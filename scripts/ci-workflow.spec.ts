@@ -239,6 +239,28 @@ describe('E2B e2e workflow', () => {
 })
 
 describe('DeepSeek e2e workflow', () => {
+  it('treats the live API key as optional without claiming that keyless E2E ran', () => {
+    const workflow = loadWorkflow('.github/workflows/e2e.yml')
+    const e2e = workflowJob(workflow, 'e2e')
+    if (!Array.isArray(e2e.steps)) throw new TypeError('DeepSeek e2e workflow must define steps')
+
+    const steps = e2e.steps.filter(isRecord)
+    const detection = steps.find(step => step.name === 'Detect optional DeepSeek API key')
+    expect(detection).toMatchObject({
+      id: 'api-key',
+      env: { DEEPSEEK_API_KEY: '${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}' },
+    })
+    expect(detection?.run).toContain('available=false')
+    expect(detection?.run).toContain('::notice::Skipping DeepSeek real-API E2E')
+    expect(steps.find(step => step.name === 'Preflight (require DEEPSEEK_API_KEY)')).toBeUndefined()
+
+    const gatedSteps = steps.filter(step => step.name !== 'Detect optional DeepSeek API key')
+    expect(gatedSteps.length).toBeGreaterThan(0)
+    for (const step of gatedSteps) {
+      expect(step.if).toBe("steps.api-key.outputs.available == 'true'")
+    }
+  })
+
   it('prepares bubblewrap from the pinned payload without a package transaction', () => {
     const workflow = loadWorkflow('.github/workflows/e2e.yml')
     const e2e = workflowJob(workflow, 'e2e')

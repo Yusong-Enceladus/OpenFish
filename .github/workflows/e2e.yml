@@ -11,11 +11,11 @@ name: E2E (real DeepSeek API)
 # keyless). The job-level `if:` below skips the whole job for those untrusted
 # PRs. The Dependabot test keys on the PR AUTHOR (pull_request.user.login), not
 # github.actor (the run trigger) — a maintainer reopening a Dependabot PR would
-# make github.actor human while the PR is still keyless. When the job runs, the
-# secret is expected, so the preflight hard-fails if it's missing (a missing
-# secret would otherwise make the self-skipping suite report a false green). A
-# job skipped by a job-level `if:` reports as a SUCCESSFUL check, so this
-# workflow is safe to use as a required status check if desired.
+# make github.actor human while the PR is still keyless. A trusted checkout may
+# also intentionally have no repository secret (the default for a public fork
+# or a fresh OpenFish deployment); the first step records that state and the
+# API-consuming steps skip with an explicit notice instead of producing a
+# misleading failure or claiming that the real-API suite ran.
 #
 # SECURITY — NEVER change this trigger to `pull_request_target`. `pull_request`
 # checks out and runs the PR's HEAD code WITHOUT secrets for forks, which is what
@@ -64,46 +64,49 @@ jobs:
     # still bounds retry storms against a slow API while the happy path fans out.
     timeout-minutes: 45
     steps:
+      # Detect the optional secret before checkout or dependency installation.
+      # The value is never written to output; only the availability bit is.
+      - name: Detect optional DeepSeek API key
+        id: api-key
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
+        run: |
+          if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "DeepSeek real-API E2E is enabled for this repository."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping DeepSeek real-API E2E because DEEPSEEK_API_KEY_EXTERNAL is not configured."
+          fi
+
       - uses: actions/checkout@v6
+        if: steps.api-key.outputs.available == 'true'
 
       - uses: pnpm/action-setup@v4
+        if: steps.api-key.outputs.available == 'true'
 
       - uses: actions/setup-node@v6
+        if: steps.api-key.outputs.available == 'true'
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install (immutable)
+        if: steps.api-key.outputs.available == 'true'
         run: pnpm install --frozen-lockfile
 
       # The with-key escalation e2e self-skips without a usable runner. Prepare
       # bwrap so trusted CI exercises it; the functional probe remains the
       # authority on whether the runner can use the sandbox.
       - name: Prepare bubblewrap (unrestrict userns)
+        if: steps.api-key.outputs.available == 'true'
         run: bash scripts/prepare-ci-bubblewrap.sh
-
-      # Guard against a false green: the e2e suites self-skip when the key is
-      # absent, so a missing/misconfigured secret would otherwise pass as
-      # "all skipped". This job only runs on trusted events (the `if:` above
-      # excludes keyless PRs), so the secret MUST be present — fail loudly if not.
-      - name: Preflight (require DEEPSEEK_API_KEY)
-        env:
-          # Repo secret DEEPSEEK_API_KEY_EXTERNAL holds the external-API key;
-          # the tests read process.env.DEEPSEEK_API_KEY, so map it across here.
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-            echo "::error::DEEPSEEK_API_KEY is empty. The e2e suite would self-skip and"
-            echo "::error::report a false green. Configure the repo secret DEEPSEEK_API_KEY_EXTERNAL."
-            exit 1
-          fi
-          echo "DEEPSEEK_API_KEY present."
 
       # The e2e suites boot the example bins in `lib` mode (DSH_EXAMPLE_MODE=lib):
       # the built artifact under plain Node, resolving plugins through real package
       # exports — the shape a real consumer runs. That requires a prior build.
       - name: Build (lib for the e2e example bins)
+        if: steps.api-key.outputs.available == 'true'
         run: pnpm run build:official
 
       # Real-API end-to-end tests only. The keyless gates (lint/typecheck/
@@ -111,6 +114,7 @@ jobs:
       # DEEPSEEK_BASE_URL is pinned to the external API; the secret is scoped to
       # this step (and preflight) only — never exposed to checkout/setup/install.
       - name: E2E tests (real DeepSeek API)
+        if: steps.api-key.outputs.available == 'true'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
           DEEPSEEK_BASE_URL: https://api.deepseek.com
