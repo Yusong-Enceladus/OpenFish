@@ -45,12 +45,13 @@ peerDependencyRules:
   allowedVersions:
     typescript: '>=5 <7'
 
-# Release jobs cross-package macOS runtimes from either Apple Silicon or Intel.
-# Keep both Darwin native optional-dependency variants in deploy closures so a
-# target-architecture Node never inherits the build machine's Koffi binary.
+# Release and public CI jobs install from both macOS and Linux hosts. Keep both
+# architectures for each OS in the lockfile so a target runner never inherits
+# the build machine's native optional dependency.
 supportedArchitectures:
   os:
     - darwin
+    - linux
   cpu:
     - arm64
     - x64
