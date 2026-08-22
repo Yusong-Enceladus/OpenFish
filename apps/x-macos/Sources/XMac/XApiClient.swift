@@ -515,6 +515,16 @@ struct HarnessGraph: Codable, Equatable, Sendable {
     let edges: [HarnessGraphEdge]
 }
 
+struct HarnessDistribution: Codable, Equatable, Sendable {
+    let kind: String
+    let package: String?
+    let archive: String?
+    let sha256: String?
+    let command: String?
+    let args: [String]
+    let env: [String: String]
+}
+
 struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     struct Installation: Decodable, Equatable, Sendable {
         let status: String
@@ -573,9 +583,13 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let version: String
     let description: String?
     let publisher: String
+    let license: String?
+    let repository: String?
+    let icon: String?
     let verified: Bool
     let protocolName: String
     let source: String
+    let distribution: HarnessDistribution?
     let graph: HarnessGraph
     let available: Bool
     let unavailableReason: String?
@@ -584,7 +598,7 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let compatibility: Compatibility
 
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, verified, source, graph, available, unavailableReason, installation, auth, compatibility
+        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, distribution, graph, available, unavailableReason, installation, auth, compatibility
         case protocolName = "protocol"
     }
 }

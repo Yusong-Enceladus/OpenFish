@@ -1920,6 +1920,8 @@ private struct HarnessPicker: View {
     @State private var showingEditor = false
     @State private var authSelection: HarnessAuthSelection?
     @State private var query = ""
+    @State private var inspectedHarnessId: String?
+    @State private var pendingCommunityHarness: HarnessCatalogEntry?
 
     private var filtered: [HarnessCatalogEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1933,6 +1935,10 @@ private struct HarnessPicker: View {
 
     private func subtitle(_ harness: HarnessCatalogEntry) -> String {
         harness.description ?? "\(harness.publisher) · \(harness.protocolName.uppercased())"
+    }
+
+    private var inspectedHarness: HarnessCatalogEntry? {
+        store.harnesses.first { $0.id == inspectedHarnessId } ?? store.currentHarness ?? filtered.first
     }
 
     var body: some View {
@@ -1968,18 +1974,7 @@ private struct HarnessPicker: View {
                         ForEach(filtered) { harness in
                             HStack(alignment: .top, spacing: 4) {
                                 Button {
-                                    if (harness.auth.status == "not-required" || harness.auth.status == "configured") {
-                                        store.chooseHarness(harness)
-                                        showingCatalog = false
-                                    } else if let method = harness.auth.methods.first {
-                                        if method.fields.isEmpty {
-                                            Task {
-                                                if await store.configureHarness(harness, method: method) { store.chooseHarness(harness) }
-                                            }
-                                        } else {
-                                            authSelection = HarnessAuthSelection(harness: harness, method: method, makeDefault: false, completesOnboarding: false, selectForDraft: true)
-                                        }
-                                    }
+                                    inspectedHarnessId = harness.id
                                 } label: {
                                 HStack(alignment: .top, spacing: 9) {
                                     Image(systemName: harness.id == store.currentHarnessId ? "checkmark.circle.fill" : "circle")
@@ -2048,15 +2043,15 @@ private struct HarnessPicker: View {
                     }
                 }
                 .frame(maxHeight: 300)
-                if let selected = store.currentHarness {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text("Architecture").font(.caption.weight(.semibold))
-                            Spacer()
-                            Text(selected.graph.level.capitalized).font(.caption2).foregroundStyle(.secondary)
+                if let inspectedHarness {
+                    HarnessDetailPanel(harness: inspectedHarness, compact: true)
+                    HStack {
+                        Spacer()
+                        Button(inspectedHarness.id == store.currentHarnessId ? "Selected" : "Use for this task") {
+                            use(inspectedHarness)
                         }
-                        HarnessGraphPreview(graph: selected.graph)
-                            .frame(height: 112)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(inspectedHarness.id == store.currentHarnessId || !inspectedHarness.available || store.harnessOperationId != nil)
                     }
                 }
             }
@@ -2065,6 +2060,48 @@ private struct HarnessPicker: View {
         }
         .sheet(isPresented: $showingEditor) { HarnessPackEditor(store: store, isPresented: $showingEditor) }
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }
+        .alert("Install an unverified Harness?", isPresented: Binding(
+            get: { pendingCommunityHarness != nil },
+            set: { if !$0 { pendingCommunityHarness = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
+            Button("Install and use") {
+                guard let harness = pendingCommunityHarness else { return }
+                pendingCommunityHarness = nil
+                useConfirmed(harness)
+            }
+        } message: {
+            Text("OpenFish has validated the public Pack format and exact version, but has not audited the publisher or package contents. Review the source and publisher before continuing.")
+        }
+    }
+
+    private func use(_ harness: HarnessCatalogEntry) {
+        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
+            pendingCommunityHarness = harness
+            return
+        }
+        useConfirmed(harness)
+    }
+
+    private func useConfirmed(_ harness: HarnessCatalogEntry) {
+        if harness.auth.status == "not-required" || harness.auth.status == "configured" {
+            store.chooseHarness(harness)
+            showingCatalog = false
+        } else if let method = harness.auth.methods.first {
+            if method.fields.isEmpty {
+                Task {
+                    if await store.configureHarness(harness, method: method) {
+                        store.chooseHarness(harness)
+                        showingCatalog = false
+                    }
+                }
+            } else {
+                authSelection = HarnessAuthSelection(
+                    harness: harness, method: method, makeDefault: false,
+                    completesOnboarding: false, selectForDraft: true
+                )
+            }
+        }
     }
 }
 
@@ -2141,9 +2178,14 @@ private struct HarnessCredentialsSheet: View {
 private struct HarnessPackEditor: View {
     @ObservedObject var store: OpenCodexStore
     @Binding var isPresented: Bool
+    var existing: HarnessCatalogEntry? = nil
     @State private var id = ""
     @State private var name = ""
     @State private var version = "1.0.0"
+    @State private var description = ""
+    @State private var publisher = ""
+    @State private var license = ""
+    @State private var repository = ""
     @State private var protocolName = "acp"
     @State private var distributionKind = "npx"
     @State private var packageOrCommand = ""
@@ -2166,14 +2208,44 @@ private struct HarnessPackEditor: View {
     @State private var edgeFrom = "runtime"
     @State private var edgeTo = "runtime"
     @State private var saving = false
+    @State private var loadedExisting = false
+
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        if id.range(of: #"^[a-z0-9][a-z0-9._-]*$"#, options: .regularExpression) == nil {
+            issues.append("Identifier must use lowercase letters, numbers, dots, underscores, or hyphens.")
+        }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Name is required.") }
+        if packageOrCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("A distribution package, URL, or command is required.") }
+        if ["npx", "bunx"].contains(distributionKind),
+           packageOrCommand.range(of: #"@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) == nil {
+            issues.append("npm and Bun packages must pin an exact semantic version.")
+        }
+        if distributionKind == "uvx",
+           packageOrCommand.range(of: #"(?:==|@)[0-9]"#, options: .regularExpression) == nil {
+            issues.append("Python packages must pin an exact version with == or @.")
+        }
+        if distributionKind == "binary" && binaryCommand.isEmpty { issues.append("A binary archive needs its command inside the archive.") }
+        if nodes.isEmpty { issues.append("The architecture graph needs at least one truthful runtime boundary node.") }
+        if Set(nodes.map(\.id)).count != nodes.count { issues.append("Architecture node ids must be unique.") }
+        let nodeIDs = Set(nodes.map(\.id))
+        if edges.contains(where: { !nodeIDs.contains($0.from) || !nodeIDs.contains($0.to) }) { issues.append("Every architecture edge must connect existing nodes.") }
+        if graphLevel != "composable" && nodes.contains(where: \.editable) { issues.append("Only composable graphs may expose editable nodes.") }
+        return issues
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Custom Harness Pack").font(.title2.bold())
+            Text(existing == nil ? "Create Harness Pack" : "Edit Harness Pack").font(.title2.bold())
             Form {
                 TextField("Identifier", text: $id)
+                    .disabled(existing != nil)
                 TextField("Name", text: $name)
                 TextField("Version", text: $version)
+                TextField("Description", text: $description)
+                TextField("Publisher", text: $publisher)
+                TextField("License", text: $license)
+                TextField("Repository URL", text: $repository)
                 TextField("Protocol / Driver id", text: $protocolName)
                 Picker("Distribution", selection: $distributionKind) {
                     Text("npm").tag("npx"); Text("Bun").tag("bunx"); Text("Python / uvx").tag("uvx")
@@ -2208,6 +2280,9 @@ private struct HarnessPackEditor: View {
                 }
             }
             Text("Architecture graph").font(.headline)
+            Text("Composable editable nodes may declare {\"acpSessionOptions\": {\"option-id\": \"value\"}}. OpenFish applies these defaults to new sessions and validates every id and value against the Harness's live ACP capability directory.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             EditableHarnessGraphCanvas(nodes: $nodes, edges: $edges, positions: $positions)
                 .frame(minHeight: 210)
             ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
@@ -2250,6 +2325,13 @@ private struct HarnessPackEditor: View {
                 Spacer()
                 Text("\(nodes.count) nodes · \(edges.count) edges").foregroundStyle(.secondary)
             }
+            if !validationIssues.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Fix before saving", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    ForEach(validationIssues, id: \.self) { Text("• \($0)").font(.caption).foregroundStyle(.secondary) }
+                }
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { isPresented = false }
@@ -2258,7 +2340,8 @@ private struct HarnessPackEditor: View {
                     Task {
                         let args = arguments.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
                         let saved = await store.saveCustomHarness(
-                            id: id, name: name, version: version, protocolName: protocolName,
+                            id: id, name: name, version: version, description: description, publisher: publisher,
+                            license: license, repository: repository, protocolName: protocolName,
                             distributionKind: distributionKind, packageOrCommand: packageOrCommand, arguments: args,
                             distributionEnvironment: distributionEnvironment,
                             binaryCommand: binaryCommand, sha256: sha256, graphLevel: graphLevel,
@@ -2272,7 +2355,7 @@ private struct HarnessPackEditor: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(saving || id.isEmpty || name.isEmpty || packageOrCommand.isEmpty || nodes.isEmpty || (distributionKind == "binary" && binaryCommand.isEmpty))
+                .disabled(saving || !validationIssues.isEmpty)
             }
         }
         .padding(22)
@@ -2280,6 +2363,52 @@ private struct HarnessPackEditor: View {
         .onChange(of: graphLevel) { _, level in
             guard level != "composable" else { return }
             nodes = nodes.map { HarnessGraphNode(id: $0.id, kind: $0.kind, title: $0.title, editable: false, config: $0.config) }
+        }
+        .onAppear { loadExistingIfNeeded() }
+    }
+
+    private func loadExistingIfNeeded() {
+        guard !loadedExisting, let existing else { return }
+        loadedExisting = true
+        id = existing.id
+        name = existing.name
+        version = existing.version
+        description = existing.description ?? ""
+        publisher = existing.publisher
+        license = existing.license ?? ""
+        repository = existing.repository ?? ""
+        protocolName = existing.protocolName
+        graphLevel = existing.graph.level
+        nodes = existing.graph.nodes
+        edges = existing.graph.edges
+        positions = Dictionary(uniqueKeysWithValues: nodes.enumerated().map { index, node in
+            let x = node.config?["x"]?.doubleValue ?? Double(110 + (index % 3) * 190)
+            let y = node.config?["y"]?.doubleValue ?? Double(70 + (index / 3) * 100)
+            return (node.id, CGPoint(x: x, y: y))
+        })
+        edgeFrom = nodes.first?.id ?? ""
+        edgeTo = nodes.dropFirst().first?.id ?? nodes.first?.id ?? ""
+        if let distribution = existing.distribution {
+            distributionKind = distribution.kind
+            packageOrCommand = distribution.package ?? distribution.archive ?? distribution.command ?? ""
+            binaryCommand = distribution.kind == "binary" ? distribution.command ?? "" : ""
+            sha256 = distribution.sha256 ?? ""
+            arguments = distribution.args.joined(separator: "\n")
+            distributionEnvironment = distribution.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+        }
+        if let method = existing.auth.methods.first {
+            authMethodId = method.id
+            authMethodName = method.name
+            authKind = method.kind
+            if let field = method.fields.first {
+                authFieldRef = field.ref
+                authFieldName = field.name
+                authFieldEnv = field.env ?? ""
+            }
+            if let terminal = method.terminal {
+                terminalAuthArguments = terminal.args.joined(separator: "\n")
+                terminalAuthEnvironment = terminal.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+            }
         }
     }
 }
@@ -2327,8 +2456,12 @@ private struct HarnessGraphPreview: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let columnCount = max(1, min(3, graph.nodes.count))
+            let horizontalStep = columnCount == 1 ? 0 : max(1, (proxy.size.width - 120) / CGFloat(columnCount - 1))
             let points = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { index, node in
-                (node.id, CGPoint(x: 70 + CGFloat(index % 3) * max(105, (proxy.size.width - 140) / 2), y: 34 + CGFloat(index / 3) * 62))
+                let column = index % columnCount
+                let x = columnCount == 1 ? proxy.size.width / 2 : 60 + CGFloat(column) * horizontalStep
+                return (node.id, CGPoint(x: x, y: 34 + CGFloat(index / columnCount) * 62))
             })
             ZStack {
                 ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
@@ -2339,7 +2472,7 @@ private struct HarnessGraphPreview: View {
                 }
                 ForEach(graph.nodes) { node in
                     VStack(spacing: 1) {
-                        Text(node.title).font(.caption2.weight(.semibold)).lineLimit(1)
+                        Text(node.title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
                         Text(node.kind).font(.system(size: 8)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 5)
@@ -2351,6 +2484,57 @@ private struct HarnessGraphPreview: View {
             }
             .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+}
+
+private struct HarnessDetailPanel: View {
+    let harness: HarnessCatalogEntry
+    var compact = false
+
+    private var truthExplanation: String {
+        switch harness.graph.level {
+        case "composable": return "Declared nodes may be edited only where the Pack allows it."
+        case "observable": return "Read-only structure confirmed by the Pack; OpenFish does not invent private internals."
+        default: return "This Harness exposes only its runtime boundary. Private internals remain intentionally hidden."
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 7 : 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(harness.name).font(compact ? .caption.weight(.semibold) : .headline)
+                        if harness.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue).font(.caption) }
+                    }
+                    Text("\(harness.publisher) · \(harness.protocolName.uppercased()) · \(harness.version)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(harness.graph.level.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).frame(height: 20)
+                    .background(.secondary.opacity(0.12), in: Capsule())
+            }
+            if !compact, let description = harness.description {
+                Text(description).font(.callout).foregroundStyle(.secondary)
+            }
+            HarnessGraphPreview(graph: harness.graph)
+                .frame(height: compact ? 112 : 190)
+            Text(truthExplanation).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Label(harness.installation.status.replacingOccurrences(of: "-", with: " "), systemImage: "shippingbox")
+                Label(harness.auth.status.replacingOccurrences(of: "-", with: " "), systemImage: "person.crop.circle.badge.checkmark")
+                Label(harness.compatibility.status, systemImage: harness.compatibility.status == "failed" ? "exclamationmark.triangle" : "checkmark.shield")
+            }
+            .font(.caption2)
+            .foregroundStyle(harness.compatibility.status == "failed" ? Color.red : Color.secondary)
+        }
+        .padding(compact ? 9 : 14)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.border))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(harness.name) Harness details, \(harness.graph.level) architecture")
     }
 }
 
@@ -2846,6 +3030,7 @@ private struct HarnessOnboardingView: View {
     @ObservedObject var store: OpenCodexStore
     @State private var authSelection: HarnessAuthSelection?
     @State private var query = ""
+    @State private var pendingCommunityHarness: HarnessCatalogEntry?
 
     private var filtered: [HarnessCatalogEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -2911,14 +3096,14 @@ private struct HarnessOnboardingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
                             ForEach(filtered) { harness in
                                 VStack(spacing: 8) {
                                     HarnessChoiceCard(
                                         harness: harness,
                                         busy: store.harnessOperationId != nil,
                                         ready: harness.available && (harness.id != "dsh" || !store.hostModels.groups.isEmpty),
-                                        action: { Task { await store.selectDefaultHarness(harness, completesOnboarding: true) } },
+                                        action: { requestDefault(harness) },
                                         authAction: { method in
                                             if method.fields.isEmpty {
                                                 Task {
@@ -2947,11 +3132,42 @@ private struct HarnessOnboardingView: View {
         }
         .padding(32)
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }
+        .alert("Install an unverified Harness?", isPresented: Binding(
+            get: { pendingCommunityHarness != nil },
+            set: { if !$0 { pendingCommunityHarness = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
+            Button("Install and use") {
+                guard let harness = pendingCommunityHarness else { return }
+                pendingCommunityHarness = nil
+                Task { await store.selectDefaultHarness(harness, completesOnboarding: true) }
+            }
+        } message: {
+            Text("This Pack passed OpenFish format checks but its publisher and package code are not audited. Continue only if you trust the source.")
+        }
         .task {
             async let settings: Void = store.loadSettings()
             async let catalog: Void = store.loadHarnessCatalogForOnboarding()
             _ = await (settings, catalog)
         }
+    }
+
+    private func requestDefault(_ harness: HarnessCatalogEntry) {
+        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
+            pendingCommunityHarness = harness
+        } else {
+            Task { await store.selectDefaultHarness(harness, completesOnboarding: true) }
+        }
+    }
+}
+
+/// Deterministic production-layout entry used by the release visual smoke.
+struct HarnessOnboardingPreview: View {
+    @ObservedObject var store: OpenCodexStore
+
+    var body: some View {
+        HarnessOnboardingView(store: store)
+            .background(OpenCodexPalette.canvas)
     }
 }
 
@@ -2975,7 +3191,6 @@ private struct HarnessChoiceCard: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
-            Spacer(minLength: 0)
             HStack {
                 Text(harness.protocolName.uppercased())
                 Spacer()
@@ -2983,6 +3198,12 @@ private struct HarnessChoiceCard: View {
             }
             .font(.system(size: 10.5, weight: .medium))
             .foregroundStyle(.secondary)
+            HStack {
+                Text("Architecture").font(.caption.weight(.semibold))
+                Spacer()
+                Text(harness.graph.level.capitalized).font(.caption2).foregroundStyle(.secondary)
+            }
+            HarnessGraphPreview(graph: harness.graph).frame(height: 82)
             if harness.auth.status != "not-required" && harness.auth.status != "configured" {
                 Divider()
                 Text("Choose how to sign in")
@@ -3006,7 +3227,7 @@ private struct HarnessChoiceCard: View {
             }
         }
         .padding(15)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 250, alignment: .leading)
         .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.border))
     }
@@ -3045,6 +3266,10 @@ private struct HarnessSettingsView: View {
     @ObservedObject var store: OpenCodexStore
     @State private var authSelection: HarnessAuthSelection?
     @State private var query = ""
+    @State private var inspectedHarnessId: String?
+    @State private var showingCreateEditor = false
+    @State private var editingHarness: HarnessCatalogEntry?
+    @State private var pendingCommunityHarness: HarnessCatalogEntry?
 
     private var filtered: [HarnessCatalogEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -3057,7 +3282,12 @@ private struct HarnessSettingsView: View {
             title: "Harnesses",
             subtitle: "Choose the Harness Open Fish uses for new tasks. Existing tasks keep the Harness they started with."
         ) {
-            TextField("Find a Harness", text: $query).textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Find a Harness", text: $query).textFieldStyle(.roundedBorder)
+                Button("Import Pack") { chooseHarnessPackImport(store: store) }
+                Button("Create Pack") { showingCreateEditor = true }
+                    .buttonStyle(.borderedProminent)
+            }
             VStack(spacing: 10) {
                 ForEach(filtered) { harness in
                     HStack(spacing: 12) {
@@ -3082,6 +3312,15 @@ private struct HarnessSettingsView: View {
                             }
                         }
                         Spacer()
+                        Button("Details") { inspectedHarnessId = harness.id }
+                            .buttonStyle(.borderless)
+                        if harness.source == "user" {
+                            Menu("Studio") {
+                                Button("Edit Pack") { editingHarness = harness }
+                                Button("Export Pack") { exportHarnessPack(store: store, harness: harness, publication: false) }
+                                Button("Prepare Publication") { exportHarnessPack(store: store, harness: harness, publication: true) }
+                            }
+                        }
                         if harness.auth.status != "not-required" && harness.auth.status != "configured" {
                             Menu("Configure") {
                                 ForEach(harness.auth.methods) { method in
@@ -3099,7 +3338,7 @@ private struct HarnessSettingsView: View {
                         } else {
                             VStack(alignment: .trailing, spacing: 5) {
                                 Button(harness.isDefault ? "Default" : (harness.installation.status == "installed" || harness.installation.status == "builtin" ? "Make Default" : "Install & Use")) {
-                                    Task { await store.selectDefaultHarness(harness) }
+                                    requestDefault(harness)
                                 }
                                 .disabled(harness.isDefault || store.harnessOperationId != nil)
                                 HStack(spacing: 7) {
@@ -3124,8 +3363,48 @@ private struct HarnessSettingsView: View {
                     .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
+            if let inspected = store.harnesses.first(where: { $0.id == inspectedHarnessId }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Harness architecture").font(.headline)
+                    HarnessDetailPanel(harness: inspected)
+                }
+            }
         }
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }
+        .sheet(isPresented: $showingCreateEditor) {
+            HarnessPackEditor(store: store, isPresented: $showingCreateEditor)
+        }
+        .sheet(item: $editingHarness) { harness in
+            HarnessPackEditor(
+                store: store,
+                isPresented: Binding(
+                    get: { editingHarness != nil },
+                    set: { if !$0 { editingHarness = nil } }
+                ),
+                existing: harness
+            )
+        }
+        .alert("Install an unverified Harness?", isPresented: Binding(
+            get: { pendingCommunityHarness != nil },
+            set: { if !$0 { pendingCommunityHarness = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
+            Button("Install and make default") {
+                guard let harness = pendingCommunityHarness else { return }
+                pendingCommunityHarness = nil
+                Task { await store.selectDefaultHarness(harness) }
+            }
+        } message: {
+            Text("The community catalog validates metadata and exact versions, not the publisher's code. Continue only if you trust this Harness.")
+        }
+    }
+
+    private func requestDefault(_ harness: HarnessCatalogEntry) {
+        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
+            pendingCommunityHarness = harness
+        } else {
+            Task { await store.selectDefaultHarness(harness) }
+        }
     }
 
     private func copyDiagnostics(_ harness: HarnessCatalogEntry) {
@@ -3738,4 +4017,31 @@ private func chooseImportArchives(store: OpenCodexStore, format: String) {
     panel.message = "Select a DSH export, Codex rollout, or a folder containing rollout JSONL files."
     guard panel.runModal() == .OK else { return }
     Task { await store.importArchives(panel.urls, format: format) }
+}
+
+@MainActor
+private func chooseHarnessPackImport(store: OpenCodexStore) {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.allowedContentTypes = [.json]
+    panel.message = "Choose an OpenFish Harness Pack JSON document. Secrets must not be stored in the Pack."
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    Task { _ = await store.importCustomHarness(from: url) }
+}
+
+@MainActor
+private func exportHarnessPack(store: OpenCodexStore, harness: HarnessCatalogEntry, publication: Bool) {
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.json]
+    panel.nameFieldStringValue = "\(harness.id).openfish-harness.json"
+    panel.message = publication
+        ? "Save the validated public manifest. OpenFish will then open the community submission guide."
+        : "Export a portable Harness Pack without credential values."
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard store.exportHarness(harness, to: url, forPublication: publication), publication else { return }
+    if let guide = URL(string: "https://github.com/Yusong-Enceladus/OpenFish/blob/main/docs/publishing-harness-packs.md") {
+        NSWorkspace.shared.open(guide)
+    }
 }

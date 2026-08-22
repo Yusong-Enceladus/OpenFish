@@ -377,6 +377,8 @@ public struct XIOSContentView: View {
 private struct MobileHarnessOnboardingView: View {
     @ObservedObject var store: MobileOpenCodexStore
     @State private var query = ""
+    @State private var inspectedHarness: MobileHarness?
+    @State private var pendingCommunityHarness: MobileHarness?
 
     private var filtered: [MobileHarness] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -398,27 +400,24 @@ private struct MobileHarnessOnboardingView: View {
                     Text("OpenFish will ask the connected Mac to install it. New tasks use this Harness unless you choose another before starting; existing tasks never change.")
                         .foregroundStyle(.secondary)
                     ForEach(filtered) { harness in
-                        Button {
-                            Task { await store.selectDefaultHarness(harness) }
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(harness.name).font(.headline)
-                                    Text(harness.description ?? "No description provided.")
-                                        .font(.subheadline).foregroundStyle(.secondary)
-                                    Text("\(harness.source) · \(harness.compatibility.status)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if harness.available { Image(systemName: "arrow.down.circle") }
-                                else { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange) }
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(harness.name).font(.headline)
+                                Text(harness.description ?? "No description provided.")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                                Text("\(harness.source) · \(harness.compatibility.status) · \(harness.graph.level)")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+                            Spacer()
+                            Button("Details") { inspectedHarness = harness }
+                                .buttonStyle(.bordered)
+                            Button("Use") { requestUse(harness) }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!harness.available)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!harness.available)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
                     }
                     Text("Harness sign-in and API credentials are stored on the Mac Host. If a Harness needs authentication, OpenFish will tell you to finish it on the Mac before selecting it here.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -428,6 +427,124 @@ private struct MobileHarnessOnboardingView: View {
             .interactiveDismissDisabled()
             .searchable(text: $query, prompt: "Find a Harness")
         }
+        .sheet(item: $inspectedHarness) { harness in
+            MobileHarnessDetailView(harness: harness) {
+                requestUse(harness)
+                inspectedHarness = nil
+            }
+        }
+        .alert("Install an unverified Harness?", isPresented: Binding(
+            get: { pendingCommunityHarness != nil },
+            set: { if !$0 { pendingCommunityHarness = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
+            Button("Install and use") {
+                guard let harness = pendingCommunityHarness else { return }
+                pendingCommunityHarness = nil
+                Task { await store.selectDefaultHarness(harness) }
+            }
+        } message: {
+            Text("OpenFish validates the public Pack format and exact version, not the publisher's package code. Continue only if you trust it.")
+        }
+    }
+
+    private func requestUse(_ harness: MobileHarness) {
+        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
+            pendingCommunityHarness = harness
+        } else {
+            Task { await store.selectDefaultHarness(harness) }
+        }
+    }
+}
+
+private struct MobileHarnessDetailView: View {
+    let harness: MobileHarness
+    let use: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var truthExplanation: String {
+        switch harness.graph.level {
+        case "composable": return "This Pack declares editable nodes. Use Harness Studio on the Mac to change them."
+        case "observable": return "Read-only structure declared by the Pack. OpenFish does not invent private internals."
+        default: return "Only the runtime boundary is public. The Harness keeps its private internals opaque."
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(harness.name).font(.largeTitle.bold())
+                            Text("\(harness.publisher) · \(harness.protocolName.uppercased()) · \(harness.version)")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if harness.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue).font(.title2) }
+                    }
+                    if let description = harness.description { Text(description).foregroundStyle(.secondary) }
+                    HStack {
+                        Label(harness.installation.status, systemImage: "shippingbox")
+                        Spacer()
+                        Label(harness.compatibility.status, systemImage: "checkmark.shield")
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Architecture").font(.headline)
+                            Spacer()
+                            Text(harness.graph.level.capitalized).font(.caption.weight(.semibold))
+                        }
+                        MobileHarnessGraphPreview(graph: harness.graph)
+                            .frame(height: max(180, CGFloat(harness.graph.nodes.count) * 72 + 24))
+                        Text(truthExplanation).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Button("Install and use for new tasks", action: use)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                        .disabled(!harness.available)
+                }
+                .padding(22)
+            }
+            .navigationTitle("Harness details")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+    }
+}
+
+private struct MobileHarnessGraphPreview: View {
+    let graph: MobileHarness.Graph
+
+    var body: some View {
+        GeometryReader { proxy in
+            let points = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { index, node in
+                (node.id, CGPoint(x: proxy.size.width / 2, y: 42 + CGFloat(index) * 72))
+            })
+            ZStack {
+                ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
+                    if let from = points[edge.from], let to = points[edge.to] {
+                        Path { path in path.move(to: from); path.addLine(to: to) }
+                            .stroke(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    }
+                }
+                ForEach(graph.nodes) { node in
+                    VStack(spacing: 2) {
+                        Image(systemName: node.kind.contains("runtime") ? "cpu" : "square.stack.3d.up")
+                        Text(node.title).font(.caption.weight(.semibold)).lineLimit(1)
+                        Text(node.kind).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(width: min(220, proxy.size.width - 36), height: 54)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25)))
+                    .position(points[node.id] ?? .zero)
+                }
+            }
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(graph.level) Harness architecture with \(graph.nodes.count) nodes")
     }
 }
 
@@ -2055,6 +2172,8 @@ private struct MobileConnectionView: View {
     @State private var code = ""
     @State private var credentialRef = "DEEPSEEK_API_KEY"
     @State private var credentialValue = ""
+    @State private var inspectedHarness: MobileHarness?
+    @State private var pendingCommunityHarness: MobileHarness?
     @Environment(\.dismiss) private var dismiss
 
     init(store: MobileOpenCodexStore) {
@@ -2122,22 +2241,21 @@ private struct MobileConnectionView: View {
 
                 Section("Default Harness") {
                     ForEach(store.harnesses) { harness in
-                        Button {
-                            Task { await store.selectDefaultHarness(harness) }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(harness.name)
-                                    if let description = harness.description {
-                                        Text(description).font(.caption).foregroundStyle(.secondary)
-                                    }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(harness.name)
+                                if let description = harness.description {
+                                    Text(description).font(.caption).foregroundStyle(.secondary)
                                 }
-                                Spacer()
-                                if harness.isDefault { Image(systemName: "checkmark") }
-                                else if !harness.available { Text("Install").font(.caption) }
+                            }
+                            Spacer()
+                            Button("Details") { inspectedHarness = harness }
+                            if harness.isDefault { Image(systemName: "checkmark") }
+                            else {
+                                Button("Use") { requestUse(harness) }
+                                    .disabled(!harness.available)
                             }
                         }
-                        .disabled(harness.isDefault)
                     }
                     Text("This changes the Host default for new tasks on every connected Open Fish device. Existing tasks keep their original Harness.")
                         .font(.caption)
@@ -2247,6 +2365,33 @@ private struct MobileConnectionView: View {
             }
             .onAppear { host = store.profile.baseURL.absoluteString }
             .task { await store.loadSettings() }
+        }
+        .sheet(item: $inspectedHarness) { harness in
+            MobileHarnessDetailView(harness: harness) {
+                requestUse(harness)
+                inspectedHarness = nil
+            }
+        }
+        .alert("Install an unverified Harness?", isPresented: Binding(
+            get: { pendingCommunityHarness != nil },
+            set: { if !$0 { pendingCommunityHarness = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
+            Button("Install and use") {
+                guard let harness = pendingCommunityHarness else { return }
+                pendingCommunityHarness = nil
+                Task { await store.selectDefaultHarness(harness) }
+            }
+        } message: {
+            Text("Community catalog inclusion is not a security audit. Continue only if you trust the Pack publisher and package.")
+        }
+    }
+
+    private func requestUse(_ harness: MobileHarness) {
+        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
+            pendingCommunityHarness = harness
+        } else {
+            Task { await store.selectDefaultHarness(harness) }
         }
     }
 }

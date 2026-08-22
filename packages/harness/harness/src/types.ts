@@ -107,7 +107,7 @@ export interface HarnessPack {
   authMethods?: HarnessAuthMethod[]
   distribution?: HarnessDistribution
   graph: HarnessGraph
-  source: 'builtin' | 'acp-registry' | 'user'
+  source: 'builtin' | 'acp-registry' | 'openfish-community' | 'user'
 }
 
 /** Detached catalog row safe for native and web clients. */

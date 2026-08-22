@@ -19,6 +19,8 @@ required=(
   README.md
   docs/openfish-compatibility.md
   docs/openfish-public-alpha.md
+  docs/publishing-harness-packs.md
+  community/harnesses/index.json
   script/build_openfish_release.sh
   script/check_harness_contract.sh
   script/check_open_source_privacy.sh
@@ -55,6 +57,7 @@ if rg -q 'PRODUCT_BUNDLE_IDENTIFIER = ai\.deepseek\.opencodex' \
 fi
 
 ./script/check_open_source_privacy.sh
+pnpm run verify-openfish-community-catalog
 
 if [[ "$ALLOW_DIRTY" -eq 0 ]]; then
   dirty="$(git status --short)"

@@ -16,6 +16,14 @@ const graphSchema = z.object({
   edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })),
 })
 
+const distributionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('npx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
+  z.object({ kind: z.literal('bunx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
+  z.object({ kind: z.literal('uvx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
+  z.object({ kind: z.literal('binary'), archive: z.string().url(), sha256: z.string().optional(), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
+  z.object({ kind: z.literal('executable'), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
+])
+
 /** Detached Harness catalog row schema. */
 export const harnessCatalogEntrySchema = z.object({
   schemaVersion: z.literal(0),
@@ -29,8 +37,9 @@ export const harnessCatalogEntrySchema = z.object({
   icon: z.string().optional(),
   verified: z.boolean(),
   protocol: z.string().min(1),
-  source: z.enum(['builtin', 'acp-registry', 'user']),
+  source: z.enum(['builtin', 'acp-registry', 'openfish-community', 'user']),
   isDefault: z.boolean(),
+  distribution: distributionSchema.optional(),
   graph: graphSchema,
   available: z.boolean(),
   unavailableReason: z.string().optional(),
@@ -82,16 +91,10 @@ export const harnessRefreshRequestSchema = z.object({}) satisfies z.ZodType<Wire
 /** harness.refresh response value. */
 export const harnessRefreshValueSchema = harnessListValueSchema satisfies z.ZodType<Wire<ResponseValue<'harness.refresh'>>>
 
-const distributionSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('npx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
-  z.object({ kind: z.literal('bunx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
-  z.object({ kind: z.literal('uvx'), package: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
-  z.object({ kind: z.literal('binary'), archive: z.string().url(), sha256: z.string().optional(), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
-  z.object({ kind: z.literal('executable'), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
-])
 const customPackSchema = z.object({
   schemaVersion: z.literal(0), id: z.string().min(1), name: z.string().min(1), version: z.string().min(1),
-  description: z.string().optional(), publisher: z.string().min(1), protocol: z.string().min(1),
+  description: z.string().optional(), publisher: z.string().min(1), license: z.string().optional(),
+  repository: z.string().optional(), icon: z.string().optional(), protocol: z.string().min(1),
   authMethods: z.array(z.object({
     id: z.string().min(1), name: z.string().min(1), kind: z.enum(['agent', 'environment', 'terminal']),
     fields: z.array(z.object({

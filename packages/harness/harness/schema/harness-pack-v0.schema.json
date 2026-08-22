@@ -21,7 +21,7 @@
     "icon": { "type": "string", "format": "uri" },
     "verified": { "type": "boolean" },
     "protocol": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
-    "source": { "enum": ["builtin", "acp-registry", "user"] },
+    "source": { "enum": ["builtin", "acp-registry", "openfish-community", "user"] },
     "authMethods": {
       "type": "array",
       "items": {

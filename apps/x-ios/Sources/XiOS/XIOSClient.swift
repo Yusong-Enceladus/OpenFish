@@ -221,6 +221,13 @@ struct MobileAgentPresetCatalog: Decodable, Equatable, Sendable {
 }
 
 struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
+    struct GraphNode: Decodable, Identifiable, Equatable, Sendable {
+        let id: String; let kind: String; let title: String; let editable: Bool; let config: [String: MobileJSONValue]?
+    }
+    struct GraphEdge: Decodable, Equatable, Sendable { let from: String; let to: String }
+    struct Graph: Decodable, Equatable, Sendable {
+        let level: String; let nodes: [GraphNode]; let edges: [GraphEdge]
+    }
     struct Installation: Decodable, Equatable, Sendable {
         let status: String
         let installedVersion: String?
@@ -247,15 +254,17 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let version: String
     let description: String?
     let publisher: String
+    let verified: Bool
     let protocolName: String
     let source: String
+    let graph: Graph
     let available: Bool
     let unavailableReason: String?
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, source, available, unavailableReason, installation, auth, compatibility
+        case id, isDefault, name, version, description, publisher, verified, source, graph, available, unavailableReason, installation, auth, compatibility
         case protocolName = "protocol"
     }
 }

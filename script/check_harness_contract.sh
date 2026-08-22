@@ -13,6 +13,7 @@ pnpm exec vitest run \
   packages/harness/harness/tests/service.spec.ts \
   packages/harness/harness-acp/tests/launch.spec.ts \
   packages/host/apiproxy/tests/api-proxy-agent-preset.spec.ts \
+  packages/host/apiproxy/tests/api-proxy-harnesses.spec.ts \
   packages/host/apiproxy/tests/api-proxy-models.spec.ts \
   packages/host/apiproxy/tests/api-proxy-workspace.spec.ts \
   packages/host/apiproxy/tests/fetch-carrier.spec.ts \

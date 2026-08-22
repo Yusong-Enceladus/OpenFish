@@ -30,6 +30,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 
 type Phase = { kind: 'idle'; turn: number } | { kind: 'running'; turn: number; abort: AbortController }
 
+/** One model and its optional reasoning directory advertised by an ACP Harness. */
 export interface AcpHarnessModelOption {
   id: string
   name: string
@@ -40,12 +41,14 @@ export interface AcpHarnessModelOption {
   }
 }
 
+/** Current ACP model selection plus every model the live Harness advertises. */
 export interface AcpHarnessModelCatalog {
   current: string
   currentReasoningEffort?: string
   models: AcpHarnessModelOption[]
 }
 
+/** One selectable value in a projected ACP session option. */
 export interface AcpHarnessConfigValue {
   id: string
   name: string
@@ -54,6 +57,7 @@ export interface AcpHarnessConfigValue {
   groupName?: string
 }
 
+/** UI-safe projection of one live ACP session configuration option. */
 export interface AcpHarnessConfigOption {
   id: string
   name: string
@@ -64,11 +68,46 @@ export interface AcpHarnessConfigOption {
   values: AcpHarnessConfigValue[]
 }
 
+/**
+ * Resolve portable session defaults declared by editable Pack nodes.
+ * `acpSessionOptions` maps standard ACP configuration ids to select/boolean
+ * values, so this remains generic when a new Harness appears.
+ * @param pack - Admitted Pack whose composable nodes may declare defaults.
+ * @returns Ordered ACP option assignments for a newly created session.
+ */
+export function packSessionConfiguration(pack: HarnessPack): Array<{ id: string; value: string | boolean }> {
+  if (pack.graph.level !== 'composable') return []
+  const resolved = new Map<string, string | boolean>()
+  for (const node of pack.graph.nodes) {
+    if (!node.editable || node.config === undefined) continue
+    const raw = node.config.acpSessionOptions
+    if (raw === undefined) continue
+    if (raw === null || Array.isArray(raw) || typeof raw !== 'object') {
+      throw new Error(`Harness Pack node "${node.id}" must declare "acpSessionOptions" as an object`)
+    }
+    for (const [id, value] of Object.entries(raw)) {
+      if (id.trim() === '' || (typeof value !== 'string' && typeof value !== 'boolean')) {
+        throw new Error(`Harness Pack node "${node.id}" has an invalid ACP session option "${id}"`)
+      }
+      const previous = resolved.get(id)
+      if (previous !== undefined && previous !== value) {
+        throw new Error(`Harness Pack declares conflicting values for ACP session option "${id}"`)
+      }
+      resolved.set(id, value)
+    }
+  }
+  return [...resolved].map(([id, value]) => ({ id, value }))
+}
+
 function flattenedSelectOptions(option: Extract<SessionConfigOption, { type: 'select' }>) {
   return option.options.flatMap(entry => 'group' in entry ? entry.options : [entry])
 }
 
-/** Lossless, UI-safe projection of every standard ACP session configuration option. */
+/**
+ * Build a lossless, UI-safe projection of standard ACP session options.
+ * @param configOptions - Live options returned by the ACP Harness.
+ * @returns Every option in the order advertised by the Harness.
+ */
 export function acpHarnessConfigCatalog(configOptions: readonly SessionConfigOption[]): AcpHarnessConfigOption[] {
   return configOptions.map(option => ({
     id: option.id,
@@ -95,7 +134,11 @@ export function acpHarnessConfigCatalog(configOptions: readonly SessionConfigOpt
   }))
 }
 
-/** Project ACP's standard model and thought-level options into Open Fish's model picker shape. */
+/**
+ * Project ACP model and thought-level options into OpenFish's picker shape.
+ * @param configOptions - Live options returned by the ACP Harness.
+ * @returns A model directory, or undefined when the Harness exposes no model option.
+ */
 export function acpHarnessModelCatalog(configOptions: readonly SessionConfigOption[]): AcpHarnessModelCatalog | undefined {
   const option = configOptions.find(candidate => candidate.type === 'select' && candidate.category === 'model')
   if (option === undefined || option.type !== 'select') return undefined
@@ -306,7 +349,13 @@ export async function installHarnessPack(ctx: Context, pack: HarnessPack, direct
   }
 }
 
-/** Launch only through ACP initialize to materialize the Harness-owned authentication form. */
+/**
+ * Launch only through ACP initialize to materialize Harness-owned authentication.
+ * @param ctx - Host context that owns the managed subprocess runtime.
+ * @param pack - Admitted Pack to probe.
+ * @param installationDirectory - Managed installation directory for the Pack.
+ * @returns Authentication methods advertised during ACP initialization.
+ */
 export async function discoverAcpAuthentication(
   ctx: Context,
   pack: HarnessPack,
@@ -380,7 +429,13 @@ function appleScriptQuote(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
 
-/** Open an ACP terminal-auth command in macOS Terminal after an explicit UI action. */
+/**
+ * Open ACP terminal authentication after an explicit macOS UI action.
+ * @param ctx - Host context that owns the managed subprocess runtime.
+ * @param pack - Admitted Pack whose command will be launched.
+ * @param installationDirectory - Managed installation directory for the Pack.
+ * @param method - Terminal method previously advertised by that Harness.
+ */
 export async function launchAcpTerminalAuthentication(
   ctx: Context,
   pack: HarnessPack,
@@ -672,17 +727,35 @@ export class AcpHarnessAgent implements Agent {
     for (const update of buffered) void this.recordSessionUpdate(update)
   }
 
-  /** Live model directory advertised by this ACP Harness, when it exposes one. */
+  /**
+   * Read the current model directory without mutating the ACP session.
+   * @returns Live model directory advertised by this ACP Harness, when present.
+   */
   harnessModelCatalog(): AcpHarnessModelCatalog | undefined {
     return acpHarnessModelCatalog(this.configOptions)
   }
 
-  /** Complete live ACP configuration directory, including future semantic categories. */
+  /**
+   * Read the complete current configuration directory without mutating the session.
+   * @returns Complete live ACP configuration directory, including future categories.
+   */
   harnessConfigCatalog(): AcpHarnessConfigOption[] {
     return acpHarnessConfigCatalog(this.configOptions)
   }
 
-  /** Set any ACP select/boolean option and replace the local directory with the authoritative response. */
+  /** Apply Pack defaults against this Harness's live ACP capability directory. */
+  async applyPackConfiguration(): Promise<void> {
+    for (const option of packSessionConfiguration(this.pack)) {
+      await this.selectHarnessConfig(option.id, option.value)
+    }
+  }
+
+  /**
+   * Set an ACP option and replace the local directory with its authoritative response.
+   * @param configId - Live ACP configuration id.
+   * @param value - Advertised select value or boolean state.
+   * @returns Refreshed live configuration directory.
+   */
   async selectHarnessConfig(configId: string, value: string | boolean): Promise<AcpHarnessConfigOption[]> {
     const connection = this.connection
     const remoteSessionId = this.remoteSessionId
@@ -706,7 +779,12 @@ export class AcpHarnessAgent implements Agent {
     return this.harnessConfigCatalog()
   }
 
-  /** Select an ACP-advertised model and optional standard thought level. */
+  /**
+   * Select an ACP-advertised model and optional standard thought level.
+   * @param model - Model id advertised by the live Harness.
+   * @param reasoningEffort - Optional thought-level id advertised after model selection.
+   * @returns Authoritative selected model and optional reasoning effort.
+   */
   async selectHarnessModel(model: string, reasoningEffort?: string): Promise<{ model: string; reasoningEffort?: string }> {
     const connection = this.connection
     const remoteSessionId = this.remoteSessionId

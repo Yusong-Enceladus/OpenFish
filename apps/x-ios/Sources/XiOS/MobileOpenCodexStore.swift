@@ -204,6 +204,24 @@ final class MobileOpenCodexStore: ObservableObject {
             ],
             failures: []
         )
+        store.harnesses = [MobileHarness(
+            id: "codex-acp", isDefault: true, name: "Codex", version: "demo",
+            description: "Codex through the OpenFish ACP bridge", publisher: "OpenAI", verified: true,
+            protocolName: "acp", source: "acp-registry",
+            graph: .init(
+                level: "observable",
+                nodes: [
+                    .init(id: "client", kind: "native-shell", title: "OpenFish", editable: false, config: nil),
+                    .init(id: "runtime", kind: "harness-runtime", title: "Codex ACP", editable: false, config: nil),
+                    .init(id: "model", kind: "model-provider", title: "ChatGPT", editable: false, config: nil),
+                ],
+                edges: [.init(from: "client", to: "runtime"), .init(from: "runtime", to: "model")]
+            ),
+            available: true, unavailableReason: nil,
+            installation: .init(status: "installed", installedVersion: "demo", availableVersion: "demo", previousVersions: [], error: nil),
+            auth: .init(methods: [], selectedMethod: "chat-gpt", status: "configured", missingFields: []),
+            compatibility: .init(status: "compatible", checkedAt: nil, message: "Synthetic demo runtime")
+        )]
         store.selectedHarnessId = "codex-acp"
         store.selectedWorkspaceId = workspace.workspaceId
         store.connectionState = .connected

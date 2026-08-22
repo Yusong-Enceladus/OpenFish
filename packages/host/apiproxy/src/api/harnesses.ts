@@ -35,8 +35,9 @@ export interface HarnessCatalogEntry {
   icon?: string
   verified: boolean
   protocol: string
-  source: 'builtin' | 'acp-registry' | 'user'
+  source: 'builtin' | 'acp-registry' | 'openfish-community' | 'user'
   isDefault: boolean
+  distribution?: CustomHarnessPackInput['distribution']
   graph: HarnessGraph
   available: boolean
   unavailableReason?: string
@@ -70,6 +71,9 @@ export interface CustomHarnessPackInput {
   version: string
   description?: string
   publisher: string
+  license?: string
+  repository?: string
+  icon?: string
   protocol: string
   authMethods?: Array<{
     id: string

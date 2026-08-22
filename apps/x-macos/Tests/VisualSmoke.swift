@@ -26,9 +26,22 @@ struct VisualSmoke {
         }
         try render(newTask, scheme: .light, to: outputDirectory.appending(path: "opencodex-new-task.png"))
 
+        try renderHarnessOnboarding(
+            .visualHarnessOnboardingFixture(), scheme: .dark,
+            to: outputDirectory.appending(path: "opencodex-harness-onboarding.png")
+        )
+
         let inspector = OpenCodexStore.visualFixture()
         inspector.isInspectorPresented = true
         try render(inspector, scheme: .dark, to: outputDirectory.appending(path: "opencodex-inspector.png"))
+
+        guard let harness = inspector.currentHarness else { throw VisualSmokeError.harnessStudioDataIsUnavailable }
+        let exportedPack = outputDirectory.appending(path: "codex-acp.openfish-harness.json")
+        guard inspector.exportHarness(harness, to: exportedPack),
+              let exportedText = try? String(contentsOf: exportedPack, encoding: .utf8),
+              exportedText.contains("\"distribution\"") && !exportedText.localizedCaseInsensitiveContains("api_key") else {
+            throw VisualSmokeError.harnessStudioExportFailed
+        }
         print("OpenFish visual smoke rendered task, new-task, model effort, and inspector fixtures at 1260×820")
     }
 
@@ -38,6 +51,20 @@ struct VisualSmoke {
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: "en_US"))
             .frame(width: 1_260, height: 820)
+        try capture(root, to: output)
+    }
+
+    @MainActor
+    private static func renderHarnessOnboarding(_ store: OpenCodexStore, scheme: ColorScheme, to output: URL) throws {
+        let root = HarnessOnboardingPreview(store: store)
+            .environment(\.colorScheme, scheme)
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .frame(width: 1_260, height: 820)
+        try capture(root, to: output)
+    }
+
+    @MainActor
+    private static func capture<Content: View>(_ root: Content, to output: URL) throws {
         let hostingView = NSHostingView(rootView: root)
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_260, height: 820)
         hostingView.layoutSubtreeIfNeeded()
@@ -59,4 +86,6 @@ private enum VisualSmokeError: Error {
     case couldNotEncodePNG
     case modelEffortIsNotVisible
     case newTaskControlsAreUnavailable
+    case harnessStudioDataIsUnavailable
+    case harnessStudioExportFailed
 }

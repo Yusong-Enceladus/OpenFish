@@ -236,11 +236,16 @@ final class OpenCodexStore: ObservableObject {
         )
         store.harnesses = [HarnessCatalogEntry(
             id: "codex-acp", isDefault: true, name: "Codex", version: "demo", description: "Codex through the OpenFish ACP bridge",
-            publisher: "OpenAI", verified: true, protocolName: "acp", source: "managed",
+            publisher: "OpenAI", license: nil, repository: "https://github.com/openai/codex", icon: nil,
+            verified: true, protocolName: "acp", source: "acp-registry",
+            distribution: HarnessDistribution(
+                kind: "npx", package: "@zed-industries/codex-acp@0.10.0", archive: nil,
+                sha256: nil, command: nil, args: [], env: [:]
+            ),
             graph: HarnessGraph(level: "observable", nodes: [HarnessGraphNode(id: "runtime", kind: "runtime", title: "Codex ACP runtime", editable: false, config: nil)], edges: []),
             available: true, unavailableReason: nil,
             installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
-            auth: .init(methods: [], selectedMethod: "chat-gpt", status: "authenticated", missingFields: []),
+            auth: .init(methods: [], selectedMethod: "chat-gpt", status: "configured", missingFields: []),
             compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in")
         )]
         store.sessions = store.sessions.map { session in
@@ -281,6 +286,54 @@ final class OpenCodexStore: ObservableObject {
         store.projectionsBySession[draftId] = [
             "permissions": store.projectionsBySession["session-live"]?["permissions"]
         ].compactMapValues { $0 }
+        return store
+    }
+
+    static func visualHarnessOnboardingFixture() -> OpenCodexStore {
+        let store = visualFixture()
+        let dsh = HarnessCatalogEntry(
+            id: "dsh", isDefault: false, name: "DeepSeek Harness", version: "builtin",
+            description: "Native plugin runtime with tools, permissions, and durable sessions.",
+            publisher: "DeepSeek", license: "MIT", repository: "https://github.com/deepseek-ai/deepseek-harness", icon: nil,
+            verified: true, protocolName: "dsh", source: "builtin", distribution: nil,
+            graph: HarnessGraph(
+                level: "observable",
+                nodes: [
+                    HarnessGraphNode(id: "plugins", kind: "plugin-runtime", title: "Cordis plugins", editable: false, config: nil),
+                    HarnessGraphNode(id: "loop", kind: "agent-loop", title: "Agent loop", editable: false, config: nil),
+                    HarnessGraphNode(id: "tools", kind: "tool-runtime", title: "Tools", editable: false, config: nil),
+                ],
+                edges: [HarnessGraphEdge(from: "plugins", to: "loop"), HarnessGraphEdge(from: "loop", to: "tools")]
+            ),
+            available: true, unavailableReason: nil,
+            installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
+            auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
+            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in")
+        )
+        let omp = HarnessCatalogEntry(
+            id: "oh-my-pi", isDefault: false, name: "Oh My Pi", version: "17.4.0",
+            description: "Community coding Harness with a native ACP mode and advanced tools.",
+            publisher: "Oh My Pi contributors", license: "MIT", repository: "https://github.com/can1357/oh-my-pi", icon: nil,
+            verified: false, protocolName: "acp", source: "builtin",
+            distribution: HarnessDistribution(
+                kind: "bunx", package: "@oh-my-pi/pi-coding-agent@17.4.0", archive: nil,
+                sha256: nil, command: nil, args: ["acp"], env: [:]
+            ),
+            graph: HarnessGraph(
+                level: "observable",
+                nodes: [HarnessGraphNode(id: "runtime", kind: "harness-runtime", title: "OMP ACP", editable: false, config: nil)],
+                edges: []
+            ),
+            available: true, unavailableReason: nil,
+            installation: .init(status: "not-installed", installedVersion: nil, availableVersion: "17.4.0", previousVersions: [], error: nil),
+            auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
+            compatibility: .init(status: "ready", checkedAt: nil, message: "Ready to install")
+        )
+        store.harnesses = [dsh] + store.harnesses + [omp]
+        store.selectedSessionId = nil
+        store.selectedHarnessId = ""
+        store.needsHarnessOnboarding = true
+        store.isLoadingHarnessCatalog = false
         return store
     }
 
@@ -1030,7 +1083,8 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func saveCustomHarness(
-        id: String, name: String, version: String, protocolName: String,
+        id: String, name: String, version: String, description: String, publisher: String,
+        license: String, repository: String, protocolName: String,
         distributionKind: String, packageOrCommand: String, arguments: [String],
         distributionEnvironment: String,
         binaryCommand: String, sha256: String, graphLevel: String,
@@ -1073,9 +1127,12 @@ final class OpenCodexStore: ObservableObject {
         let graphEdges: [JSONValue] = edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }
         var packObject: [String: JSONValue] = [
             "schemaVersion": .number(0), "id": .string(id), "name": .string(name), "version": .string(version),
-            "publisher": .string("Open Fish user"), "protocol": .string(protocolName), "distribution": distribution,
+            "publisher": .string(publisher.isEmpty ? "OpenFish user" : publisher), "protocol": .string(protocolName), "distribution": distribution,
             "graph": .object(["level": .string(graphLevel), "nodes": .array(graphNodes), "edges": .array(graphEdges)]),
         ]
+        if !description.isEmpty { packObject["description"] = .string(description) }
+        if !license.isEmpty { packObject["license"] = .string(license) }
+        if !repository.isEmpty { packObject["repository"] = .string(repository) }
         if !authMethodId.isEmpty {
             var fields: [JSONValue] = []
             if authKind == "environment", !authFieldRef.isEmpty {
@@ -1103,6 +1160,108 @@ final class OpenCodexStore: ObservableObject {
             return true
         } catch {
             errorBanner = "Could not save the custom Harness: \(error)"
+            return false
+        }
+    }
+
+    func importCustomHarness(from url: URL) async -> Bool {
+        do {
+            let data = try Data(contentsOf: url)
+            let pack = try JSONDecoder().decode(JSONValue.self, from: data)
+            guard case .object = pack else { throw CocoaError(.fileReadCorruptFile) }
+            harnesses = try await api.mutateHarness(action: "upsert", pack: pack)
+            errorBanner = nil
+            return true
+        } catch {
+            errorBanner = "Could not import the Harness Pack: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func exportHarness(_ harness: HarnessCatalogEntry, to url: URL, forPublication: Bool = false) -> Bool {
+        guard let distribution = harness.distribution else {
+            errorBanner = "\(harness.name) does not expose a portable distribution to export."
+            return false
+        }
+        if forPublication && distribution.kind == "executable" {
+            errorBanner = "Community publication requires a portable package or checksummed binary, not a path on this Mac."
+            return false
+        }
+        if forPublication && distribution.kind == "binary" && (distribution.sha256?.isEmpty != false) {
+            errorBanner = "Community binary publication requires a SHA-256 checksum."
+            return false
+        }
+        let secretName = try? NSRegularExpression(pattern: "(?i)(?:key|token|secret|password|credential)$")
+        let unsafeNames = distribution.env.keys.filter { name in
+            secretName?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
+                && !(distribution.env[name] ?? "").isEmpty
+        }
+        guard unsafeNames.isEmpty else {
+            errorBanner = "Move potential secrets out of launch environment before export: \(unsafeNames.sorted().joined(separator: ", ")). Use Authentication fields instead."
+            return false
+        }
+
+        let environment = JSONValue.object(distribution.env.mapValues(JSONValue.string))
+        var distributionObject: [String: JSONValue] = [
+            "kind": .string(distribution.kind), "args": .array(distribution.args.map(JSONValue.string)), "env": environment,
+        ]
+        if let package = distribution.package { distributionObject["package"] = .string(package) }
+        if let archive = distribution.archive { distributionObject["archive"] = .string(archive) }
+        if let sha256 = distribution.sha256 { distributionObject["sha256"] = .string(sha256) }
+        if let command = distribution.command { distributionObject["command"] = .string(command) }
+
+        var pack: [String: JSONValue] = [
+            "$schema": .string("https://openfish.dev/schemas/harness-pack-v0.json"),
+            "schemaVersion": .number(0), "id": .string(harness.id), "name": .string(harness.name),
+            "version": .string(harness.version), "publisher": .string(harness.publisher),
+            "verified": .bool(false), "protocol": .string(harness.protocolName), "source": .string("user"),
+            "distribution": .object(distributionObject),
+            "graph": .object([
+                "level": .string(harness.graph.level),
+                "nodes": .array(harness.graph.nodes.map { node in
+                    var value: [String: JSONValue] = [
+                        "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
+                    ]
+                    if let config = node.config { value["config"] = .object(config) }
+                    return .object(value)
+                }),
+                "edges": .array(harness.graph.edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }),
+            ]),
+        ]
+        if let description = harness.description { pack["description"] = .string(description) }
+        if let license = harness.license { pack["license"] = .string(license) }
+        if let repository = harness.repository { pack["repository"] = .string(repository) }
+        if !harness.auth.methods.isEmpty {
+            pack["authMethods"] = .array(harness.auth.methods.map { method in
+                var value: [String: JSONValue] = [
+                    "id": .string(method.id), "name": .string(method.name), "kind": .string(method.kind),
+                    "fields": .array(method.fields.map { field in
+                        var fieldValue: [String: JSONValue] = [
+                            "ref": .string(field.ref), "name": .string(field.name),
+                            "required": .bool(field.required), "secret": .bool(field.secret),
+                        ]
+                        if let env = field.env { fieldValue["env"] = .string(env) }
+                        if let placeholder = field.placeholder { fieldValue["placeholder"] = .string(placeholder) }
+                        return .object(fieldValue)
+                    }),
+                ]
+                if let terminal = method.terminal {
+                    value["terminal"] = .object([
+                        "args": .array(terminal.args.map(JSONValue.string)),
+                        "env": .object(terminal.env.mapValues(JSONValue.string)),
+                    ])
+                }
+                return .object(value)
+            })
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            try encoder.encode(JSONValue.object(pack)).write(to: url, options: .atomic)
+            errorBanner = nil
+            return true
+        } catch {
+            errorBanner = "Could not export the Harness Pack: \(error.localizedDescription)"
             return false
         }
     }

@@ -42,7 +42,10 @@ export function apply(ctx: Context): void {
     try {
       try {
         await agent.start(resume ? remoteSessionId : undefined)
-        if (!resume) agent.commitSelection()
+        if (!resume) {
+          await agent.applyPackConfiguration()
+          agent.commitSelection()
+        }
       } catch (error: unknown) {
         // Some Harnesses (notably Codex) do not persist a remote session until
         // its first turn. An empty Open Fish task is still durable locally, so
@@ -54,6 +57,7 @@ export function apply(ctx: Context): void {
         await agent.dispose()
         agent = new AcpHarnessAgent(ctx, request.sessionId, session, pack, request.installationDirectory, request.authMethod)
         await agent.start()
+        await agent.applyPackConfiguration()
         agent.commitSelection()
       }
       detachSession = agent.ctx.sessions.enter(session)

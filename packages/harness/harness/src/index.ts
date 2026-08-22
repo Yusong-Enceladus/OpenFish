@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { packsFromAcpRegistry, parseHarnessPack } from './manifest.ts'
+import { packsFromAcpRegistry, packsFromOpenFishCommunity, parseHarnessPack } from './manifest.ts'
 import type {
   HarnessCatalogEntry,
   HarnessDriver,
@@ -36,6 +36,8 @@ declare module '@deepseek-ai/dsh-session/types' {
 export interface HarnessConfig {
   /** ACP Registry JSON endpoint refreshed at startup and on user request. */
   registryUrl?: string
+  /** OpenFish community Pack catalog refreshed independently from the ACP Registry. */
+  communityRegistryUrl?: string
   /** Untrusted Pack v0 documents admitted before Registry rows are merged. */
   packs?: unknown[]
   /** Managed Harness state root; defaults beneath `$DSH_HOME`. */
@@ -45,6 +47,7 @@ export interface HarnessConfig {
 /** Statically walkable Harness catalog configuration schema. */
 export const Config: Schema<HarnessConfig> = Schema.object({
   registryUrl: Schema.string().default('https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json'),
+  communityRegistryUrl: Schema.string().default('https://raw.githubusercontent.com/Yusong-Enceladus/OpenFish/main/community/harnesses/index.json'),
   packs: Schema.array(Schema.any()).default([]),
   stateDir: Schema.string(),
 })
@@ -61,10 +64,11 @@ interface StoredHarnessState {
   defaultHarnessId?: string
   customPacks: HarnessPack[]
   registryPacks: HarnessPack[]
+  communityPacks: HarnessPack[]
   installs: Record<string, StoredInstall>
 }
 
-const EMPTY_STATE: StoredHarnessState = { version: 2, customPacks: [], registryPacks: [], installs: {} }
+const EMPTY_STATE: StoredHarnessState = { version: 2, customPacks: [], registryPacks: [], communityPacks: [], installs: {} }
 
 /**
  * Admit a persisted Pack written by an older Open Fish runtime. Some early ACP
@@ -163,9 +167,11 @@ export class HarnessService extends Service {
         const candidate = parsed as Omit<StoredHarnessState, 'version'> & { version: 1 | 2 }
         const customPacks = candidate.customPacks.map(pack => parseHarnessPack({ ...pack, source: 'user' }))
         const registryPacks = (candidate.registryPacks ?? []).map(pack => parseHarnessPack({ ...pack, source: 'acp-registry' }))
+        const communityPacks = (candidate.communityPacks ?? []).map(pack => parseHarnessPack({ ...pack, verified: false, source: 'openfish-community' }))
         const catalog = new Map<HarnessId, HarnessPack>([
-          ...customPacks.map(pack => [pack.id, pack] as const),
           ...registryPacks.map(pack => [pack.id, pack] as const),
+          ...communityPacks.map(pack => [pack.id, pack] as const),
+          ...customPacks.map(pack => [pack.id, pack] as const),
         ])
         const installs = Object.fromEntries(Object.entries(candidate.installs).map(([id, install]) => {
           const fallback = catalog.get(id as HarnessId)
@@ -185,10 +191,14 @@ export class HarnessService extends Service {
             : {}),
           customPacks,
           registryPacks,
+          communityPacks,
           installs,
         }
-        for (const pack of this.state.customPacks) this.packs.set(pack.id, pack)
         for (const pack of this.state.registryPacks) this.packs.set(pack.id, pack)
+        for (const pack of this.state.communityPacks) {
+          if (!this.packs.has(pack.id)) this.packs.set(pack.id, pack)
+        }
+        for (const pack of this.state.customPacks) this.packs.set(pack.id, pack)
         for (const install of Object.values(this.state.installs)) {
           if (install.active !== undefined && !this.packs.has(install.active.id)) this.packs.set(install.active.id, install.active)
         }
@@ -229,27 +239,52 @@ export class HarnessService extends Service {
    */
   async refresh(signal?: AbortSignal): Promise<void> {
     const options = signal === undefined ? {} : { signal }
-    const [response, ompResponse] = await Promise.all([
-      fetch(this.config.registryUrl ?? 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json', options),
+    const [response, communityResponse, ompResponse] = await Promise.all([
+      fetch(this.config.registryUrl ?? 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json', options).catch(() => undefined),
+      fetch(this.config.communityRegistryUrl ?? 'https://raw.githubusercontent.com/Yusong-Enceladus/OpenFish/main/community/harnesses/index.json', options).catch(() => undefined),
       fetch('https://registry.npmjs.org/@oh-my-pi%2Fpi-coding-agent/latest', options).catch(() => undefined),
     ])
-    if (!response.ok) throw new Error(`ACP Registry returned HTTP ${response.status}`)
     if (ompResponse?.ok) {
       const metadata = await ompResponse.json() as { version?: unknown }
-      if (typeof metadata.version === 'string' && metadata.version.length > 0) {
+      if (typeof metadata.version === 'string' && /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(metadata.version)) {
         const omp = curatedOmp(metadata.version)
         this.packs.set(omp.id, omp)
       }
     }
-    const registryPacks = packsFromAcpRegistry(await response.json())
+    let registryPacks = this.state.registryPacks
+    if (response?.ok) {
+      try {
+        registryPacks = packsFromAcpRegistry(await response.json())
+      } catch (error: unknown) {
+        this.ctx.logger.warn(`ACP Registry refresh failed; retaining the last successful catalog: ${String(error)}`)
+      }
+    } else if (response !== undefined) {
+      this.ctx.logger.warn(`ACP Registry returned HTTP ${response.status}; retaining the last successful catalog`)
+    }
+    let communityPacks = this.state.communityPacks
+    if (communityResponse?.ok) {
+      try {
+        communityPacks = packsFromOpenFishCommunity(await communityResponse.json())
+      } catch (error: unknown) {
+        this.ctx.logger.warn(`OpenFish community Harness catalog refresh failed; retaining the last successful catalog: ${String(error)}`)
+      }
+    }
     const refreshedIds = new Set(registryPacks.map(pack => pack.id))
+    const refreshedCommunityIds = new Set(communityPacks.map(pack => pack.id))
     for (const [id, existing] of this.packs) {
       if (existing.source === 'acp-registry' && !refreshedIds.has(id)) this.packs.delete(id)
+      if (existing.source === 'openfish-community' && !refreshedCommunityIds.has(id)) this.packs.delete(id)
     }
     this.state.registryPacks = registryPacks
+    this.state.communityPacks = communityPacks
     for (const pack of registryPacks) {
       const existing = this.packs.get(pack.id)
       if (existing?.source === 'builtin' || existing?.source === 'user') continue
+      this.packs.set(pack.id, pack)
+    }
+    for (const pack of communityPacks) {
+      const existing = this.packs.get(pack.id)
+      if (existing?.source === 'builtin' || existing?.source === 'user' || existing?.source === 'acp-registry') continue
       this.packs.set(pack.id, pack)
     }
     await this.saveState()
@@ -391,7 +426,11 @@ export class HarnessService extends Service {
     })
   }
 
-  /** Launch one explicitly selected interactive authentication flow. */
+  /**
+   * Launch one explicitly selected interactive authentication flow.
+   * @param id - Installed Harness whose terminal login should run.
+   * @param methodId - Pack-declared terminal authentication method.
+   */
   async authenticateInteractive(id: HarnessId, methodId: string): Promise<void> {
     await this.initialRefresh
     const pack = this.require(id)
@@ -428,7 +467,10 @@ export class HarnessService extends Service {
     })
   }
 
-  /** Current explicit default, absent until a user chooses one. */
+  /**
+   * Read the explicit cross-device default.
+   * @returns Selected Harness id, or absent before onboarding completes.
+   */
   async defaultId(): Promise<HarnessId | undefined> {
     await this.initialRefresh
     return this.state.defaultHarnessId as HarnessId | undefined
@@ -502,6 +544,7 @@ export class HarnessService extends Service {
    * @param id - Persisted Harness Pack identity.
    * @param sessionId - Existing local session identity.
    * @param cwd - Persisted absolute working directory.
+   * @param version - Exact installed Pack version recorded by the session.
    * @returns Restored external Agent.
    */
   async resume(id: HarnessId, sessionId: SessionId, cwd: string, version?: string): Promise<Agent> {

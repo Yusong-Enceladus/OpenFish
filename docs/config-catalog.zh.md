@@ -575,6 +575,22 @@ export interface Config {
 
 来源：[`packages/extensions/cordis-host-runner/src/index.ts:88`](../packages/extensions/cordis-host-runner/src/index.ts)
 
+<a id="deepseek-aidsh-credentials-keychain"></a>
+
+## `@deepseek-ai/dsh-credentials-keychain`
+
+```ts config-catalog
+/** macOS Keychain credential provider configuration. */
+export interface Config {
+  /** Generic-password service name used to isolate OpenFish credentials. */
+  service?: string
+  /** Owner-only legacy YAML path imported once and removed after success. */
+  legacyPath?: string
+}
+```
+
+来源：[`packages/credentials/credentials-keychain/src/index.ts:57`](../packages/credentials/credentials-keychain/src/index.ts)
+
 <a id="deepseek-aidsh-credentials-local"></a>
 
 ## `@deepseek-ai/dsh-credentials-local`
@@ -739,6 +755,8 @@ export interface Config {
 export interface HarnessConfig {
   /** ACP Registry JSON endpoint refreshed at startup and on user request. */
   registryUrl?: string
+  /** OpenFish community Pack catalog refreshed independently from the ACP Registry. */
+  communityRegistryUrl?: string
   /** Untrusted Pack v0 documents admitted before Registry rows are merged. */
   packs?: unknown[]
   /** Managed Harness state root; defaults beneath `$DSH_HOME`. */

@@ -783,10 +783,26 @@ async rollback(id: HarnessId): Promise<void>
 async selectAuth(id: HarnessId, method?: string): Promise<void>
 
 /**
+ * Launch one explicitly selected interactive authentication flow.
+ * @param id - Installed Harness whose terminal login should run.
+ * @param methodId - Pack-declared terminal authentication method.
+ */
+async authenticateInteractive(id: HarnessId, methodId: string): Promise<void>
+
+/**
  * Persist the cross-device default chosen by native Open Fish clients.
  * @param id - Harness to use for new tasks by default.
  */
 async selectDefault(id: HarnessId): Promise<void>
+
+/** Explicitly clear the default so first-run clients must ask the user. */
+async clearDefault(): Promise<void>
+
+/**
+ * Read the explicit cross-device default.
+ * @returns Selected Harness id, or absent before onboarding completes.
+ */
+async defaultId(): Promise<HarnessId | undefined>
 
 /**
  * Create or replace one user Pack without editing Open Fish source.
@@ -822,12 +838,13 @@ async create(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>
  * @param id - Persisted Harness Pack identity.
  * @param sessionId - Existing local session identity.
  * @param cwd - Persisted absolute working directory.
+ * @param version - Exact installed Pack version recorded by the session.
  * @returns Restored external Agent.
  */
-async resume(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>
+async resume(id: HarnessId, sessionId: SessionId, cwd: string, version?: string): Promise<Agent>
 ```
 
-Source: [`packages/harness/harness/src/index.ts:104`](../../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:134`](../../packages/harness/harness/src/index.ts)
 
 <a id="ctxvoice--voice"></a>
 

@@ -13,8 +13,10 @@ import { parse as parseYaml } from 'yaml'
 
 const execFileAsync = promisify(execFile)
 export const name = 'credentials-keychain'
+/** Keychain generic-password service reserved for OpenFish credentials. */
 export const SERVICE_NAME = 'app.openfish.credentials'
 
+/** Minimal credential-store operations used by the provider and its tests. */
 export interface KeychainExecutor {
   get(account: string): Promise<string | undefined>
   set(account: string, value: string): Promise<void>
@@ -53,7 +55,13 @@ export class SecurityKeychainExecutor implements KeychainExecutor {
   }
 }
 
-export interface Config { service?: string; legacyPath?: string }
+/** macOS Keychain credential provider configuration. */
+export interface Config {
+  /** Generic-password service name used to isolate OpenFish credentials. */
+  service?: string
+  /** Owner-only legacy YAML path imported once and removed after success. */
+  legacyPath?: string
+}
 
 function accountFor(ref: CredentialRef): string {
   return `openfish:${ref}`

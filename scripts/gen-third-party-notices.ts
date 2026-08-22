@@ -72,7 +72,9 @@ export function isOwnerAuthorizedRuntime(name: string): boolean {
  * license-scoped: an npm update must be reviewed instead of inheriting a broad
  * package-name exception.
  */
-export function isAuthorizedNpmCliManifest(manifest: Manifest): boolean {
+export function isAuthorizedNpmCliManifest(
+  manifest: Manifest,
+): manifest is Manifest & { name: string; version: string; license: string } {
   return manifest.name === NPM_CLI_PACKAGE
     && manifest.version === NPM_CLI_AUTHORIZED_VERSION
     && manifest.license === NPM_CLI_AUTHORIZED_LICENSE

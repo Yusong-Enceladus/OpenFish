@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { packsFromAcpRegistry, parseHarnessPack } from '../src/manifest.ts'
+import { packsFromAcpRegistry, packsFromOpenFishCommunity, parseHarnessPack } from '../src/manifest.ts'
 
 describe('Harness Pack v0', () => {
   it('admits a fourth composable ACP Harness without provider-specific code', () => {
@@ -84,5 +84,40 @@ describe('Harness Pack v0', () => {
         } } } }],
     })
     expect(pack?.distribution).toMatchObject({ kind: 'binary', command: './bin/native', sha256: 'a'.repeat(64) })
+  })
+
+  it('admits exact-version community Packs without granting verified status', () => {
+    const [pack] = packsFromOpenFishCommunity({
+      version: 0,
+      packs: [{
+        schemaVersion: 0, id: 'community.public-agent', name: 'Public Agent', version: '1.2.3', publisher: 'Community',
+        verified: true, protocol: 'acp', source: 'user',
+        distribution: { kind: 'npx', package: '@community/public-agent@1.2.3', args: ['acp'], env: {} },
+        graph: { level: 'opaque', nodes: [{ id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false }], edges: [] },
+      }],
+    })
+    expect(pack).toMatchObject({ id: 'community.public-agent', source: 'openfish-community', verified: false })
+  })
+
+  it('rejects floating package versions in the community catalog', () => {
+    expect(() => packsFromOpenFishCommunity({
+      version: 0,
+      packs: [{
+        schemaVersion: 0, id: 'community.floating', name: 'Floating', version: '1', publisher: 'Community',
+        protocol: 'acp', distribution: { kind: 'npx', package: '@community/floating@latest', args: [], env: {} },
+        graph: { level: 'opaque', nodes: [], edges: [] },
+      }],
+    })).toThrow('exact version')
+  })
+
+  it('rejects credential values from the public community catalog', () => {
+    expect(() => packsFromOpenFishCommunity({
+      version: 0,
+      packs: [{
+        schemaVersion: 0, id: 'community.leaked', name: 'Leaked', version: '1.0.0', publisher: 'Community',
+        protocol: 'acp', distribution: { kind: 'npx', package: '@community/leaked@1.0.0', args: [], env: { API_KEY: 'private' } },
+        graph: { level: 'opaque', nodes: [], edges: [] },
+      }],
+    })).toThrow('cannot contain a value')
   })
 })

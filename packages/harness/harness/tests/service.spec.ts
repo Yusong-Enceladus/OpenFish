@@ -117,4 +117,38 @@ describe('Harness lifecycle and Driver SDK', () => {
       await rm(stateDir, { recursive: true, force: true })
     }
   })
+
+  it('retains the community catalog offline and gives user Packs precedence', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-community-'))
+    const communityPack = {
+      schemaVersion: 0, id: 'community.driver-demo', name: 'Published demo', version: '3.0.0', publisher: 'Community',
+      protocol: 'community-protocol', distribution: { kind: 'npx', package: '@community/driver-demo@3.0.0', args: [], env: {} },
+      graph: { level: 'opaque', nodes: [], edges: [] },
+    }
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (input) => {
+        const url = String(input)
+        if (url.includes('community.test')) return new Response(JSON.stringify({ version: 0, packs: [communityPack] }))
+        if (url.includes('registry.test')) return new Response(JSON.stringify({ version: '1', agents: [] }))
+        return new Response(JSON.stringify({ version: '17.4.0' }))
+      }))
+      const online = new HarnessService(new Context(), {
+        stateDir, registryUrl: 'https://registry.test/index.json', communityRegistryUrl: 'https://community.test/index.json',
+      })
+      expect((await online.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
+        name: 'Published demo', source: 'openfish-community', verified: false,
+      })
+
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+      const offline = new HarnessService(new Context(), {
+        stateDir, registryUrl: 'https://registry.test/index.json', communityRegistryUrl: 'https://community.test/index.json',
+        packs: [pack('4.0.0')],
+      })
+      expect((await offline.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
+        version: '4.0.0', source: 'user',
+      })
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
 })

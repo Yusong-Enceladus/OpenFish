@@ -850,9 +850,25 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'id', description: 'Harness whose login mode is selected.' }, { name: 'method', description: 'Pack-declared method id, or absent to clear the preference.' }],
       },
       {
+        signature: 'async authenticateInteractive(id: HarnessId, methodId: string): Promise<void>',
+        description: 'Launch one explicitly selected interactive authentication flow.',
+        parameters: [{ name: 'id', description: 'Installed Harness whose terminal login should run.' }, { name: 'methodId', description: 'Pack-declared terminal authentication method.' }],
+      },
+      {
         signature: 'async selectDefault(id: HarnessId): Promise<void>',
         description: 'Persist the cross-device default chosen by native Open Fish clients.',
         parameters: [{ name: 'id', description: 'Harness to use for new tasks by default.' }],
+      },
+      {
+        signature: 'async clearDefault(): Promise<void>',
+        description: 'Explicitly clear the default so first-run clients must ask the user.',
+        parameters: [],
+      },
+      {
+        signature: 'async defaultId(): Promise<HarnessId | undefined>',
+        description: 'Read the explicit cross-device default.',
+        parameters: [],
+        returns: 'Selected Harness id, or absent before onboarding completes.',
       },
       {
         signature: 'async upsert(input: unknown): Promise<HarnessPack>',
@@ -878,9 +894,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Published external Agent.',
       },
       {
-        signature: 'async resume(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>',
+        signature: 'async resume(id: HarnessId, sessionId: SessionId, cwd: string, version?: string): Promise<Agent>',
         description: 'Resume a persisted non-DSH session through its registered protocol driver.',
-        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Existing local session identity.' }, { name: 'cwd', description: 'Persisted absolute working directory.' }],
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Existing local session identity.' }, { name: 'cwd', description: 'Persisted absolute working directory.' }, { name: 'version', description: 'Exact installed Pack version recorded by the session.' }],
         returns: 'Restored external Agent.',
       },
     ],
@@ -3010,6 +3026,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BinaryHarnessDistribution',
+    declaration: 'export interface BinaryHarnessDistribution {\n    kind: \'binary\';\n    archive: string;\n    sha256?: string;\n    command: string;\n    args: string[];\n    env: Record<string, string>;\n}',
+  },
+  {
     name: 'Branded',
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
   },
@@ -3430,16 +3450,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
   },
   {
+    name: 'HarnessAuthField',
+    declaration: 'export interface HarnessAuthField {\n    ref: string;\n    name: string;\n    env?: string;\n    required: boolean;\n    secret: boolean;\n    placeholder?: string;\n}',
+  },
+  {
     name: 'HarnessAuthMethod',
-    declaration: 'export interface HarnessAuthMethod {\n    id: string;\n    name: string;\n    kind: \'agent\' | \'environment\' | \'terminal\';\n}',
+    declaration: 'export interface HarnessAuthMethod {\n    id: string;\n    name: string;\n    kind: \'agent\' | \'environment\' | \'terminal\';\n    fields: HarnessAuthField[];\n    terminal?: {\n        args: string[];\n        env: Record<string, string>;\n    };\n}',
   },
   {
     name: 'HarnessDistribution',
-    declaration: 'export type HarnessDistribution = NpxHarnessDistribution | BunxHarnessDistribution | ExecutableHarnessDistribution;',
+    declaration: 'export type HarnessDistribution = NpxHarnessDistribution | BunxHarnessDistribution | UvxHarnessDistribution | BinaryHarnessDistribution | ExecutableHarnessDistribution;',
   },
   {
     name: 'HarnessDriver',
-    declaration: 'export interface HarnessDriver {\n    readonly protocol: string;\n    available(pack: HarnessPack): Promise<string | undefined>;\n    create(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    resume(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    install?(pack: HarnessPack, directory: string, signal?: AbortSignal): Promise<void>;\n}',
+    declaration: 'export interface HarnessDriver {\n    readonly protocol: string;\n    available(pack: HarnessPack): Promise<string | undefined>;\n    create(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    resume(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    install?(pack: HarnessPack, directory: string, signal?: AbortSignal): Promise<void>;\n    missingCredentials?(pack: HarnessPack, authMethod?: string): Promise<string[]>;\n    discoverAuth?(pack: HarnessPack, installationDirectory: string): Promise<HarnessAuthMethod[]>;\n    authenticateInteractive?(pack: HarnessPack, installationDirectory: string, method: HarnessAuthMethod): Promise<void>;\n}',
   },
   {
     name: 'HarnessId',
@@ -3447,11 +3471,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessPack',
-    declaration: 'export interface HarnessPack {\n    schemaVersion: 0;\n    id: HarnessId;\n    name: string;\n    version: string;\n    description?: string;\n    publisher: string;\n    license?: string;\n    repository?: string;\n    icon?: string;\n    verified: boolean;\n    protocol: string;\n    authMethods?: HarnessAuthMethod[];\n    distribution?: HarnessDistribution;\n    graph: HarnessGraph;\n    source: \'builtin\' | \'acp-registry\' | \'user\';\n}',
+    declaration: 'export interface HarnessPack {\n    schemaVersion: 0;\n    id: HarnessId;\n    name: string;\n    version: string;\n    description?: string;\n    publisher: string;\n    license?: string;\n    repository?: string;\n    icon?: string;\n    verified: boolean;\n    protocol: string;\n    authMethods?: HarnessAuthMethod[];\n    distribution?: HarnessDistribution;\n    graph: HarnessGraph;\n    source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n}',
   },
   {
     name: 'HarnessSessionRequest',
-    declaration: 'export interface HarnessSessionRequest {\n    harnessId: HarnessId;\n    sessionId: SessionId;\n    cwd: string;\n    installationDirectory?: string;\n    authMethod?: string;\n}',
+    declaration: 'export interface HarnessSessionRequest {\n    harnessId: HarnessId;\n    sessionId: SessionId;\n    cwd: string;\n    version?: string;\n    installationDirectory?: string;\n    authMethod?: string;\n}',
   },
   {
     name: 'ImageAttachmentLimits',
@@ -3799,7 +3823,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'NativeHandshake',
-    declaration: 'export interface NativeHandshake {\n    product: \'opencodex\';\n    protocolVersion: string;\n    minimumClientProtocol: string;\n    host: \'dsh\';\n    surface: \'native\';\n}',
+    declaration: 'export interface NativeHandshake {\n    product: \'opencodex\';\n    protocolVersion: string;\n    minimumClientProtocol: string;\n    host: \'dsh\';\n    surface: \'native\';\n    embeddedRuntimeId?: string;\n    embeddedProcessId?: number;\n}',
   },
   {
     name: 'NativeMethod',
@@ -4952,6 +4976,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UserQuestionProvider',
     declaration: 'export interface UserQuestionProvider {\n    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;\n}',
+  },
+  {
+    name: 'UvxHarnessDistribution',
+    declaration: 'export interface UvxHarnessDistribution {\n    kind: \'uvx\';\n    package: string;\n    args: string[];\n    env: Record<string, string>;\n}',
   },
   {
     name: 'VoiceCapabilities',

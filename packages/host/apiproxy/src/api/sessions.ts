@@ -169,6 +169,7 @@ export interface SessionModels {
   harnessOptions?: HarnessConfigOption[]
 }
 
+/** One selectable value advertised by a live Harness session option. */
 export interface HarnessConfigValue {
   id: string
   name: string
@@ -177,6 +178,7 @@ export interface HarnessConfigValue {
   groupName?: string
 }
 
+/** API projection of one live Harness session configuration option. */
 export interface HarnessConfigOption {
   id: string
   name: string

@@ -6,6 +6,7 @@ import type { HarnessId, HarnessPack } from './types.ts'
 
 const stringRecord = z.record(z.string(), z.string())
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
+const SENSITIVE_ENVIRONMENT_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)$/iu
 const distribution = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('npx'), package: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
   z.object({ kind: z.literal('bunx'), package: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
@@ -51,7 +52,7 @@ const packSchema = z.object({
   })).optional(),
   distribution: distribution.optional(),
   graph,
-  source: z.enum(['builtin', 'acp-registry', 'user']),
+  source: z.enum(['builtin', 'acp-registry', 'openfish-community', 'user']),
 })
 
 /**
@@ -100,7 +101,7 @@ export function parseHarnessPack(input: unknown): HarnessPack {
   for (const key of Object.keys(pack.distribution?.env ?? {})) {
     if (!ENVIRONMENT_NAME.test(key)) throw new Error(`Harness Pack "${pack.id}" distribution has an invalid environment name`)
   }
-  if (pack.source === 'user' && pack.distribution !== undefined) {
+  if ((pack.source === 'user' || pack.source === 'openfish-community') && pack.distribution !== undefined) {
     const distribution = pack.distribution
     if ((distribution.kind === 'npx' || distribution.kind === 'bunx') && !isPinnedNpmPackage(distribution.package)) {
       throw new Error(`Harness Pack "${pack.id}" must pin its npm/Bun package to an exact version`)
@@ -115,7 +116,42 @@ export function parseHarnessPack(input: unknown): HarnessPack {
       throw new Error(`Harness Pack "${pack.id}" binary command must stay inside its installation directory`)
     }
   }
+  if (pack.source === 'openfish-community' && pack.distribution?.kind === 'executable') {
+    throw new Error(`Harness Pack "${pack.id}" community publication requires a portable package or checksummed binary distribution`)
+  }
+  if (pack.source === 'openfish-community' && pack.distribution?.kind === 'binary' && pack.distribution.sha256 === undefined) {
+    throw new Error(`Harness Pack "${pack.id}" community binary publication requires a SHA-256 checksum`)
+  }
+  if (pack.source === 'openfish-community') {
+    const publicEnvironments = [pack.distribution?.env, ...authMethods.map(method => method.terminal?.env)]
+    for (const environment of publicEnvironments) {
+      const leaked = Object.entries(environment ?? {}).find(([name, value]) => SENSITIVE_ENVIRONMENT_NAME.test(name) && value !== '')
+      if (leaked !== undefined) {
+        throw new Error(`Harness Pack "${pack.id}" community publication cannot contain a value for potential secret "${leaked[0]}"`)
+      }
+    }
+  }
   return pack
+}
+
+const openFishCommunitySchema = z.object({
+  version: z.literal(0),
+  packs: z.array(z.unknown()),
+})
+
+/**
+ * Parse the OpenFish community catalog and mark every entry as unverified data.
+ * @param input - Untrusted generated community catalog document.
+ * @returns Validated, credential-free community Packs.
+ */
+export function packsFromOpenFishCommunity(input: unknown): HarnessPack[] {
+  const catalog = openFishCommunitySchema.parse(input)
+  return catalog.packs.map((candidate) => {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+      throw new Error('OpenFish community catalog entries must be objects')
+    }
+    return parseHarnessPack({ ...candidate, verified: false, source: 'openfish-community' })
+  })
 }
 
 function isPinnedNpmPackage(spec: string): boolean {

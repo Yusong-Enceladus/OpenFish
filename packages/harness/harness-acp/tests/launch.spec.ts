@@ -3,9 +3,38 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { parseHarnessPack } from '../../harness/src/manifest.ts'
-import { acpHarnessConfigCatalog, acpHarnessModelCatalog, launchArgv, managedLaunchArgv } from '../src/agent.ts'
+import { acpHarnessConfigCatalog, acpHarnessModelCatalog, launchArgv, managedLaunchArgv, packSessionConfiguration } from '../src/agent.ts'
 
 describe('ACP Harness launch boundary', () => {
+  it('projects only editable composable node defaults into live ACP options', () => {
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'configured-acp', name: 'Configured ACP', version: '1.0.0', publisher: 'Test',
+      verified: false, protocol: 'acp', source: 'user',
+      distribution: { kind: 'npx', package: '@example/configured-acp@1.0.0', args: [], env: {} },
+      graph: { level: 'composable', nodes: [
+        { id: 'model', kind: 'model', title: 'Model', editable: true, config: { acpSessionOptions: { model: 'gpt-test', sandbox: true } } },
+        { id: 'hidden', kind: 'runtime', title: 'Hidden', editable: false, config: { acpSessionOptions: { ignored: 'value' } } },
+      ], edges: [] },
+    })
+    expect(packSessionConfiguration(pack)).toEqual([
+      { id: 'model', value: 'gpt-test' },
+      { id: 'sandbox', value: true },
+    ])
+  })
+
+  it('rejects conflicting portable ACP defaults', () => {
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'conflicting-acp', name: 'Conflicting ACP', version: '1.0.0', publisher: 'Test',
+      verified: false, protocol: 'acp', source: 'user',
+      distribution: { kind: 'npx', package: '@example/conflicting-acp@1.0.0', args: [], env: {} },
+      graph: { level: 'composable', nodes: [
+        { id: 'one', kind: 'model', title: 'One', editable: true, config: { acpSessionOptions: { model: 'one' } } },
+        { id: 'two', kind: 'model', title: 'Two', editable: true, config: { acpSessionOptions: { model: 'two' } } },
+      ], edges: [] },
+    })
+    expect(() => packSessionConfiguration(pack)).toThrow('conflicting values')
+  })
+
   it('projects ACP model config options into a selectable model catalog', () => {
     expect(acpHarnessModelCatalog([{
       id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'anthropic/claude-sonnet',
