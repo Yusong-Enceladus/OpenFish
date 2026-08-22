@@ -355,7 +355,7 @@ private struct OpenCodexSidebar: View {
             }
             .buttonStyle(.plain)
 
-            ConnectionFooter(state: store.connectionState)
+            ConnectionFooter(state: store.connectionState, isDemoMode: store.isDemoMode)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
         }
@@ -714,13 +714,14 @@ private struct SessionRow: View {
 
 private struct ConnectionFooter: View {
     let state: DshConnectionState
+    let isDemoMode: Bool
 
     var body: some View {
         HStack(spacing: 7) {
             Circle()
                 .fill(state == .connected ? Color.green : Color.orange)
                 .frame(width: 6, height: 6)
-            Text(state == .connected ? "DSH host connected" : state.label)
+            Text(isDemoMode ? "Demo data · offline" : state == .connected ? "DSH host connected" : state.label)
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
             Spacer()

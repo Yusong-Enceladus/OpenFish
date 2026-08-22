@@ -77,9 +77,7 @@ final class LocalVoiceService: NSObject, ObservableObject {
         stopSpeaking()
         stopListening()
         errorMessage = nil
-        let speechAuthorization = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
-        }
+        let speechAuthorization = await Self.requestSpeechAuthorization()
         guard speechAuthorization == .authorized else {
             errorMessage = "Speech recognition permission is required for local dictation."
             return
@@ -108,10 +106,14 @@ final class LocalVoiceService: NSObject, ObservableObject {
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
-            request?.append(buffer)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            recognitionRequest = nil
+            transcriptHandler = nil
+            errorMessage = "No microphone input is available. Check the input device in System Settings."
+            return
         }
+        input.removeTap(onBus: 0)
+        Self.installInputTap(on: input, format: format, request: request)
         audioEngine.prepare()
         do {
             try audioEngine.start()
@@ -124,19 +126,49 @@ final class LocalVoiceService: NSObject, ObservableObject {
         }
 
         isListening = true
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+        recognitionTask = Self.makeRecognitionTask(recognizer: recognizer, request: request, service: self)
+    }
+
+    nonisolated private static func installInputTap(
+        on input: AVAudioInputNode,
+        format: AVAudioFormat,
+        request: SFSpeechAudioBufferRecognitionRequest
+    ) {
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
+            request?.append(buffer)
+        }
+    }
+
+    nonisolated private static func makeRecognitionTask(
+        recognizer: SFSpeechRecognizer,
+        request: SFSpeechAudioBufferRecognitionRequest,
+        service: LocalVoiceService
+    ) -> SFSpeechRecognitionTask {
+        recognizer.recognitionTask(with: request) { [weak service] result, error in
+            let update = result.map { ($0.bestTranscription.formattedString, $0.isFinal) }
+            let failure = error?.localizedDescription
+            Task { @MainActor [weak service] in
+                guard let self = service else { return }
                 guard self.recognitionTask != nil else { return }
-                if let result {
-                    let text = result.bestTranscription.formattedString
+                if let update {
+                    let (text, isFinal) = update
                     self.partialTranscript = text
-                    self.transcriptHandler?(text, result.isFinal)
-                    if result.isFinal { self.stopListening() }
-                } else if let error {
-                    self.errorMessage = error.localizedDescription
+                    self.transcriptHandler?(text, isFinal)
+                    if isFinal { self.stopListening() }
+                } else if let failure {
+                    self.errorMessage = failure
                     self.stopListening()
                 }
+            }
+        }
+    }
+
+    nonisolated private static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                // TCC may invoke this callback on a background queue. Keep the
+                // callback nonisolated; the suspended caller resumes on MainActor.
+                continuation.resume(returning: status)
             }
         }
     }

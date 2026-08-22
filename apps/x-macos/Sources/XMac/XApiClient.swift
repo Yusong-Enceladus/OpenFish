@@ -272,6 +272,13 @@ struct ModelReasoningEffort: Decodable, Identifiable, Equatable, Sendable {
         case id, isDefault, name, description
     }
 
+    init(id: String, isDefault: Bool = false, name: String, description: String?) {
+        self.id = id
+        self.isDefault = isDefault
+        self.name = name
+        self.description = description
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)

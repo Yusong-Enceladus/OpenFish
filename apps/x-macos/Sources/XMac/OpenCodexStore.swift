@@ -96,6 +96,7 @@ final class OpenCodexStore: ObservableObject {
     @Published var isVoiceConversationPresented = false
     @Published private(set) var voiceConversationStatus = "Ready"
     @Published private(set) var voiceConversationTranscript = ""
+    @Published private(set) var isDemoMode = false
 
     private var api: DshApiClient
     private var connection: DshLiveConnection
@@ -126,22 +127,22 @@ final class OpenCodexStore: ObservableObject {
         connection = DshLiveConnection(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
     }
 
-    /// Deterministic product-state fixture used only for offscreen visual verification.
+    /// Deterministic, network-isolated state for screenshots and product demos.
     static func visualFixture() -> OpenCodexStore {
         let store = OpenCodexStore(baseURL: NativeConnectionProfile.local.baseURL)
         let now = Date().timeIntervalSince1970 * 1_000
         let workspace = WorkspaceView(
-            workspaceId: "workspace-opencodex",
-            path: "/tmp/OpenCodex",
-            title: "OpenCodex",
+            workspaceId: "workspace-aurora",
+            path: "/Demo/AuroraNotes",
+            title: "Aurora Notes",
             sessionIds: ["session-live", "session-architecture", "session-voice"],
             createdAt: "2026-08-17T00:00:00.000Z",
             updatedAt: "2026-08-17T01:00:00.000Z"
         )
         let dsh = WorkspaceView(
-            workspaceId: "workspace-dsh",
-            path: "/tmp/DSH",
-            title: "DSH",
+            workspaceId: "workspace-studio",
+            path: "/Demo/StudioWebsite",
+            title: "Studio Website",
             sessionIds: ["session-plugin"],
             createdAt: "2026-08-16T00:00:00.000Z",
             updatedAt: "2026-08-17T01:00:00.000Z"
@@ -167,7 +168,7 @@ final class OpenCodexStore: ObservableObject {
         ]
         store.projectionsBySession = [
             "session-live": [
-                "title": ProjectionCell(seq: 14, value: .string("Replace polling with DSH event streams")),
+                "title": ProjectionCell(seq: 14, value: .string("Design the offline sync flow")),
                 "permissions": ProjectionCell(
                     seq: 14,
                     value: .object([
@@ -192,9 +193,9 @@ final class OpenCodexStore: ObservableObject {
                     ])
                 ),
             ],
-            "session-architecture": ["title": ProjectionCell(seq: 8, value: .string("Define OpenCodex runtime ownership"))],
-            "session-voice": ["title": ProjectionCell(seq: 5, value: .string("Plan local voice providers"))],
-            "session-plugin": ["title": ProjectionCell(seq: 11, value: .string("Audit Cordis plugin seams"))],
+            "session-architecture": ["title": ProjectionCell(seq: 8, value: .string("Add export progress"))],
+            "session-voice": ["title": ProjectionCell(seq: 5, value: .string("Review accessibility labels"))],
+            "session-plugin": ["title": ProjectionCell(seq: 11, value: .string("Polish the launch page"))],
         ]
         store.recordsBySession["session-live"] = visualFixtureRecords(now: now)
         store.pendingApprovals["approval-visual"] = PendingApproval(
@@ -203,41 +204,60 @@ final class OpenCodexStore: ObservableObject {
             approvalId: "approval-visual",
             toolName: "bash",
             callId: "call-next",
-            reason: "Allow the test runner to use the wider macOS sandbox for this command?"
+            reason: "Allow OpenFish to update the local sync contract fixture?"
         )
         store.hostDescription = HostDescription(
-            version: "0.1.0", cwd: workspace.path, provider: "deepseek-official",
-            model: "deepseek-v4-flash", attachedSessions: 1, canOpenPath: true
+            version: "demo", cwd: workspace.path, provider: "openai-codex",
+            model: "gpt-5.6-sol", attachedSessions: 1, canOpenPath: true
         )
         store.sessionModels = SessionModels(
-            current: ModelSelection(provider: "deepseek-official", model: "deepseek-v4-flash", reasoningEffort: "high"),
+            current: ModelSelection(provider: "openai-codex", model: "gpt-5.6-sol", reasoningEffort: "medium"),
             routable: true,
             groups: [
                 ModelProviderGroup(
-                    id: "deepseek-official",
-                    name: "DeepSeek",
+                    id: "openai-codex",
+                    name: "ChatGPT",
                     models: [
-                        CatalogModel(id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", description: nil, reasoning: nil),
+                        CatalogModel(
+                            id: "gpt-5.6-sol", name: "GPT-5.6-Sol", description: "Demo model",
+                            reasoning: ModelReasoning(
+                                efforts: [
+                                    ModelReasoningEffort(id: "low", name: "Low", description: nil),
+                                    ModelReasoningEffort(id: "medium", name: "Medium", description: nil),
+                                    ModelReasoningEffort(id: "high", name: "High", description: nil),
+                                ],
+                                defaultEffort: "medium"
+                            )
+                        ),
                     ]
                 ),
             ],
             failures: []
         )
         store.harnesses = [HarnessCatalogEntry(
-            id: "dsh", isDefault: true, name: "DeepSeek Harness", version: "builtin", description: "OpenFish native runtime",
-            publisher: "DeepSeek", verified: true, protocolName: "dsh", source: "builtin",
-            graph: HarnessGraph(level: "observable", nodes: [HarnessGraphNode(id: "runtime", kind: "runtime", title: "DSH plugin runtime", editable: false, config: nil)], edges: []),
+            id: "codex-acp", isDefault: true, name: "Codex", version: "demo", description: "Codex through the OpenFish ACP bridge",
+            publisher: "OpenAI", verified: true, protocolName: "acp", source: "managed",
+            graph: HarnessGraph(level: "observable", nodes: [HarnessGraphNode(id: "runtime", kind: "runtime", title: "Codex ACP runtime", editable: false, config: nil)], edges: []),
             available: true, unavailableReason: nil,
             installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
-            auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
+            auth: .init(methods: [], selectedMethod: "chat-gpt", status: "authenticated", missingFields: []),
             compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in")
         )]
+        store.sessions = store.sessions.map { session in
+            SessionSummary(
+                sessionId: session.sessionId, harnessId: "codex-acp", updatedAt: session.updatedAt,
+                running: session.running, blank: session.blank, parentSessionId: session.parentSessionId,
+                origin: session.origin, cwd: session.cwd, agentPreset: nil, projections: session.projections
+            )
+        }
+        store.selectedHarnessId = "codex-acp"
         store.selectedWorkspaceId = workspace.workspaceId
         store.selectedSessionId = "session-live"
         store.connectionState = .connected
         store.hasBooted = true
         store.hasBaseline = true
         store.isSynchronizingBaseline = false
+        store.isDemoMode = true
         return store
     }
 
@@ -248,14 +268,14 @@ final class OpenCodexStore: ObservableObject {
         store.draftSessionId = draftId
         store.sessions.append(SessionSummary(
             sessionId: draftId,
-            harnessId: "dsh",
+            harnessId: "codex-acp",
             updatedAt: Date().timeIntervalSince1970 * 1_000,
             running: false,
             blank: true,
             parentSessionId: nil,
             origin: nil,
             cwd: store.currentWorkspace?.path,
-            agentPreset: "anchored",
+            agentPreset: nil,
             projections: nil
         ))
         store.projectionsBySession[draftId] = [
@@ -2315,7 +2335,7 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
         event(1, "user/message", [
             "content": .array([.object([
                 "type": .string("text"),
-                "text": .string("Replace the native polling loop with the real DSH event streams, then verify the approval path."),
+                "text": .string("Design an offline-first sync flow for notes. Keep conflicts understandable and make every recovery action reversible."),
             ])]),
             "source": .object(["kind": .string("user")]),
         ]),
@@ -2324,7 +2344,7 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
             "message": .object([
                 "content": .array([.object([
                     "type": .string("text"),
-                    "text": .string("I mapped the existing DSH connection seam first. The native client now shares the same Host and mux streams as the Web client, so reconnects, projections, and approvals have one authoritative source."),
+                    "text": .string("I mapped the current persistence boundary and split the flow into local commit, background sync, and conflict review. The local note stays immediately editable while sync state remains visible."),
                 ])]),
             ]),
         ]),
@@ -2334,8 +2354,8 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
         ], view: .object([
             "for": .string("call"),
             "view": .object([
-                "card": .string("terminal"), "title": .string("Run native DSH transport checks"),
-                "description": .string("RPC, history, model catalog, Host stream, and mux stream"),
+                "card": .string("terminal"), "title": .string("Run the sync contract checks"),
+                "description": .string("Offline writes, reconnect replay, and conflict recovery"),
             ]),
         ])),
         event(9, "tool/result", [
@@ -2346,7 +2366,7 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
                     "type": .string("tool-result"), "toolCallId": .string("call-tests"), "isError": .bool(false),
                     "content": .array([.object([
                         "type": .string("text"),
-                        "text": .string("Projection smoke passed\nDSH stream state: Connected\nOpenCodex DSH smoke passed"),
+                        "text": .string("Offline write passed\nReconnect replay passed\nConflict recovery passed"),
                     ])]),
                 ])]),
             ]),
@@ -2354,7 +2374,7 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
             "for": .string("result"),
             "view": .object([
                 "card": .string("terminal"),
-                "output": .string("Projection smoke passed\nDSH stream state: Connected\nOpenCodex DSH smoke passed"),
+                "output": .string("Offline write passed\nReconnect replay passed\nConflict recovery passed"),
             ]),
         ])),
         event(12, "assistant/message", [
@@ -2362,7 +2382,7 @@ private func visualFixtureRecords(now: Double) -> [SessionEventRecord] {
             "message": .object([
                 "content": .array([.object([
                     "type": .string("text"),
-                    "text": .string("The polling path is gone and the real dual-stream handshake is passing. One approval is waiting below so the interaction can be checked in its actual in-thread position."),
+                    "text": .string("The sync contract now passes in all three states. I also added a conflict summary that explains what changed before the user chooses which version to keep."),
                 ])]),
             ]),
         ]),

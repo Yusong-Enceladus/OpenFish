@@ -7,6 +7,53 @@ private func isOpenFishCancellation(_ error: Error) -> Bool {
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }
 
+private func mobileVisualFixtureRecords(now: Double) -> [MobileEventRecord] {
+    func event(_ seq: Int, _ type: String, _ data: [String: MobileJSONValue]) -> MobileEventRecord {
+        MobileEventRecord(
+            event: MobileSessionEvent(
+                type: type,
+                seq: seq,
+                time: now - Double(12 - seq) * 1_000,
+                data: .object(data),
+                sourceEventSeqs: nil,
+                surfaceOp: nil,
+                ignorable: nil
+            ),
+            view: nil
+        )
+    }
+
+    return [
+        event(1, "user/message", [
+            "content": .array([.object([
+                "type": .string("text"),
+                "text": .string("Design an offline-first sync flow for notes. Keep every recovery action reversible."),
+            ])]),
+            "source": .object(["kind": .string("user")]),
+        ]),
+        event(5, "assistant/message", [
+            "turn": .number(1),
+            "step": .number(1),
+            "message": .object([
+                "content": .array([.object([
+                    "type": .string("text"),
+                    "text": .string("I split the flow into local commit, background sync, and conflict review. Notes stay immediately editable while their sync state remains visible."),
+                ])]),
+            ]),
+        ]),
+        event(9, "assistant/message", [
+            "turn": .number(1),
+            "step": .number(2),
+            "message": .object([
+                "content": .array([.object([
+                    "type": .string("text"),
+                    "text": .string("Offline writes, reconnect replay, and conflict recovery now pass. The conflict screen explains what changed before the user chooses a version."),
+                ])]),
+            ]),
+        ]),
+    ]
+}
+
 struct MobilePendingImage: Identifiable, Equatable, Sendable {
     let id = UUID()
     let name: String
@@ -69,6 +116,7 @@ final class MobileOpenCodexStore: ObservableObject {
     @Published var showsVoiceConversation = false
     @Published private(set) var voiceConversationStatus = "Ready"
     @Published private(set) var voiceConversationTranscript = ""
+    @Published private(set) var isDemoMode = false
 
     private var api: XIOSClient
     private var connection: MobileLiveConnection
@@ -91,6 +139,77 @@ final class MobileOpenCodexStore: ObservableObject {
         self.profile = profile
         api = XIOSClient(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
         connection = MobileLiveConnection(baseURL: profile.baseURL, token: profile.bearerToken)
+    }
+
+    /// Deterministic, network-isolated state for screenshots and product demos.
+    static func visualFixture() -> MobileOpenCodexStore {
+        let profile = MobileConnectionProfile(
+            baseURL: URL(string: "http://demo-mac.local:3080")!,
+            bearerToken: nil
+        )
+        let store = MobileOpenCodexStore(profile: profile)
+        let now = Date().timeIntervalSince1970 * 1_000
+        let workspace = MobileWorkspace(
+            workspaceId: "workspace-aurora",
+            path: "/Demo/AuroraNotes",
+            title: "Aurora Notes",
+            sessionIds: ["session-sync", "session-export", "session-accessibility"],
+            createdAt: "2026-08-22T00:00:00.000Z",
+            updatedAt: "2026-08-22T01:00:00.000Z"
+        )
+        store.workspaces = [workspace]
+        store.sessions = [
+            MobileSession(
+                sessionId: "session-sync", harnessId: "codex-acp", updatedAt: now,
+                running: true, blank: false, parentSessionId: nil, origin: nil,
+                cwd: workspace.path, agentPreset: nil, projections: nil
+            ),
+            MobileSession(
+                sessionId: "session-export", harnessId: "omp-acp", updatedAt: now - 3_600_000,
+                running: false, blank: false, parentSessionId: nil, origin: nil,
+                cwd: workspace.path, agentPreset: nil, projections: nil
+            ),
+            MobileSession(
+                sessionId: "session-accessibility", harnessId: "dsh", updatedAt: now - 86_400_000,
+                running: false, blank: false, parentSessionId: nil, origin: nil,
+                cwd: workspace.path, agentPreset: "anchored", projections: nil
+            ),
+        ]
+        store.projections = [
+            "session-sync": ["title": .string("Design the offline sync flow")],
+            "session-export": ["title": .string("Add export progress")],
+            "session-accessibility": ["title": .string("Review accessibility labels")],
+        ]
+        store.records["session-sync"] = mobileVisualFixtureRecords(now: now)
+        store.sessionModels = MobileSessionModels(
+            current: .init(provider: "openai-codex", model: "gpt-5.6-sol", reasoningEffort: "medium"),
+            routable: true,
+            groups: [
+                .init(
+                    id: "openai-codex", name: "ChatGPT",
+                    models: [
+                        .init(
+                            id: "gpt-5.6-sol", name: "GPT-5.6-Sol", description: "Demo model",
+                            reasoning: .init(
+                                efforts: [
+                                    .init(id: "low", name: "Low", description: nil),
+                                    .init(id: "medium", name: "Medium", description: nil),
+                                    .init(id: "high", name: "High", description: nil),
+                                ],
+                                defaultEffort: "medium"
+                            )
+                        ),
+                    ]
+                ),
+            ],
+            failures: []
+        )
+        store.selectedHarnessId = "codex-acp"
+        store.selectedWorkspaceId = workspace.workspaceId
+        store.connectionState = .connected
+        store.booted = true
+        store.isDemoMode = true
+        return store
     }
 
     var selectedSession: MobileSession? {

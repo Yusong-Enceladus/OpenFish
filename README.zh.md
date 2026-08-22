@@ -1,6 +1,14 @@
 # OpenFish
 
-[English](README.md) | 中文
+<p align="center">
+  <img src="apps/x-macos/Sources/XMac/Assets.xcassets/AppIcon.appiconset/OpenFish-1024.png" alt="OpenFish 应用图标" width="112">
+</p>
+
+<p align="center">一个承载多种编程智能体 Harness 的原生入口：Mac 上用，手机上继续。</p>
+
+<p align="center"><a href="README.md">English</a> · 中文</p>
+
+![使用合成演示任务的 OpenFish macOS 界面](docs/assets/openfish-macos-demo.png)
 
 OpenFish 是一个原生 macOS 与 iPhone 编程智能体客户端：用户只安装一个应用，选择自己要用的
 Harness，并在 Mac 与已配对的 iPhone 上继续使用同一批持久任务、审批、模型控制和实时活动。
@@ -8,6 +16,12 @@ Harness，并在 Mac 与已配对的 iPhone 上继续使用同一批持久任务
 OpenFish 构建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 （`dsh`）之上，并保留其 MIT 许可证与第三方声明。DSH 负责 Host、会话日志、工具、权限和插件组合；
 OpenFish 增加原生壳子、托管式 Harness 安装、ACP 兼容层与跨设备体验。
+
+<p align="center">
+  <img src="docs/assets/openfish-iphone-demo.png" alt="OpenFish iPhone 合成远程任务界面" width="320">
+</p>
+
+以上图片来自 OpenFish 确定性、网络隔离的 Demo 状态，不含真实账号、主机名、项目路径、任务或对话。
 
 ## Public Alpha
 
@@ -49,6 +63,12 @@ pnpm run release:openfish:preflight
 ```
 
 该检查会主动拒绝脏工作区或缺失发布文件的源码树。
+
+## 运行截图安全的 Demo
+
+Mac 与 iPhone 原生应用都支持 `--openfish-demo` 启动参数。Demo 模式不会启动内置 Host，也不会连接
+远程电脑；它只用生产 SwiftUI 界面渲染合成的项目、Harness、模型与对话。详见
+[Demo 与截图指南](docs/openfish-demo-mode.md)。
 
 ## DeepSeek Harness 开发
 

@@ -5,7 +5,8 @@ import UniformTypeIdentifiers
 
 public struct OpenCodexIOSView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var store = MobileOpenCodexStore()
+    @StateObject private var store: MobileOpenCodexStore
+    private let shouldBoot: Bool
     @State private var importsPresented = false
     @State private var searchText = ""
     @State private var expandedWorkspaceIDs: Set<String> = []
@@ -15,7 +16,16 @@ public struct OpenCodexIOSView: View {
     @State private var selectedComputer = "all"
     @State private var showsActivity = false
 
-    public init() {}
+    public init() {
+        let demo = ProcessInfo.processInfo.arguments.contains("--openfish-demo")
+        _store = StateObject(wrappedValue: demo ? .visualFixture() : MobileOpenCodexStore())
+        shouldBoot = !demo
+    }
+
+    init(store: MobileOpenCodexStore, shouldBoot: Bool) {
+        _store = StateObject(wrappedValue: store)
+        self.shouldBoot = shouldBoot
+    }
 
     public var body: some View {
         NavigationStack {
@@ -194,7 +204,7 @@ public struct OpenCodexIOSView: View {
                 Text(store.errorMessage ?? "")
             }
             .task {
-                await store.boot()
+                if shouldBoot { await store.boot() }
                 chooseInitialWorkspaceIfNeeded()
             }
             .onChange(of: store.workspaces) { _, _ in chooseInitialWorkspaceIfNeeded() }
@@ -440,6 +450,14 @@ private struct MobileRemoteHeader: View {
             Spacer()
             Text("OpenFish")
                 .font(.system(size: 17, weight: .semibold))
+            if store.isDemoMode {
+                Text("DEMO")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .background(Color.secondary.opacity(0.13), in: Capsule())
+            }
             Spacer()
 
             Button { showsActivity.toggle() } label: {

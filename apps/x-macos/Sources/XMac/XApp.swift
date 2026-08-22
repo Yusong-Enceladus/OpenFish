@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum OpenFishDemoMode {
+    static let isEnabled = ProcessInfo.processInfo.arguments.contains("--openfish-demo")
+}
+
 private enum OpenFishLegacyPreferences {
     private static let legacyDomain = "ai.deepseek.opencodex"
     private static let migrationMarker = "OpenFish.didMigrateLegacyPreferences.v1"
@@ -19,13 +23,17 @@ private enum OpenFishLegacyPreferences {
 @main
 struct OpenCodexApp: App {
     init() {
+        guard !OpenFishDemoMode.isEnabled else { return }
         OpenFishLegacyPreferences.migrateIfNeeded()
         OpenFishHostRuntime.bootstrapIfNeeded()
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(
+                store: OpenFishDemoMode.isEnabled ? .visualFixture() : nil,
+                shouldBoot: !OpenFishDemoMode.isEnabled
+            )
                 .frame(minWidth: 980, minHeight: 680)
         }
         .defaultSize(width: 1_260, height: 820)

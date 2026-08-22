@@ -1,6 +1,16 @@
 # OpenFish
 
-English | [中文](README.zh.md)
+<p align="center">
+  <img src="apps/x-macos/Sources/XMac/Assets.xcassets/AppIcon.appiconset/OpenFish-1024.png" alt="OpenFish app icon" width="112">
+</p>
+
+<p align="center">
+  One native home for coding-agent Harnesses — on your Mac and in your pocket.
+</p>
+
+<p align="center">English · <a href="README.zh.md">中文</a></p>
+
+![OpenFish on macOS with synthetic demo tasks](docs/assets/openfish-macos-demo.png)
 
 OpenFish is a native macOS and iPhone home for interchangeable coding-agent
 Harnesses. Install one app, choose a Harness, and keep the same durable tasks,
@@ -12,6 +22,13 @@ OpenFish is built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 session log, tools, permissions, and plugin composition; OpenFish adds the native
 shell, managed Harness installation, ACP compatibility layer, and cross-device
 experience.
+
+<p align="center">
+  <img src="docs/assets/openfish-iphone-demo.png" alt="OpenFish on iPhone showing synthetic remote tasks" width="320">
+</p>
+
+The images above use OpenFish's deterministic, network-isolated demo state. No
+real account, hostname, project path, task, or conversation appears in them.
 
 ## Public Alpha
 
@@ -61,6 +78,13 @@ pnpm run release:openfish:preflight
 ```
 
 The preflight deliberately rejects a dirty or incomplete source tree.
+
+## Run the screenshot-safe demo
+
+The native apps recognize the `--openfish-demo` launch argument. Demo mode does
+not boot the bundled Host or connect to a remote computer; it renders synthetic
+projects, Harnesses, models, and conversations through the production SwiftUI
+views. See the [demo and screenshot guide](docs/openfish-demo-mode.md).
 
 ## DeepSeek Harness development
 

@@ -70,9 +70,7 @@ final class MobileLocalVoice: NSObject, ObservableObject {
         stopSpeaking()
         stopListening()
         errorMessage = nil
-        let authorization = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
-        }
+        let authorization = await Self.requestSpeechAuthorization()
         guard authorization == .authorized else {
             errorMessage = "Speech permission is required."
             return
@@ -98,30 +96,62 @@ final class MobileLocalVoice: NSObject, ObservableObject {
             self.request = request
             handler = onTranscript
             let input = engine.inputNode
-            input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1_024, format: input.outputFormat(forBus: 0)) { [weak request] buffer, _ in
-                request?.append(buffer)
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                errorMessage = "No microphone input is available. Check the input device in Settings."
+                stopListening()
+                return
             }
+            input.removeTap(onBus: 0)
+            Self.installInputTap(on: input, format: format, request: request)
             hasInputTap = true
             engine.prepare()
             try engine.start()
             isListening = true
-            task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    guard self.task != nil else { return }
-                    if let result {
-                        self.handler?(result.bestTranscription.formattedString, result.isFinal)
-                        if result.isFinal { self.stopListening() }
-                    } else if let error {
-                        self.errorMessage = error.localizedDescription
-                        self.stopListening()
-                    }
-                }
-            }
+            task = Self.makeRecognitionTask(recognizer: recognizer, request: request, service: self)
         } catch {
             errorMessage = error.localizedDescription
             stopListening()
+        }
+    }
+
+    nonisolated private static func installInputTap(
+        on input: AVAudioInputNode,
+        format: AVAudioFormat,
+        request: SFSpeechAudioBufferRecognitionRequest
+    ) {
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
+            request?.append(buffer)
+        }
+    }
+
+    nonisolated private static func makeRecognitionTask(
+        recognizer: SFSpeechRecognizer,
+        request: SFSpeechAudioBufferRecognitionRequest,
+        service: MobileLocalVoice
+    ) -> SFSpeechRecognitionTask {
+        recognizer.recognitionTask(with: request) { [weak service] result, error in
+            let update = result.map { ($0.bestTranscription.formattedString, $0.isFinal) }
+            let failure = error?.localizedDescription
+            Task { @MainActor in
+                guard let service, service.task != nil else { return }
+                if let update {
+                    let (text, isFinal) = update
+                    service.handler?(text, isFinal)
+                    if isFinal { service.stopListening() }
+                } else if let failure {
+                    service.errorMessage = failure
+                    service.stopListening()
+                }
+            }
+        }
+    }
+
+    nonisolated private static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
         }
     }
 

@@ -8,7 +8,7 @@ struct VisualSmoke {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
 
-        guard OpenCodexStore.visualFixture().currentModelLabel == "DeepSeek V4 Flash · high" else {
+        guard OpenCodexStore.visualFixture().currentModelLabel == "GPT-5.6-Sol · Medium" else {
             throw VisualSmokeError.modelEffortIsNotVisible
         }
 
