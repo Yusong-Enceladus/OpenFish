@@ -1,0 +1,30 @@
+{
+  "name": "@deepseek-ai/opencodex-cli",
+  "description": "OpenCodex CLI: Codex-compatible product surface over the DSH runtime",
+  "version": "0.1.0-x.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "opencodex": "lib/bin.js",
+    "x": "lib/bin.js"
+  },
+  "files": [
+    "lib/bin.js",
+    "lib/types/**/*.d.ts",
+    "src/generated/*.json"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "profile": {}
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "js-yaml": "^4.3.1",
+    "smol-toml": "^1.7.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9"
+  }
+}

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-iphone-remote-home-hierarchy.md
+2026-08-20-iphone-remote-home-hierarchy.md: a4202fcbc5982927d58644f7fae34ec684fd48c8
+2026-08-20-iphone-remote-home-hierarchy.zh.md: 9c61b5946f6bbc546f849c92f5e84dbaa6179a53

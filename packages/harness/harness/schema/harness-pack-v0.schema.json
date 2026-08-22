@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfish.dev/schemas/harness-pack-v0.json",
+  "title": "OpenFish Harness Pack v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "version", "publisher", "verified", "protocol", "graph", "source"],
+  "allOf": [
+    { "if": { "properties": { "protocol": { "not": { "const": "dsh" } } } }, "then": { "required": ["distribution"] } }
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 0 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "publisher": { "type": "string", "minLength": 1 },
+    "license": { "type": "string" },
+    "repository": { "type": "string", "format": "uri" },
+    "icon": { "type": "string", "format": "uri" },
+    "verified": { "type": "boolean" },
+    "protocol": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+    "source": { "enum": ["builtin", "acp-registry", "user"] },
+    "authMethods": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "kind", "fields"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["agent", "environment", "terminal"] },
+          "fields": { "type": "array", "items": { "$ref": "#/$defs/authField" } },
+          "terminal": { "$ref": "#/$defs/terminalAuth" }
+        }
+      }
+    },
+    "distribution": { "$ref": "#/$defs/distribution" },
+    "graph": { "$ref": "#/$defs/graph" }
+  },
+  "$defs": {
+    "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+    "authField": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "name", "required", "secret"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }, "name": { "type": "string", "minLength": 1 },
+        "env": { "type": "string", "minLength": 1 }, "required": { "type": "boolean" },
+        "secret": { "type": "boolean" }, "placeholder": { "type": "string" }
+      }
+    },
+    "terminalAuth": {
+      "type": "object", "additionalProperties": false, "required": ["args", "env"],
+      "properties": { "args": { "type": "array", "items": { "type": "string" } }, "env": { "$ref": "#/$defs/environment" } }
+    },
+    "distribution": {
+      "oneOf": [
+        { "$ref": "#/$defs/packageDistribution" },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "archive", "command", "args", "env"],
+          "properties": { "kind": { "const": "binary" }, "archive": { "type": "string", "format": "uri" },
+            "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }, "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } }, "env": { "$ref": "#/$defs/environment" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "command", "args", "env"],
+          "properties": { "kind": { "const": "executable" }, "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } }, "env": { "$ref": "#/$defs/environment" } } }
+      ]
+    },
+    "packageDistribution": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "package", "args", "env"],
+      "properties": { "kind": { "enum": ["npx", "bunx", "uvx"] }, "package": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } }, "env": { "$ref": "#/$defs/environment" } }
+    },
+    "graph": {
+      "type": "object", "additionalProperties": false, "required": ["level", "nodes", "edges"],
+      "properties": {
+        "level": { "enum": ["opaque", "observable", "composable"] },
+        "nodes": { "type": "array", "items": { "type": "object", "additionalProperties": false,
+          "required": ["id", "kind", "title", "editable"], "properties": {
+            "id": { "type": "string", "minLength": 1 }, "kind": { "type": "string", "minLength": 1 },
+            "title": { "type": "string", "minLength": 1 }, "editable": { "type": "boolean" },
+            "config": { "type": "object" }
+          } } },
+        "edges": { "type": "array", "items": { "type": "object", "additionalProperties": false,
+          "required": ["from", "to"], "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 } } } }
+      }
+    }
+  }
+}

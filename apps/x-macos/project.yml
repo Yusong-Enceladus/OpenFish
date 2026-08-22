@@ -1,0 +1,44 @@
+name: XMac
+options:
+  bundleIdPrefix: app.openfish
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: NO
+    SWIFT_VERSION: 6.0
+targets:
+  XMac:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/XMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.openfish.mac
+        PRODUCT_NAME: OpenFish
+        INFOPLIST_KEY_CFBundleDisplayName: OpenFish
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: OpenFish uses the microphone only for on-device dictation.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: OpenFish converts speech to text on this Mac without a cloud fallback.
+        GENERATE_INFOPLIST_FILE: YES
+  XMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - UITests
+    dependencies:
+      - target: XMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.openfish.mac.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  XMac:
+    build:
+      targets:
+        XMac: all
+        XMacUITests: [test]
+    test:
+      targets:
+        - XMacUITests

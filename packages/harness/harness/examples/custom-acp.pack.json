@@ -1,0 +1,19 @@
+{
+  "$schema": "../schema/harness-pack-v0.schema.json",
+  "schemaVersion": 0,
+  "id": "example.custom-acp",
+  "name": "Example custom ACP Harness",
+  "version": "1.0.0",
+  "description": "Replace the package and metadata with an exact version of your ACP agent.",
+  "publisher": "Example publisher",
+  "verified": false,
+  "protocol": "acp",
+  "source": "user",
+  "distribution": { "kind": "npx", "package": "example-acp-agent@1.0.0", "args": ["--acp"], "env": {} },
+  "authMethods": [],
+  "graph": {
+    "level": "opaque",
+    "nodes": [{ "id": "runtime", "kind": "harness-runtime", "title": "ACP runtime", "editable": false }],
+    "edges": []
+  }
+}

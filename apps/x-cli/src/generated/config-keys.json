@@ -1,0 +1,770 @@
+{
+  "source": "codex-parity/generated/codex-baseline.json",
+  "keys": [
+    {
+      "key": "approval_policy",
+      "category": "approval_policy",
+      "baseline_id": "CFG-approval-policy"
+    },
+    {
+      "key": "model",
+      "category": "model",
+      "baseline_id": "CFG-model"
+    },
+    {
+      "key": "model_reasoning_effort",
+      "category": "model_reasoning_effort",
+      "baseline_id": "CFG-model-reasoning-effort"
+    },
+    {
+      "key": "service_tier",
+      "category": "service_tier",
+      "baseline_id": "CFG-service-tier"
+    },
+    {
+      "key": "personality",
+      "category": "personality",
+      "baseline_id": "CFG-personality"
+    },
+    {
+      "key": "developer_instructions",
+      "category": "developer_instructions",
+      "baseline_id": "CFG-developer-instructions"
+    },
+    {
+      "key": "sandbox_mode",
+      "category": "sandbox_mode",
+      "baseline_id": "CFG-sandbox-mode"
+    },
+    {
+      "key": "approvals_reviewer",
+      "category": "approvals_reviewer",
+      "baseline_id": "CFG-approvals-reviewer"
+    },
+    {
+      "key": "notify",
+      "category": "notify",
+      "baseline_id": "CFG-notify"
+    },
+    {
+      "key": "model_providers.openai_http.name",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-openai-http-name"
+    },
+    {
+      "key": "model_providers.openai_http.base_url",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-openai-http-base-url"
+    },
+    {
+      "key": "model_providers.openai_http.wire_api",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-openai-http-wire-api"
+    },
+    {
+      "key": "model_providers.openai_http.requires_openai_auth",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-openai-http-requires-openai-auth"
+    },
+    {
+      "key": "model_providers.openai_http.supports_websockets",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-openai-http-supports-websockets"
+    },
+    {
+      "key": "model_providers.httpai.name",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-httpai-name"
+    },
+    {
+      "key": "model_providers.httpai.base_url",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-httpai-base-url"
+    },
+    {
+      "key": "model_providers.httpai.wire_api",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-httpai-wire-api"
+    },
+    {
+      "key": "model_providers.httpai.requires_openai_auth",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-httpai-requires-openai-auth"
+    },
+    {
+      "key": "model_providers.httpai.supports_websockets",
+      "category": "model_providers",
+      "baseline_id": "CFG-model-providers-httpai-supports-websockets"
+    },
+    {
+      "key": "features.hooks",
+      "category": "features",
+      "baseline_id": "CFG-features-hooks"
+    },
+    {
+      "key": "features.goals",
+      "category": "features",
+      "baseline_id": "CFG-features-goals"
+    },
+    {
+      "key": "features.js_repl",
+      "category": "features",
+      "baseline_id": "CFG-features-js-repl"
+    },
+    {
+      "key": "marketplaces.openai-bundled.last_updated",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-bundled-last-updated"
+    },
+    {
+      "key": "marketplaces.openai-bundled.source_type",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-bundled-source-type"
+    },
+    {
+      "key": "marketplaces.openai-bundled.source",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-bundled-source"
+    },
+    {
+      "key": "marketplaces.openai-primary-runtime.last_updated",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-primary-runtime-last-updated"
+    },
+    {
+      "key": "marketplaces.openai-primary-runtime.source_type",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-primary-runtime-source-type"
+    },
+    {
+      "key": "marketplaces.openai-primary-runtime.source",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-openai-primary-runtime-source"
+    },
+    {
+      "key": "marketplaces.financial-services-plugins.last_updated",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-financial-services-plugins-last-updated"
+    },
+    {
+      "key": "marketplaces.financial-services-plugins.source_type",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-financial-services-plugins-source-type"
+    },
+    {
+      "key": "marketplaces.financial-services-plugins.source",
+      "category": "marketplaces",
+      "baseline_id": "CFG-marketplaces-financial-services-plugins-source"
+    },
+    {
+      "key": "mcp_servers.wechat-mcp-pro.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-wechat-mcp-pro-command"
+    },
+    {
+      "key": "mcp_servers.wechat-mcp-pro.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-wechat-mcp-pro-args"
+    },
+    {
+      "key": "mcp_servers.wechat-mcp-pro.enabled",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-wechat-mcp-pro-enabled"
+    },
+    {
+      "key": "mcp_servers.node_repl.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-args"
+    },
+    {
+      "key": "mcp_servers.node_repl.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-command"
+    },
+    {
+      "key": "mcp_servers.node_repl.startup_timeout_sec",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-startup-timeout-sec"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-native-pipe-connect-timeout-ms"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_NODE_MODULE_DIRS",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-node-module-dirs"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_NODE_PATH",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-node-path"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_TRUSTED_CODE_PATHS",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-trusted-code-paths"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.CODEX_HOME",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-codex-home"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-trusted-browser-client-sha256s"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.BROWSER_USE_AVAILABLE_BACKENDS",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-browser-use-available-backends"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-instructions-use-case-browser"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-instructions-use-case-chrome"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.NODE_REPL_INSTRUCTIONS_USE_CASE_COMPUTER_USE",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-node-repl-instructions-use-case-computer-use"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.BROWSER_USE_CODEX_APP_BUILD_FLAVOR",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-browser-use-codex-app-build-flavor"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.BROWSER_USE_CODEX_APP_VERSION",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-browser-use-codex-app-version"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.SKY_CUA_SERVICE_PATH",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-sky-cua-service-path"
+    },
+    {
+      "key": "mcp_servers.node_repl.env.CODEX_CLI_PATH",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-node-repl-env-codex-cli-path"
+    },
+    {
+      "key": "mcp_servers.computer-use.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-computer-use-command"
+    },
+    {
+      "key": "mcp_servers.computer-use.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-computer-use-args"
+    },
+    {
+      "key": "mcp_servers.computer-use.cwd",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-computer-use-cwd"
+    },
+    {
+      "key": "mcp_servers.computer-use.enabled",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-computer-use-enabled"
+    },
+    {
+      "key": "mcp_servers.openaiDeveloperDocs.url",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-openaideveloperdocs-url"
+    },
+    {
+      "key": "mcp_servers.claude_handoff.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-claude-handoff-command"
+    },
+    {
+      "key": "mcp_servers.claude_handoff.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-claude-handoff-args"
+    },
+    {
+      "key": "mcp_servers.claude_handoff.enabled",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-claude-handoff-enabled"
+    },
+    {
+      "key": "mcp_servers.claude_handoff.startup_timeout_sec",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-claude-handoff-startup-timeout-sec"
+    },
+    {
+      "key": "mcp_servers.claude_handoff.tool_timeout_sec",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-claude-handoff-tool-timeout-sec"
+    },
+    {
+      "key": "mcp_servers.deepseek_handoff.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-deepseek-handoff-command"
+    },
+    {
+      "key": "mcp_servers.deepseek_handoff.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-deepseek-handoff-args"
+    },
+    {
+      "key": "mcp_servers.deepseek_handoff.enabled",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-deepseek-handoff-enabled"
+    },
+    {
+      "key": "mcp_servers.deepseek_handoff.startup_timeout_sec",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-deepseek-handoff-startup-timeout-sec"
+    },
+    {
+      "key": "mcp_servers.deepseek_handoff.tool_timeout_sec",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-deepseek-handoff-tool-timeout-sec"
+    },
+    {
+      "key": "mcp_servers.codex.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-codex-command"
+    },
+    {
+      "key": "mcp_servers.codex.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-codex-args"
+    },
+    {
+      "key": "mcp_servers.codex-image.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-codex-image-command"
+    },
+    {
+      "key": "mcp_servers.codex-image.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-codex-image-args"
+    },
+    {
+      "key": "mcp_servers.isaac-mcp.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-isaac-mcp-command"
+    },
+    {
+      "key": "mcp_servers.isaac-mcp.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-isaac-mcp-args"
+    },
+    {
+      "key": "mcp_servers.overleaf.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-overleaf-command"
+    },
+    {
+      "key": "mcp_servers.overleaf.env.OVERLEAF_CONFIG_FILE",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-overleaf-env-overleaf-config-file"
+    },
+    {
+      "key": "mcp_servers.refchecker.command",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-refchecker-command"
+    },
+    {
+      "key": "mcp_servers.refchecker.args",
+      "category": "mcp_servers",
+      "baseline_id": "CFG-mcp-servers-refchecker-args"
+    },
+    {
+      "key": "plugins.documents@openai-primary-runtime.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-documents-openai-primary-runtime-enabled"
+    },
+    {
+      "key": "plugins.github@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-github-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.gmail@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-gmail-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.outlook-calendar@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-outlook-calendar-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.outlook-email@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-outlook-email-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.presentations@openai-primary-runtime.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-presentations-openai-primary-runtime-enabled"
+    },
+    {
+      "key": "plugins.spreadsheets@openai-primary-runtime.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-spreadsheets-openai-primary-runtime-enabled"
+    },
+    {
+      "key": "plugins.zotero@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-zotero-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.latex@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-latex-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.computer-use@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-computer-use-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.pdf@openai-primary-runtime.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-pdf-openai-primary-runtime-enabled"
+    },
+    {
+      "key": "plugins.visualize@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-visualize-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.template-creator@openai-primary-runtime.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-template-creator-openai-primary-runtime-enabled"
+    },
+    {
+      "key": "plugins.build-macos-apps@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-build-macos-apps-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.codex-security@openai-curated.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-codex-security-openai-curated-enabled"
+    },
+    {
+      "key": "plugins.chrome@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-chrome-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.browser@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-browser-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.sites@openai-bundled.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-sites-openai-bundled-enabled"
+    },
+    {
+      "key": "plugins.equity-research@financial-services-plugins.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-equity-research-financial-services-plugins-enabled"
+    },
+    {
+      "key": "plugins.financial-analysis@financial-services-plugins.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-financial-analysis-financial-services-plugins-enabled"
+    },
+    {
+      "key": "plugins.wealth-management@financial-services-plugins.enabled",
+      "category": "plugins",
+      "baseline_id": "CFG-plugins-wealth-management-financial-services-plugins-enabled"
+    },
+    {
+      "key": "projects./.trust_level",
+      "category": "projects",
+      "baseline_id": "CFG-projects-trust-level"
+    },
+    {
+      "key": "shell_environment_policy.inherit",
+      "category": "shell_environment_policy",
+      "baseline_id": "CFG-shell-environment-policy-inherit"
+    },
+    {
+      "key": "shell_environment_policy.set.BROWSER_USE_AVAILABLE_BACKENDS",
+      "category": "shell_environment_policy",
+      "baseline_id": "CFG-shell-environment-policy-set-browser-use-available-backends"
+    },
+    {
+      "key": "shell_environment_policy.set.NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S",
+      "category": "shell_environment_policy",
+      "baseline_id": "CFG-shell-environment-policy-set-node-repl-trusted-browser-client-sha256s"
+    },
+    {
+      "key": "shell_environment_policy.set.NODE_REPL_TRUSTED_CODE_PATHS",
+      "category": "shell_environment_policy",
+      "baseline_id": "CFG-shell-environment-policy-set-node-repl-trusted-code-paths"
+    },
+    {
+      "key": "desktop.ambient-suggestions-enabled",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-ambient-suggestions-enabled"
+    },
+    {
+      "key": "desktop.appearanceTheme",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancetheme"
+    },
+    {
+      "key": "desktop.appearanceLightCodeThemeId",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightcodethemeid"
+    },
+    {
+      "key": "desktop.appearanceDarkCodeThemeId",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkcodethemeid"
+    },
+    {
+      "key": "desktop.sansFontSize",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-sansfontsize"
+    },
+    {
+      "key": "desktop.codeFontSize",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-codefontsize"
+    },
+    {
+      "key": "desktop.dictationDictionary",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-dictationdictionary"
+    },
+    {
+      "key": "desktop.preventSleepWhileRunning",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-preventsleepwhilerunning"
+    },
+    {
+      "key": "desktop.keepRemoteControlAwakeWhilePluggedIn",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-keepremotecontrolawakewhilepluggedin"
+    },
+    {
+      "key": "desktop.notifications-turn-mode",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-notifications-turn-mode"
+    },
+    {
+      "key": "desktop.selected-avatar-id",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-selected-avatar-id"
+    },
+    {
+      "key": "desktop.conversationDetailMode",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-conversationdetailmode"
+    },
+    {
+      "key": "desktop.hotkey-window-projectless-default-enabled",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-hotkey-window-projectless-default-enabled"
+    },
+    {
+      "key": "desktop.mac-menu-bar-enabled",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-mac-menu-bar-enabled"
+    },
+    {
+      "key": "desktop.followUpQueueMode",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-followupqueuemode"
+    },
+    {
+      "key": "desktop.dock-icon-preference",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-dock-icon-preference"
+    },
+    {
+      "key": "desktop.usePointerCursors",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-usepointercursors"
+    },
+    {
+      "key": "desktop.show-context-window-usage",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-show-context-window-usage"
+    },
+    {
+      "key": "desktop.enabled-reasoning-efforts",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-enabled-reasoning-efforts"
+    },
+    {
+      "key": "desktop.realtimeVoiceScreenContextEnabled",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-realtimevoicescreencontextenabled"
+    },
+    {
+      "key": "desktop.avatar-overlay-mascot-width-px",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-avatar-overlay-mascot-width-px"
+    },
+    {
+      "key": "desktop.external-agent-import-sync-enabled",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-external-agent-import-sync-enabled"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.accent",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-accent"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.contrast",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-contrast"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.ink",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-ink"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.opaqueWindows",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-opaquewindows"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.surface",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-surface"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.fonts.code",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-fonts-code"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.fonts.ui",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-fonts-ui"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.semanticColors.diffAdded",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-semanticcolors-diffadded"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.semanticColors.diffRemoved",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-semanticcolors-diffremoved"
+    },
+    {
+      "key": "desktop.appearanceLightChromeTheme.semanticColors.skill",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancelightchrometheme-semanticcolors-skill"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.accent",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-accent"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.contrast",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-contrast"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.ink",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-ink"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.opaqueWindows",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-opaquewindows"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.surface",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-surface"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.fonts.code",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-fonts-code"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.fonts.ui",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-fonts-ui"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.semanticColors.diffAdded",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-semanticcolors-diffadded"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.semanticColors.diffRemoved",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-semanticcolors-diffremoved"
+    },
+    {
+      "key": "desktop.appearanceDarkChromeTheme.semanticColors.skill",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-appearancedarkchrometheme-semanticcolors-skill"
+    },
+    {
+      "key": "desktop.open-in-target-preferences.global",
+      "category": "desktop",
+      "baseline_id": "CFG-desktop-open-in-target-preferences-global"
+    },
+    {
+      "key": "tui.model_availability_nux.gpt-5.6-sol",
+      "category": "tui",
+      "baseline_id": "CFG-tui-model-availability-nux-gpt-5-6-sol"
+    },
+    {
+      "key": "tool_suggest.disabled_tools",
+      "category": "tool_suggest",
+      "baseline_id": "CFG-tool-suggest-disabled-tools"
+    },
+    {
+      "key": "Notification",
+      "category": "hooks",
+      "baseline_id": "HOOK-notification"
+    },
+    {
+      "key": "PermissionRequest",
+      "category": "hooks",
+      "baseline_id": "HOOK-permissionrequest"
+    },
+    {
+      "key": "PreToolUse",
+      "category": "hooks",
+      "baseline_id": "HOOK-pretooluse"
+    },
+    {
+      "key": "SessionStart",
+      "category": "hooks",
+      "baseline_id": "HOOK-sessionstart"
+    },
+    {
+      "key": "Stop",
+      "category": "hooks",
+      "baseline_id": "HOOK-stop"
+    },
+    {
+      "key": "UserPromptSubmit",
+      "category": "hooks",
+      "baseline_id": "HOOK-userpromptsubmit"
+    }
+  ]
+}

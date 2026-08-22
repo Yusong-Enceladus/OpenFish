@@ -1,0 +1,5082 @@
+{
+  "binary": "opencodex",
+  "baseline_binary": "codex",
+  "source": "codex-parity/generated/codex-baseline.json",
+  "root_options": [
+    {
+      "flags": [
+        "-c",
+        "--config"
+      ],
+      "arg": "key=value",
+      "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+      "baseline_id": "CLI-OPT-root-c"
+    },
+    {
+      "flags": [
+        "--enable"
+      ],
+      "arg": "FEATURE",
+      "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+      "baseline_id": "CLI-OPT-root-enable"
+    },
+    {
+      "flags": [
+        "--disable"
+      ],
+      "arg": "FEATURE",
+      "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+      "baseline_id": "CLI-OPT-root-disable"
+    },
+    {
+      "flags": [
+        "--remote"
+      ],
+      "arg": "ADDR",
+      "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+      "baseline_id": "CLI-OPT-root-remote"
+    },
+    {
+      "flags": [
+        "--remote-auth-token-env"
+      ],
+      "arg": "ENV_VAR",
+      "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+      "baseline_id": "CLI-OPT-root-remote-auth-token-env"
+    },
+    {
+      "flags": [
+        "--strict-config"
+      ],
+      "arg": "",
+      "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+      "baseline_id": "CLI-OPT-root-strict-config"
+    },
+    {
+      "flags": [
+        "-i",
+        "--image"
+      ],
+      "arg": "FILE",
+      "description": "... Optional image(s) to attach to the initial prompt",
+      "baseline_id": "CLI-OPT-root-i"
+    },
+    {
+      "flags": [
+        "-m",
+        "--model"
+      ],
+      "arg": "MODEL",
+      "description": "Model the agent should use",
+      "baseline_id": "CLI-OPT-root-m"
+    },
+    {
+      "flags": [
+        "--oss"
+      ],
+      "arg": "",
+      "description": "Use open-source provider",
+      "baseline_id": "CLI-OPT-root-oss"
+    },
+    {
+      "flags": [
+        "--local-provider"
+      ],
+      "arg": "OSS_PROVIDER",
+      "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+      "baseline_id": "CLI-OPT-root-local-provider"
+    },
+    {
+      "flags": [
+        "-p",
+        "--profile"
+      ],
+      "arg": "CONFIG_PROFILE_V2",
+      "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+      "baseline_id": "CLI-OPT-root-p"
+    },
+    {
+      "flags": [
+        "-s",
+        "--sandbox"
+      ],
+      "arg": "SANDBOX_MODE",
+      "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+      "baseline_id": "CLI-OPT-root-s"
+    },
+    {
+      "flags": [
+        "--approve-for-me"
+      ],
+      "arg": "",
+      "description": "Route approval requests through automatic review using the workspace-write sandbox",
+      "baseline_id": "CLI-OPT-root-approve-for-me"
+    },
+    {
+      "flags": [
+        "--dangerously-bypass-approvals-and-sandbox"
+      ],
+      "arg": "",
+      "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+      "baseline_id": "CLI-OPT-root-dangerously-bypass-approvals-and-sandbox"
+    },
+    {
+      "flags": [
+        "--dangerously-bypass-hook-trust"
+      ],
+      "arg": "",
+      "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+      "baseline_id": "CLI-OPT-root-dangerously-bypass-hook-trust"
+    },
+    {
+      "flags": [
+        "--add-dir"
+      ],
+      "arg": "DIR",
+      "description": "Additional directories that should be writable alongside the primary workspace",
+      "baseline_id": "CLI-OPT-root-add-dir"
+    },
+    {
+      "flags": [
+        "-a",
+        "--ask-for-approval"
+      ],
+      "arg": "APPROVAL_POLICY",
+      "description": "Configure when the model requires human approval before executing a command Possible values: command that is not in the \"trusted\" set",
+      "baseline_id": "CLI-OPT-root-a"
+    },
+    {
+      "flags": [
+        "--search"
+      ],
+      "arg": "",
+      "description": "Enable live web search. When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval)",
+      "baseline_id": "CLI-OPT-root-search"
+    },
+    {
+      "flags": [
+        "--no-alt-screen"
+      ],
+      "arg": "",
+      "description": "Disable alternate screen mode Runs the TUI in inline mode, preserving terminal scrollback history.",
+      "baseline_id": "CLI-OPT-root-no-alt-screen"
+    },
+    {
+      "flags": [
+        "-h",
+        "--help"
+      ],
+      "arg": "",
+      "description": "Print help (see a summary with '-h')",
+      "baseline_id": "CLI-OPT-root-h"
+    },
+    {
+      "flags": [
+        "-V",
+        "--version"
+      ],
+      "arg": "",
+      "description": "Print version",
+      "baseline_id": "CLI-OPT-root-v"
+    }
+  ],
+  "commands": [
+    {
+      "path": "app",
+      "name": "app",
+      "description": "Launch the Desktop app (opens the app installer if missing)",
+      "arguments": [
+        "[path]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-c"
+        },
+        {
+          "flags": [
+            "--download-url"
+          ],
+          "arg": "DOWNLOAD_URL_OVERRIDE",
+          "description": "Override the app installer download URL (advanced)",
+          "baseline_id": "CLI-OPT-app-download-url"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server",
+      "name": "app-server",
+      "description": "[experimental] Run the app server or related tooling",
+      "arguments": [
+        "[command]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-disable"
+        },
+        {
+          "flags": [
+            "--code-mode-host"
+          ],
+          "arg": "WS_URL",
+          "description": "Connect to a remote code-mode host instead of starting a local host",
+          "baseline_id": "CLI-OPT-app-server-code-mode-host"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-app-server-strict-config"
+        },
+        {
+          "flags": [
+            "--listen"
+          ],
+          "arg": "URL",
+          "description": "Transport endpoint URL. Supported values: `stdio://` (default), `unix://`, `unix://PATH`, `ws://IP:PORT`, `off` [default: stdio://]",
+          "baseline_id": "CLI-OPT-app-server-listen"
+        },
+        {
+          "flags": [
+            "--stdio"
+          ],
+          "arg": "",
+          "description": "Use stdio as the transport (equivalent to `--listen stdio://`)",
+          "baseline_id": "CLI-OPT-app-server-stdio"
+        },
+        {
+          "flags": [
+            "--analytics-default-enabled"
+          ],
+          "arg": "",
+          "description": "Controls whether analytics are enabled by default. Analytics are disabled by default for app-server. Users have to explicitly opt in via the `analytics` section in the config.toml file. However, for first-party use cases like the VSCode IDE extension, we default analytics to be enabled by default by setting this flag. Users can still opt out by setting this in their config.toml: ```toml [analytics] enabled = false ``` See https://developers.openai.com/codex/config-advanced/#metrics for more details.",
+          "baseline_id": "CLI-OPT-app-server-analytics-default-enabled"
+        },
+        {
+          "flags": [
+            "--ws-auth"
+          ],
+          "arg": "MODE",
+          "description": "Websocket auth mode for non-loopback listeners Possible values: capability-token, signed-bearer-token",
+          "baseline_id": "CLI-OPT-app-server-ws-auth"
+        },
+        {
+          "flags": [
+            "--ws-token-file"
+          ],
+          "arg": "PATH",
+          "description": "Absolute path to the capability-token file",
+          "baseline_id": "CLI-OPT-app-server-ws-token-file"
+        },
+        {
+          "flags": [
+            "--ws-token-sha256"
+          ],
+          "arg": "HEX",
+          "description": "Hex-encoded SHA-256 digest of the capability token",
+          "baseline_id": "CLI-OPT-app-server-ws-token-sha256"
+        },
+        {
+          "flags": [
+            "--ws-shared-secret-file"
+          ],
+          "arg": "PATH",
+          "description": "Absolute path to the shared secret file for signed JWT bearer tokens",
+          "baseline_id": "CLI-OPT-app-server-ws-shared-secret-file"
+        },
+        {
+          "flags": [
+            "--ws-issuer"
+          ],
+          "arg": "ISSUER",
+          "description": "Expected issuer for signed JWT bearer tokens",
+          "baseline_id": "CLI-OPT-app-server-ws-issuer"
+        },
+        {
+          "flags": [
+            "--ws-audience"
+          ],
+          "arg": "AUDIENCE",
+          "description": "Expected audience for signed JWT bearer tokens",
+          "baseline_id": "CLI-OPT-app-server-ws-audience"
+        },
+        {
+          "flags": [
+            "--ws-max-clock-skew-seconds"
+          ],
+          "arg": "SECONDS",
+          "description": "Maximum clock skew when validating signed JWT bearer tokens",
+          "baseline_id": "CLI-OPT-app-server-ws-max-clock-skew-seconds"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon",
+      "name": "daemon",
+      "description": "Manage the local app-server daemon",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/bootstrap",
+      "name": "bootstrap",
+      "description": "Install durable local app-server management for SSH-driven use",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-bootstrap-c"
+        },
+        {
+          "flags": [
+            "--remote-control"
+          ],
+          "arg": "",
+          "description": "Launch the managed app-server with remote control enabled",
+          "baseline_id": "CLI-OPT-app-server-daemon-bootstrap-remote-control"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-bootstrap-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-bootstrap-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-bootstrap-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/disable-remote-control",
+      "name": "disable-remote-control",
+      "description": "Disable remote control for future starts and a currently running managed daemon",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-disable-remote-control-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-disable-remote-control-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-disable-remote-control-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-disable-remote-control-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/enable-remote-control",
+      "name": "enable-remote-control",
+      "description": "Enable remote control for future starts and a currently running managed daemon",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-enable-remote-control-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-enable-remote-control-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-enable-remote-control-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-enable-remote-control-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/restart",
+      "name": "restart",
+      "description": "Restart the local app server daemon",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-restart-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-restart-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-restart-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-restart-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/start",
+      "name": "start",
+      "description": "Start the local app server daemon if it is not already running",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-start-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-start-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-start-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-start-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/stop",
+      "name": "stop",
+      "description": "Stop the local app server daemon",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-stop-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-stop-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-stop-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-stop-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/daemon/version",
+      "name": "version",
+      "description": "Print local CLI and running app-server versions as JSON",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-daemon-version-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-daemon-version-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-daemon-version-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-daemon-version-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/generate-json-schema",
+      "name": "generate-json-schema",
+      "description": "[experimental] Generate JSON Schema for the app server protocol",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-c"
+        },
+        {
+          "flags": [
+            "-o",
+            "--out"
+          ],
+          "arg": "DIR",
+          "description": "Output directory where the schema bundle will be written",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-o"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-enable"
+        },
+        {
+          "flags": [
+            "--experimental"
+          ],
+          "arg": "",
+          "description": "Include experimental methods and fields in the generated output",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-experimental"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-generate-json-schema-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/generate-ts",
+      "name": "generate-ts",
+      "description": "[experimental] Generate TypeScript bindings for the app server protocol",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-c"
+        },
+        {
+          "flags": [
+            "-o",
+            "--out"
+          ],
+          "arg": "DIR",
+          "description": "Output directory where .ts files will be written",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-o"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-enable"
+        },
+        {
+          "flags": [
+            "-p",
+            "--prettier"
+          ],
+          "arg": "PRETTIER_BIN",
+          "description": "Optional path to the Prettier executable to format generated files",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-p"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-disable"
+        },
+        {
+          "flags": [
+            "--experimental"
+          ],
+          "arg": "",
+          "description": "Include experimental methods and fields in the generated output",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-experimental"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-generate-ts-h"
+        }
+      ]
+    },
+    {
+      "path": "app-server/proxy",
+      "name": "proxy",
+      "description": "Proxy stdio bytes to the running app-server control socket",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-app-server-proxy-c"
+        },
+        {
+          "flags": [
+            "--sock"
+          ],
+          "arg": "SOCKET_PATH",
+          "description": "Path to the app-server Unix domain socket to connect to",
+          "baseline_id": "CLI-OPT-app-server-proxy-sock"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-app-server-proxy-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-app-server-proxy-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-app-server-proxy-h"
+        }
+      ]
+    },
+    {
+      "path": "apply",
+      "name": "apply",
+      "description": "Apply the latest diff produced by Codex agent as a `git apply` to your local working tree",
+      "arguments": [
+        "<task_id>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-apply-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-apply-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-apply-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-apply-h"
+        }
+      ]
+    },
+    {
+      "path": "archive",
+      "name": "archive",
+      "description": "Archive a saved session by id or session name",
+      "arguments": [
+        "<session>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "ADDR",
+          "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+          "baseline_id": "CLI-OPT-archive-remote"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-archive-enable"
+        },
+        {
+          "flags": [
+            "--remote-auth-token-env"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+          "baseline_id": "CLI-OPT-archive-remote-auth-token-env"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-archive-disable"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-archive-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-archive-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-archive-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-archive-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-archive-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-archive-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-archive-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-archive-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-archive-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "-C",
+            "--cd"
+          ],
+          "arg": "DIR",
+          "description": "Tell the agent to use the specified directory as its working root",
+          "baseline_id": "CLI-OPT-archive-c"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-archive-add-dir"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-archive-strict-config"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-archive-h"
+        }
+      ]
+    },
+    {
+      "path": "cloud",
+      "name": "cloud",
+      "description": "[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally",
+      "arguments": [
+        "[command]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-h"
+        },
+        {
+          "flags": [
+            "-V",
+            "--version"
+          ],
+          "arg": "",
+          "description": "Print version",
+          "baseline_id": "CLI-OPT-cloud-v"
+        }
+      ]
+    },
+    {
+      "path": "cloud/apply",
+      "name": "apply",
+      "description": "Apply the diff for a Codex Cloud task locally",
+      "arguments": [
+        "<task_id>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "--attempt"
+          ],
+          "arg": "N",
+          "description": "Attempt number to apply (1-based)",
+          "baseline_id": "CLI-OPT-cloud-apply-attempt"
+        },
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-apply-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-apply-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-apply-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-apply-h"
+        }
+      ]
+    },
+    {
+      "path": "cloud/diff",
+      "name": "diff",
+      "description": "Show the unified diff for a Codex Cloud task",
+      "arguments": [
+        "<task_id>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "--attempt"
+          ],
+          "arg": "N",
+          "description": "Attempt number to display (1-based)",
+          "baseline_id": "CLI-OPT-cloud-diff-attempt"
+        },
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-diff-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-diff-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-diff-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-diff-h"
+        }
+      ]
+    },
+    {
+      "path": "cloud/exec",
+      "name": "exec",
+      "description": "Submit a new Codex Cloud task without launching the TUI",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-exec-c"
+        },
+        {
+          "flags": [
+            "--env"
+          ],
+          "arg": "ENV_ID",
+          "description": "Target environment identifier (see `codex cloud` to browse)",
+          "baseline_id": "CLI-OPT-cloud-exec-env"
+        },
+        {
+          "flags": [
+            "--attempts"
+          ],
+          "arg": "ATTEMPTS",
+          "description": "Number of assistant attempts (best-of-N) [default: 1]",
+          "baseline_id": "CLI-OPT-cloud-exec-attempts"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-exec-enable"
+        },
+        {
+          "flags": [
+            "--branch"
+          ],
+          "arg": "BRANCH",
+          "description": "Git branch to run in Codex Cloud (defaults to current branch)",
+          "baseline_id": "CLI-OPT-cloud-exec-branch"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-exec-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-exec-h"
+        }
+      ]
+    },
+    {
+      "path": "cloud/list",
+      "name": "list",
+      "description": "List Codex Cloud tasks",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-list-c"
+        },
+        {
+          "flags": [
+            "--env"
+          ],
+          "arg": "ENV_ID",
+          "description": "Filter tasks by environment identifier",
+          "baseline_id": "CLI-OPT-cloud-list-env"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-list-enable"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "arg": "N",
+          "description": "Maximum number of tasks to return (1-20) [default: 20]",
+          "baseline_id": "CLI-OPT-cloud-list-limit"
+        },
+        {
+          "flags": [
+            "--cursor"
+          ],
+          "arg": "CURSOR",
+          "description": "Pagination cursor returned by a previous call",
+          "baseline_id": "CLI-OPT-cloud-list-cursor"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-list-disable"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit JSON instead of plain text",
+          "baseline_id": "CLI-OPT-cloud-list-json"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-list-h"
+        }
+      ]
+    },
+    {
+      "path": "cloud/status",
+      "name": "status",
+      "description": "Show the status of a Codex Cloud task",
+      "arguments": [
+        "<task_id>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-cloud-status-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-cloud-status-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-cloud-status-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-cloud-status-h"
+        }
+      ]
+    },
+    {
+      "path": "completion",
+      "name": "completion",
+      "description": "Generate shell completion scripts",
+      "arguments": [
+        "[shell]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-completion-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-completion-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-completion-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-completion-h"
+        }
+      ]
+    },
+    {
+      "path": "debug",
+      "name": "debug",
+      "description": "Debugging tools",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-debug-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-debug-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-debug-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-debug-h"
+        }
+      ]
+    },
+    {
+      "path": "debug/app-server",
+      "name": "app-server",
+      "description": "Tooling: helps debug the app server",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-debug-app-server-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-debug-app-server-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-debug-app-server-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-debug-app-server-h"
+        }
+      ]
+    },
+    {
+      "path": "debug/app-server/send-message-v2",
+      "name": "send-message-v2",
+      "description": "Usage: codex debug app-server send-message-v2 [OPTIONS] <USER_MESSAGE>",
+      "arguments": [
+        "<user_message>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-debug-app-server-send-message-v2-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-debug-app-server-send-message-v2-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-debug-app-server-send-message-v2-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-debug-app-server-send-message-v2-h"
+        }
+      ]
+    },
+    {
+      "path": "debug/models",
+      "name": "models",
+      "description": "Render the raw model catalog as JSON",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "--bundled"
+          ],
+          "arg": "",
+          "description": "Skip refresh and dump only the bundled catalog shipped with this binary",
+          "baseline_id": "CLI-OPT-debug-models-bundled"
+        },
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-debug-models-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-debug-models-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-debug-models-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-debug-models-h"
+        }
+      ]
+    },
+    {
+      "path": "debug/prompt-input",
+      "name": "prompt-input",
+      "description": "Render the model-visible prompt input list as JSON",
+      "arguments": [
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-debug-prompt-input-c"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the user prompt",
+          "baseline_id": "CLI-OPT-debug-prompt-input-i"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-debug-prompt-input-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-debug-prompt-input-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-debug-prompt-input-h"
+        }
+      ]
+    },
+    {
+      "path": "delete",
+      "name": "delete",
+      "description": "Permanently delete a saved session by id or session name",
+      "arguments": [
+        "<session>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "ADDR",
+          "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+          "baseline_id": "CLI-OPT-delete-remote"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-delete-enable"
+        },
+        {
+          "flags": [
+            "--remote-auth-token-env"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+          "baseline_id": "CLI-OPT-delete-remote-auth-token-env"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-delete-disable"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-delete-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-delete-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-delete-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-delete-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-delete-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-delete-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-delete-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-delete-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-delete-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "-C",
+            "--cd"
+          ],
+          "arg": "DIR",
+          "description": "Tell the agent to use the specified directory as its working root",
+          "baseline_id": "CLI-OPT-delete-c"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-delete-add-dir"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-delete-strict-config"
+        },
+        {
+          "flags": [
+            "--force"
+          ],
+          "arg": "",
+          "description": "Delete without prompting. SESSION must be a UUID",
+          "baseline_id": "CLI-OPT-delete-force"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-delete-h"
+        }
+      ]
+    },
+    {
+      "path": "doctor",
+      "name": "doctor",
+      "description": "Diagnose local Codex installation, config, auth, and runtime health",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-doctor-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit a redacted machine-readable report",
+          "baseline_id": "CLI-OPT-doctor-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-doctor-enable"
+        },
+        {
+          "flags": [
+            "--summary"
+          ],
+          "arg": "",
+          "description": "Only show grouped check rows and the final count summary",
+          "baseline_id": "CLI-OPT-doctor-summary"
+        },
+        {
+          "flags": [
+            "--all"
+          ],
+          "arg": "",
+          "description": "Expand long lists in detailed human output",
+          "baseline_id": "CLI-OPT-doctor-all"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-doctor-disable"
+        },
+        {
+          "flags": [
+            "--no-color"
+          ],
+          "arg": "",
+          "description": "Disable ANSI color in human output",
+          "baseline_id": "CLI-OPT-doctor-no-color"
+        },
+        {
+          "flags": [
+            "--ascii"
+          ],
+          "arg": "",
+          "description": "Use ASCII status labels and separators in human output",
+          "baseline_id": "CLI-OPT-doctor-ascii"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-doctor-h"
+        }
+      ]
+    },
+    {
+      "path": "exec",
+      "name": "exec",
+      "description": "Run Codex non-interactively",
+      "arguments": [
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-exec-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-exec-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-exec-disable"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-exec-strict-config"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-exec-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-exec-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-exec-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-exec-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-exec-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-exec-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-exec-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-exec-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-exec-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-exec-add-dir"
+        },
+        {
+          "flags": [
+            "--skip-git-repo-check"
+          ],
+          "arg": "",
+          "description": "Allow running Codex outside a Git repository",
+          "baseline_id": "CLI-OPT-exec-skip-git-repo-check"
+        },
+        {
+          "flags": [
+            "--ephemeral"
+          ],
+          "arg": "",
+          "description": "Run without persisting session files to disk",
+          "baseline_id": "CLI-OPT-exec-ephemeral"
+        },
+        {
+          "flags": [
+            "--ignore-user-config"
+          ],
+          "arg": "",
+          "description": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+          "baseline_id": "CLI-OPT-exec-ignore-user-config"
+        },
+        {
+          "flags": [
+            "--ignore-rules"
+          ],
+          "arg": "",
+          "description": "Do not load user or project execpolicy `.rules` files",
+          "baseline_id": "CLI-OPT-exec-ignore-rules"
+        },
+        {
+          "flags": [
+            "--output-schema"
+          ],
+          "arg": "FILE",
+          "description": "Path to a JSON Schema file describing the model's final response shape",
+          "baseline_id": "CLI-OPT-exec-output-schema"
+        },
+        {
+          "flags": [
+            "--color"
+          ],
+          "arg": "COLOR",
+          "description": "Specifies color settings for use in the output [default: auto] Possible values: always, never, auto",
+          "baseline_id": "CLI-OPT-exec-color"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Print events to stdout as JSONL",
+          "baseline_id": "CLI-OPT-exec-json"
+        },
+        {
+          "flags": [
+            "-o",
+            "--output-last-message"
+          ],
+          "arg": "FILE",
+          "description": "Specifies file where the last message from the agent should be written",
+          "baseline_id": "CLI-OPT-exec-o"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-exec-h"
+        },
+        {
+          "flags": [
+            "-V",
+            "--version"
+          ],
+          "arg": "",
+          "description": "Print version",
+          "baseline_id": "CLI-OPT-exec-v"
+        }
+      ]
+    },
+    {
+      "path": "exec-server",
+      "name": "exec-server",
+      "description": "[EXPERIMENTAL] Run the standalone exec-server service",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-exec-server-c"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-exec-server-strict-config"
+        },
+        {
+          "flags": [
+            "--concurrent-requests"
+          ],
+          "arg": "COUNT",
+          "description": "Maximum number of requests to process concurrently on each connection [default: 1]",
+          "baseline_id": "CLI-OPT-exec-server-concurrent-requests"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-exec-server-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-exec-server-disable"
+        },
+        {
+          "flags": [
+            "--listen"
+          ],
+          "arg": "URL",
+          "description": "Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `stdio`, `stdio://`",
+          "baseline_id": "CLI-OPT-exec-server-listen"
+        },
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "URL",
+          "description": "Register this exec-server as a remote environment using the given base URL",
+          "baseline_id": "CLI-OPT-exec-server-remote"
+        },
+        {
+          "flags": [
+            "--environment-id"
+          ],
+          "arg": "ID",
+          "description": "Environment id to attach to when registering remotely",
+          "baseline_id": "CLI-OPT-exec-server-environment-id"
+        },
+        {
+          "flags": [
+            "--name"
+          ],
+          "arg": "NAME",
+          "description": "Human-readable environment name",
+          "baseline_id": "CLI-OPT-exec-server-name"
+        },
+        {
+          "flags": [
+            "--use-agent-identity-auth"
+          ],
+          "arg": "",
+          "description": "Use Agent Identity auth from CODEX_ACCESS_TOKEN for remote registration",
+          "baseline_id": "CLI-OPT-exec-server-use-agent-identity-auth"
+        },
+        {
+          "flags": [
+            "--exit-on-stdin-close"
+          ],
+          "arg": "",
+          "description": "Exit when the parent-owned standard-input pipe closes [env: CODEX_EXEC_SERVER_EXIT_ON_STDIN_CLOSE=]",
+          "baseline_id": "CLI-OPT-exec-server-exit-on-stdin-close"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-exec-server-h"
+        }
+      ]
+    },
+    {
+      "path": "exec/fork",
+      "name": "fork",
+      "description": "Fork a previous session by id into a new session",
+      "arguments": [
+        "<session_id>",
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-exec-fork-c"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "Optional image(s) to attach to the prompt sent after forking",
+          "baseline_id": "CLI-OPT-exec-fork-i"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-exec-fork-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-exec-fork-disable"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-exec-fork-strict-config"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-exec-fork-m"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-exec-fork-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-exec-fork-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--skip-git-repo-check"
+          ],
+          "arg": "",
+          "description": "Allow running Codex outside a Git repository",
+          "baseline_id": "CLI-OPT-exec-fork-skip-git-repo-check"
+        },
+        {
+          "flags": [
+            "--ephemeral"
+          ],
+          "arg": "",
+          "description": "Run without persisting session files to disk",
+          "baseline_id": "CLI-OPT-exec-fork-ephemeral"
+        },
+        {
+          "flags": [
+            "--ignore-user-config"
+          ],
+          "arg": "",
+          "description": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+          "baseline_id": "CLI-OPT-exec-fork-ignore-user-config"
+        },
+        {
+          "flags": [
+            "--ignore-rules"
+          ],
+          "arg": "",
+          "description": "Do not load user or project execpolicy `.rules` files",
+          "baseline_id": "CLI-OPT-exec-fork-ignore-rules"
+        },
+        {
+          "flags": [
+            "--output-schema"
+          ],
+          "arg": "FILE",
+          "description": "Path to a JSON Schema file describing the model's final response shape",
+          "baseline_id": "CLI-OPT-exec-fork-output-schema"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Print events to stdout as JSONL",
+          "baseline_id": "CLI-OPT-exec-fork-json"
+        },
+        {
+          "flags": [
+            "-o",
+            "--output-last-message"
+          ],
+          "arg": "FILE",
+          "description": "Specifies file where the last message from the agent should be written",
+          "baseline_id": "CLI-OPT-exec-fork-o"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-exec-fork-h"
+        }
+      ]
+    },
+    {
+      "path": "exec/resume",
+      "name": "resume",
+      "description": "Resume a previous session by id or pick the most recent with --last",
+      "arguments": [
+        "[session_id]",
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-exec-resume-c"
+        },
+        {
+          "flags": [
+            "--last"
+          ],
+          "arg": "",
+          "description": "Resume the most recent recorded session (newest) without specifying an id",
+          "baseline_id": "CLI-OPT-exec-resume-last"
+        },
+        {
+          "flags": [
+            "--all"
+          ],
+          "arg": "",
+          "description": "Show all sessions (disables cwd filtering)",
+          "baseline_id": "CLI-OPT-exec-resume-all"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-exec-resume-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-exec-resume-disable"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "Optional image(s) to attach to the prompt sent after resuming",
+          "baseline_id": "CLI-OPT-exec-resume-i"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-exec-resume-strict-config"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-exec-resume-m"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-exec-resume-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-exec-resume-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--skip-git-repo-check"
+          ],
+          "arg": "",
+          "description": "Allow running Codex outside a Git repository",
+          "baseline_id": "CLI-OPT-exec-resume-skip-git-repo-check"
+        },
+        {
+          "flags": [
+            "--ephemeral"
+          ],
+          "arg": "",
+          "description": "Run without persisting session files to disk",
+          "baseline_id": "CLI-OPT-exec-resume-ephemeral"
+        },
+        {
+          "flags": [
+            "--ignore-user-config"
+          ],
+          "arg": "",
+          "description": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+          "baseline_id": "CLI-OPT-exec-resume-ignore-user-config"
+        },
+        {
+          "flags": [
+            "--ignore-rules"
+          ],
+          "arg": "",
+          "description": "Do not load user or project execpolicy `.rules` files",
+          "baseline_id": "CLI-OPT-exec-resume-ignore-rules"
+        },
+        {
+          "flags": [
+            "--output-schema"
+          ],
+          "arg": "FILE",
+          "description": "Path to a JSON Schema file describing the model's final response shape",
+          "baseline_id": "CLI-OPT-exec-resume-output-schema"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Print events to stdout as JSONL",
+          "baseline_id": "CLI-OPT-exec-resume-json"
+        },
+        {
+          "flags": [
+            "-o",
+            "--output-last-message"
+          ],
+          "arg": "FILE",
+          "description": "Specifies file where the last message from the agent should be written",
+          "baseline_id": "CLI-OPT-exec-resume-o"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-exec-resume-h"
+        }
+      ]
+    },
+    {
+      "path": "exec/review",
+      "name": "review",
+      "description": "Run a code review against the current repository",
+      "arguments": [
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-exec-review-c"
+        },
+        {
+          "flags": [
+            "--uncommitted"
+          ],
+          "arg": "",
+          "description": "Review staged, unstaged, and untracked changes",
+          "baseline_id": "CLI-OPT-exec-review-uncommitted"
+        },
+        {
+          "flags": [
+            "--base"
+          ],
+          "arg": "BRANCH",
+          "description": "Review changes against the given base branch",
+          "baseline_id": "CLI-OPT-exec-review-base"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-exec-review-enable"
+        },
+        {
+          "flags": [
+            "--commit"
+          ],
+          "arg": "SHA",
+          "description": "Review the changes introduced by a commit",
+          "baseline_id": "CLI-OPT-exec-review-commit"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-exec-review-disable"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-exec-review-strict-config"
+        },
+        {
+          "flags": [
+            "--title"
+          ],
+          "arg": "TITLE",
+          "description": "Optional commit title to display in the review summary",
+          "baseline_id": "CLI-OPT-exec-review-title"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-exec-review-m"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-exec-review-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-exec-review-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--skip-git-repo-check"
+          ],
+          "arg": "",
+          "description": "Allow running Codex outside a Git repository",
+          "baseline_id": "CLI-OPT-exec-review-skip-git-repo-check"
+        },
+        {
+          "flags": [
+            "--ephemeral"
+          ],
+          "arg": "",
+          "description": "Run without persisting session files to disk",
+          "baseline_id": "CLI-OPT-exec-review-ephemeral"
+        },
+        {
+          "flags": [
+            "--ignore-user-config"
+          ],
+          "arg": "",
+          "description": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+          "baseline_id": "CLI-OPT-exec-review-ignore-user-config"
+        },
+        {
+          "flags": [
+            "--ignore-rules"
+          ],
+          "arg": "",
+          "description": "Do not load user or project execpolicy `.rules` files",
+          "baseline_id": "CLI-OPT-exec-review-ignore-rules"
+        },
+        {
+          "flags": [
+            "--output-schema"
+          ],
+          "arg": "FILE",
+          "description": "Path to a JSON Schema file describing the model's final response shape",
+          "baseline_id": "CLI-OPT-exec-review-output-schema"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Print events to stdout as JSONL",
+          "baseline_id": "CLI-OPT-exec-review-json"
+        },
+        {
+          "flags": [
+            "-o",
+            "--output-last-message"
+          ],
+          "arg": "FILE",
+          "description": "Specifies file where the last message from the agent should be written",
+          "baseline_id": "CLI-OPT-exec-review-o"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-exec-review-h"
+        }
+      ]
+    },
+    {
+      "path": "features",
+      "name": "features",
+      "description": "Inspect feature flags",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-features-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-features-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-features-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-features-h"
+        }
+      ]
+    },
+    {
+      "path": "features/disable",
+      "name": "disable",
+      "description": "Disable a feature in config.toml",
+      "arguments": [
+        "<feature>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-features-disable-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-features-disable-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-features-disable-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-features-disable-h"
+        }
+      ]
+    },
+    {
+      "path": "features/enable",
+      "name": "enable",
+      "description": "Enable a feature in config.toml",
+      "arguments": [
+        "<feature>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-features-enable-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-features-enable-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-features-enable-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-features-enable-h"
+        }
+      ]
+    },
+    {
+      "path": "features/list",
+      "name": "list",
+      "description": "List known features with their stage and effective state",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-features-list-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-features-list-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-features-list-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-features-list-h"
+        }
+      ]
+    },
+    {
+      "path": "fork",
+      "name": "fork",
+      "description": "Fork a previous interactive session (picker by default; use --last to fork the most recent)",
+      "arguments": [
+        "[session_id]",
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-fork-c"
+        },
+        {
+          "flags": [
+            "--last"
+          ],
+          "arg": "",
+          "description": "Fork the most recent session without showing the picker",
+          "baseline_id": "CLI-OPT-fork-last"
+        },
+        {
+          "flags": [
+            "--all"
+          ],
+          "arg": "",
+          "description": "Show all sessions (disables cwd filtering and shows CWD column)",
+          "baseline_id": "CLI-OPT-fork-all"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-fork-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-fork-disable"
+        },
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "ADDR",
+          "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+          "baseline_id": "CLI-OPT-fork-remote"
+        },
+        {
+          "flags": [
+            "--remote-auth-token-env"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+          "baseline_id": "CLI-OPT-fork-remote-auth-token-env"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-fork-strict-config"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-fork-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-fork-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-fork-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-fork-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-fork-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-fork-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-fork-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-fork-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-fork-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-fork-add-dir"
+        },
+        {
+          "flags": [
+            "-a",
+            "--ask-for-approval"
+          ],
+          "arg": "APPROVAL_POLICY",
+          "description": "Configure when the model requires human approval before executing a command Possible values: command that is not in the \"trusted\" set",
+          "baseline_id": "CLI-OPT-fork-a"
+        },
+        {
+          "flags": [
+            "--search"
+          ],
+          "arg": "",
+          "description": "Enable live web search. When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval)",
+          "baseline_id": "CLI-OPT-fork-search"
+        },
+        {
+          "flags": [
+            "--no-alt-screen"
+          ],
+          "arg": "",
+          "description": "Disable alternate screen mode Runs the TUI in inline mode, preserving terminal scrollback history.",
+          "baseline_id": "CLI-OPT-fork-no-alt-screen"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-fork-h"
+        },
+        {
+          "flags": [
+            "-V",
+            "--version"
+          ],
+          "arg": "",
+          "description": "Print version",
+          "baseline_id": "CLI-OPT-fork-v"
+        }
+      ]
+    },
+    {
+      "path": "login",
+      "name": "login",
+      "description": "Manage login",
+      "arguments": [
+        "[command]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-login-c"
+        },
+        {
+          "flags": [
+            "--with-api-key"
+          ],
+          "arg": "",
+          "description": "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)",
+          "baseline_id": "CLI-OPT-login-with-api-key"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-login-enable"
+        },
+        {
+          "flags": [
+            "--with-access-token"
+          ],
+          "arg": "",
+          "description": "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`)",
+          "baseline_id": "CLI-OPT-login-with-access-token"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-login-disable"
+        },
+        {
+          "flags": [
+            "--device-auth"
+          ],
+          "arg": "",
+          "description": "",
+          "baseline_id": "CLI-OPT-login-device-auth"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-login-h"
+        }
+      ]
+    },
+    {
+      "path": "login/status",
+      "name": "status",
+      "description": "Show login status",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-login-status-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-login-status-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-login-status-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-login-status-h"
+        }
+      ]
+    },
+    {
+      "path": "logout",
+      "name": "logout",
+      "description": "Remove stored authentication credentials",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-logout-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-logout-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-logout-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-logout-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp",
+      "name": "mcp",
+      "description": "Manage external MCP servers for Codex",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp-server",
+      "name": "mcp-server",
+      "description": "Start Codex as an MCP server (stdio)",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-server-c"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-mcp-server-strict-config"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-server-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-server-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-server-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/add",
+      "name": "add",
+      "description": "Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)",
+      "arguments": [
+        "<name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-add-c"
+        },
+        {
+          "flags": [
+            "--env"
+          ],
+          "arg": "KEY=VALUE",
+          "description": "Environment variables to set when launching the server. Only valid with stdio servers",
+          "baseline_id": "CLI-OPT-mcp-add-env"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-add-enable"
+        },
+        {
+          "flags": [
+            "--url"
+          ],
+          "arg": "URL",
+          "description": "URL for a streamable HTTP MCP server",
+          "baseline_id": "CLI-OPT-mcp-add-url"
+        },
+        {
+          "flags": [
+            "--bearer-token-env-var"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Optional environment variable to read for a bearer token. Only valid with streamable HTTP servers",
+          "baseline_id": "CLI-OPT-mcp-add-bearer-token-env-var"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-add-disable"
+        },
+        {
+          "flags": [
+            "--oauth-client-id"
+          ],
+          "arg": "CLIENT_ID",
+          "description": "Optional OAuth client identifier to use for this MCP server",
+          "baseline_id": "CLI-OPT-mcp-add-oauth-client-id"
+        },
+        {
+          "flags": [
+            "--oauth-client-registration"
+          ],
+          "arg": "AUTO|CIMD|DCR",
+          "description": "OAuth client-registration strategy for the immediate login only Possible values: auto, cimd, dcr",
+          "baseline_id": "CLI-OPT-mcp-add-oauth-client-registration"
+        },
+        {
+          "flags": [
+            "--oauth-resource"
+          ],
+          "arg": "RESOURCE",
+          "description": "Optional OAuth resource parameter to include during MCP login",
+          "baseline_id": "CLI-OPT-mcp-add-oauth-resource"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-add-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/get",
+      "name": "get",
+      "description": "Usage: codex mcp get [OPTIONS] <NAME>",
+      "arguments": [
+        "<name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-get-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output the server configuration as JSON",
+          "baseline_id": "CLI-OPT-mcp-get-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-get-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-get-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-get-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/list",
+      "name": "list",
+      "description": "Usage: codex mcp list [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-list-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output the configured servers as JSON",
+          "baseline_id": "CLI-OPT-mcp-list-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-list-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-list-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-list-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/login",
+      "name": "login",
+      "description": "Usage: codex mcp login [OPTIONS] <NAME>",
+      "arguments": [
+        "<name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-login-c"
+        },
+        {
+          "flags": [
+            "--scopes"
+          ],
+          "arg": "SCOPE,SCOPE",
+          "description": "Comma-separated list of OAuth scopes to request",
+          "baseline_id": "CLI-OPT-mcp-login-scopes"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-login-enable"
+        },
+        {
+          "flags": [
+            "--oauth-client-registration"
+          ],
+          "arg": "AUTO|CIMD|DCR",
+          "description": "OAuth client-registration strategy for this login only Possible values: auto, cimd, dcr",
+          "baseline_id": "CLI-OPT-mcp-login-oauth-client-registration"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-login-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-login-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/logout",
+      "name": "logout",
+      "description": "Usage: codex mcp logout [OPTIONS] <NAME>",
+      "arguments": [
+        "<name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-logout-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-logout-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-logout-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-logout-h"
+        }
+      ]
+    },
+    {
+      "path": "mcp/remove",
+      "name": "remove",
+      "description": "Usage: codex mcp remove [OPTIONS] <NAME>",
+      "arguments": [
+        "<name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-mcp-remove-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-mcp-remove-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-mcp-remove-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-mcp-remove-h"
+        }
+      ]
+    },
+    {
+      "path": "migrate-rollouts",
+      "name": "migrate-rollouts",
+      "description": "Inspect or migrate legacy local sessions to paginated thread history",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "--apply"
+          ],
+          "arg": "",
+          "description": "Publish the migration. Without this flag the command only reports eligible sessions",
+          "baseline_id": "CLI-OPT-migrate-rollouts-apply"
+        },
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-migrate-rollouts-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-migrate-rollouts-enable"
+        },
+        {
+          "flags": [
+            "--thread"
+          ],
+          "arg": "THREAD_ID",
+          "description": "Restrict inspection or migration to one or more thread IDs",
+          "baseline_id": "CLI-OPT-migrate-rollouts-thread"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-migrate-rollouts-disable"
+        },
+        {
+          "flags": [
+            "--max-mib-per-second"
+          ],
+          "arg": "MIB",
+          "description": "Limit aggregate rollout read and write throughput, in MiB per second",
+          "baseline_id": "CLI-OPT-migrate-rollouts-max-mib-per-second"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit the complete per-thread report as JSON",
+          "baseline_id": "CLI-OPT-migrate-rollouts-json"
+        },
+        {
+          "flags": [
+            "--verbose"
+          ],
+          "arg": "",
+          "description": "Print one line for every inspected rollout",
+          "baseline_id": "CLI-OPT-migrate-rollouts-verbose"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-migrate-rollouts-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin",
+      "name": "plugin",
+      "description": "Manage Codex plugins",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-plugin-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/add",
+      "name": "add",
+      "description": "Install a plugin from a configured marketplace snapshot.",
+      "arguments": [
+        "<plugin[@marketplace>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-add-c"
+        },
+        {
+          "flags": [
+            "-m",
+            "--marketplace"
+          ],
+          "arg": "MARKETPLACE",
+          "description": "Configured marketplace name to use when PLUGIN does not include @MARKETPLACE",
+          "baseline_id": "CLI-OPT-plugin-add-m"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-add-enable"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output install result as JSON",
+          "baseline_id": "CLI-OPT-plugin-add-json"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-add-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') codex plugin add sample@debug codex plugin add sample --marketplace debug",
+          "baseline_id": "CLI-OPT-plugin-add-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/list",
+      "name": "list",
+      "description": "List plugins available from configured marketplace snapshots",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-list-c"
+        },
+        {
+          "flags": [
+            "-m",
+            "--marketplace"
+          ],
+          "arg": "MARKETPLACE",
+          "description": "Only list plugins from this configured marketplace name",
+          "baseline_id": "CLI-OPT-plugin-list-m"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-list-enable"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output plugin list as JSON",
+          "baseline_id": "CLI-OPT-plugin-list-json"
+        },
+        {
+          "flags": [
+            "--available"
+          ],
+          "arg": "",
+          "description": "Include uninstalled marketplace plugins in the JSON output",
+          "baseline_id": "CLI-OPT-plugin-list-available"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-list-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') codex plugin list codex plugin list --marketplace debug codex plugin list --json codex plugin list --available --json",
+          "baseline_id": "CLI-OPT-plugin-list-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/marketplace",
+      "name": "marketplace",
+      "description": "Add, list, upgrade, or remove configured plugin marketplaces",
+      "arguments": [
+        "<command>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-marketplace-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-plugin-marketplace-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/marketplace/add",
+      "name": "add",
+      "description": "Add a local or Git marketplace to the configured marketplace sources",
+      "arguments": [
+        "<source>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-c"
+        },
+        {
+          "flags": [
+            "--ref"
+          ],
+          "arg": "REF",
+          "description": "Git ref to fetch for Git marketplace sources",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-ref"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-enable"
+        },
+        {
+          "flags": [
+            "--sparse"
+          ],
+          "arg": "PATH",
+          "description": "Sparse checkout path for Git marketplace sources. Can be repeated",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-sparse"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-disable"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output add result as JSON",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-json"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') codex plugin marketplace add ./path/to/marketplace codex plugin marketplace add owner/repo --ref main codex plugin marketplace add https://github.com/owner/repo --sparse plugins/foo",
+          "baseline_id": "CLI-OPT-plugin-marketplace-add-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/marketplace/list",
+      "name": "list",
+      "description": "List plugin marketplaces Codex is currently considering and their roots",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-marketplace-list-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output marketplace list as JSON",
+          "baseline_id": "CLI-OPT-plugin-marketplace-list-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-list-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-list-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-plugin-marketplace-list-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/marketplace/remove",
+      "name": "remove",
+      "description": "Remove a configured marketplace source by name",
+      "arguments": [
+        "<marketplace_name>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-marketplace-remove-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output remove result as JSON",
+          "baseline_id": "CLI-OPT-plugin-marketplace-remove-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-remove-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-remove-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') Example: codex plugin marketplace remove debug",
+          "baseline_id": "CLI-OPT-plugin-marketplace-remove-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/marketplace/upgrade",
+      "name": "upgrade",
+      "description": "Refresh configured Git marketplace snapshots.",
+      "arguments": [
+        "[marketplace_name]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-marketplace-upgrade-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output upgrade result as JSON",
+          "baseline_id": "CLI-OPT-plugin-marketplace-upgrade-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-upgrade-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-marketplace-upgrade-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') codex plugin marketplace upgrade codex plugin marketplace upgrade debug",
+          "baseline_id": "CLI-OPT-plugin-marketplace-upgrade-h"
+        }
+      ]
+    },
+    {
+      "path": "plugin/remove",
+      "name": "remove",
+      "description": "Remove an installed plugin from local config and cache.",
+      "arguments": [
+        "<plugin[@marketplace>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-plugin-remove-c"
+        },
+        {
+          "flags": [
+            "-m",
+            "--marketplace"
+          ],
+          "arg": "MARKETPLACE",
+          "description": "Marketplace name to use when PLUGIN does not include @MARKETPLACE",
+          "baseline_id": "CLI-OPT-plugin-remove-m"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-plugin-remove-enable"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Output remove result as JSON",
+          "baseline_id": "CLI-OPT-plugin-remove-json"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-plugin-remove-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h') codex plugin remove sample@debug codex plugin remove sample --marketplace debug",
+          "baseline_id": "CLI-OPT-plugin-remove-h"
+        }
+      ]
+    },
+    {
+      "path": "remote-control",
+      "name": "remote-control",
+      "description": "[experimental] Manage the app-server daemon with remote control enabled",
+      "arguments": [
+        "[command]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-remote-control-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit machine-readable JSON",
+          "baseline_id": "CLI-OPT-remote-control-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-remote-control-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-remote-control-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-remote-control-h"
+        }
+      ]
+    },
+    {
+      "path": "remote-control/pair",
+      "name": "pair",
+      "description": "Create and print a short-lived manual pairing code",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-remote-control-pair-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit machine-readable JSON",
+          "baseline_id": "CLI-OPT-remote-control-pair-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-remote-control-pair-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-remote-control-pair-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-remote-control-pair-h"
+        }
+      ]
+    },
+    {
+      "path": "remote-control/start",
+      "name": "start",
+      "description": "Start the app-server daemon with remote control enabled",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-remote-control-start-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit machine-readable JSON",
+          "baseline_id": "CLI-OPT-remote-control-start-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-remote-control-start-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-remote-control-start-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-remote-control-start-h"
+        }
+      ]
+    },
+    {
+      "path": "remote-control/stop",
+      "name": "stop",
+      "description": "Stop the app-server daemon",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-remote-control-stop-c"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "arg": "",
+          "description": "Emit machine-readable JSON",
+          "baseline_id": "CLI-OPT-remote-control-stop-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-remote-control-stop-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-remote-control-stop-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-remote-control-stop-h"
+        }
+      ]
+    },
+    {
+      "path": "resume",
+      "name": "resume",
+      "description": "Resume a previous interactive session (picker by default; use --last to continue the most recent)",
+      "arguments": [
+        "[session_id]",
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-resume-c"
+        },
+        {
+          "flags": [
+            "--last"
+          ],
+          "arg": "",
+          "description": "Continue the most recent session without showing the picker",
+          "baseline_id": "CLI-OPT-resume-last"
+        },
+        {
+          "flags": [
+            "--all"
+          ],
+          "arg": "",
+          "description": "Show all sessions (disables cwd filtering and shows CWD column)",
+          "baseline_id": "CLI-OPT-resume-all"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-resume-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-resume-disable"
+        },
+        {
+          "flags": [
+            "--include-non-interactive"
+          ],
+          "arg": "",
+          "description": "Include non-interactive sessions in the resume picker and --last selection",
+          "baseline_id": "CLI-OPT-resume-include-non-interactive"
+        },
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "ADDR",
+          "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+          "baseline_id": "CLI-OPT-resume-remote"
+        },
+        {
+          "flags": [
+            "--remote-auth-token-env"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+          "baseline_id": "CLI-OPT-resume-remote-auth-token-env"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-resume-strict-config"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-resume-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-resume-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-resume-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-resume-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-resume-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-resume-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-resume-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-resume-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-resume-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-resume-add-dir"
+        },
+        {
+          "flags": [
+            "-a",
+            "--ask-for-approval"
+          ],
+          "arg": "APPROVAL_POLICY",
+          "description": "Configure when the model requires human approval before executing a command Possible values: command that is not in the \"trusted\" set",
+          "baseline_id": "CLI-OPT-resume-a"
+        },
+        {
+          "flags": [
+            "--search"
+          ],
+          "arg": "",
+          "description": "Enable live web search. When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval)",
+          "baseline_id": "CLI-OPT-resume-search"
+        },
+        {
+          "flags": [
+            "--no-alt-screen"
+          ],
+          "arg": "",
+          "description": "Disable alternate screen mode Runs the TUI in inline mode, preserving terminal scrollback history.",
+          "baseline_id": "CLI-OPT-resume-no-alt-screen"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-resume-h"
+        },
+        {
+          "flags": [
+            "-V",
+            "--version"
+          ],
+          "arg": "",
+          "description": "Print version",
+          "baseline_id": "CLI-OPT-resume-v"
+        }
+      ]
+    },
+    {
+      "path": "review",
+      "name": "review",
+      "description": "Run a code review non-interactively",
+      "arguments": [
+        "[prompt]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-review-c"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-review-strict-config"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-review-enable"
+        },
+        {
+          "flags": [
+            "--uncommitted"
+          ],
+          "arg": "",
+          "description": "Review staged, unstaged, and untracked changes",
+          "baseline_id": "CLI-OPT-review-uncommitted"
+        },
+        {
+          "flags": [
+            "--base"
+          ],
+          "arg": "BRANCH",
+          "description": "Review changes against the given base branch",
+          "baseline_id": "CLI-OPT-review-base"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-review-disable"
+        },
+        {
+          "flags": [
+            "--commit"
+          ],
+          "arg": "SHA",
+          "description": "Review the changes introduced by a commit",
+          "baseline_id": "CLI-OPT-review-commit"
+        },
+        {
+          "flags": [
+            "--title"
+          ],
+          "arg": "TITLE",
+          "description": "Optional commit title to display in the review summary",
+          "baseline_id": "CLI-OPT-review-title"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-review-h"
+        }
+      ]
+    },
+    {
+      "path": "sandbox",
+      "name": "sandbox",
+      "description": "Run commands within a Codex-provided sandbox",
+      "arguments": [
+        "[command]]"
+      ],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-sandbox-c"
+        },
+        {
+          "flags": [
+            "--sandbox-state-json"
+          ],
+          "arg": "JSON",
+          "description": "JSON value from `codex/sandbox-state-meta` to apply directly",
+          "baseline_id": "CLI-OPT-sandbox-sandbox-state-json"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-sandbox-enable"
+        },
+        {
+          "flags": [
+            "--sandbox-state-readable-root"
+          ],
+          "arg": "SANDBOX_STATE_READABLE_ROOT",
+          "description": "Add a readable root to the supplied sandbox state. Repeat for multiple roots",
+          "baseline_id": "CLI-OPT-sandbox-sandbox-state-readable-root"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-sandbox-disable"
+        },
+        {
+          "flags": [
+            "--sandbox-state-disable-network"
+          ],
+          "arg": "",
+          "description": "Disable direct network access in the supplied sandbox state",
+          "baseline_id": "CLI-OPT-sandbox-sandbox-state-disable-network"
+        },
+        {
+          "flags": [
+            "-P",
+            "--permission-profile"
+          ],
+          "arg": "NAME",
+          "description": "Named permissions profile to apply from the active configuration stack",
+          "baseline_id": "CLI-OPT-sandbox-p"
+        },
+        {
+          "flags": [
+            "--include-managed-config"
+          ],
+          "arg": "",
+          "description": "Include managed requirements while resolving an explicit permissions profile",
+          "baseline_id": "CLI-OPT-sandbox-include-managed-config"
+        },
+        {
+          "flags": [
+            "--allow-unix-socket"
+          ],
+          "arg": "ALLOW_UNIX_SOCKETS",
+          "description": "Allow the sandboxed command to bind/connect AF_UNIX sockets rooted at this path. Relative paths are resolved against the current directory. Repeat to allow multiple paths",
+          "baseline_id": "CLI-OPT-sandbox-allow-unix-socket"
+        },
+        {
+          "flags": [
+            "--log-denials"
+          ],
+          "arg": "",
+          "description": "While the command runs, capture macOS sandbox denials via `log stream` and print them after exit",
+          "baseline_id": "CLI-OPT-sandbox-log-denials"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-sandbox-h"
+        }
+      ]
+    },
+    {
+      "path": "unarchive",
+      "name": "unarchive",
+      "description": "Unarchive a saved session by id or session name",
+      "arguments": [
+        "<session>"
+      ],
+      "options": [
+        {
+          "flags": [
+            "--remote"
+          ],
+          "arg": "ADDR",
+          "description": "Connect the TUI to a remote app server endpoint. Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.",
+          "baseline_id": "CLI-OPT-unarchive-remote"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-unarchive-enable"
+        },
+        {
+          "flags": [
+            "--remote-auth-token-env"
+          ],
+          "arg": "ENV_VAR",
+          "description": "Name of the environment variable containing the bearer token to send to a remote app server websocket",
+          "baseline_id": "CLI-OPT-unarchive-remote-auth-token-env"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-unarchive-disable"
+        },
+        {
+          "flags": [
+            "-i",
+            "--image"
+          ],
+          "arg": "FILE",
+          "description": "... Optional image(s) to attach to the initial prompt",
+          "baseline_id": "CLI-OPT-unarchive-i"
+        },
+        {
+          "flags": [
+            "-m",
+            "--model"
+          ],
+          "arg": "MODEL",
+          "description": "Model the agent should use",
+          "baseline_id": "CLI-OPT-unarchive-m"
+        },
+        {
+          "flags": [
+            "--oss"
+          ],
+          "arg": "",
+          "description": "Use open-source provider",
+          "baseline_id": "CLI-OPT-unarchive-oss"
+        },
+        {
+          "flags": [
+            "--local-provider"
+          ],
+          "arg": "OSS_PROVIDER",
+          "description": "Specify which local provider to use (lmstudio or ollama). If not specified with --oss, will use config default or show selection",
+          "baseline_id": "CLI-OPT-unarchive-local-provider"
+        },
+        {
+          "flags": [
+            "-p",
+            "--profile"
+          ],
+          "arg": "CONFIG_PROFILE_V2",
+          "description": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+          "baseline_id": "CLI-OPT-unarchive-p"
+        },
+        {
+          "flags": [
+            "-s",
+            "--sandbox"
+          ],
+          "arg": "SANDBOX_MODE",
+          "description": "Select the sandbox policy to use when executing model-generated shell commands Possible values: read-only, workspace-write, danger-full-access",
+          "baseline_id": "CLI-OPT-unarchive-s"
+        },
+        {
+          "flags": [
+            "--approve-for-me"
+          ],
+          "arg": "",
+          "description": "Route approval requests through automatic review using the workspace-write sandbox",
+          "baseline_id": "CLI-OPT-unarchive-approve-for-me"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "arg": "",
+          "description": "Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY DANGEROUS. Intended solely for running in environments that are externally sandboxed",
+          "baseline_id": "CLI-OPT-unarchive-dangerously-bypass-approvals-and-sandbox"
+        },
+        {
+          "flags": [
+            "--dangerously-bypass-hook-trust"
+          ],
+          "arg": "",
+          "description": "Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS. Intended only for automation that already vets hook sources",
+          "baseline_id": "CLI-OPT-unarchive-dangerously-bypass-hook-trust"
+        },
+        {
+          "flags": [
+            "-C",
+            "--cd"
+          ],
+          "arg": "DIR",
+          "description": "Tell the agent to use the specified directory as its working root",
+          "baseline_id": "CLI-OPT-unarchive-c"
+        },
+        {
+          "flags": [
+            "--add-dir"
+          ],
+          "arg": "DIR",
+          "description": "Additional directories that should be writable alongside the primary workspace",
+          "baseline_id": "CLI-OPT-unarchive-add-dir"
+        },
+        {
+          "flags": [
+            "--strict-config"
+          ],
+          "arg": "",
+          "description": "Error out when config.toml contains fields that are not recognized by this version of Codex",
+          "baseline_id": "CLI-OPT-unarchive-strict-config"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-unarchive-h"
+        }
+      ]
+    },
+    {
+      "path": "update",
+      "name": "update",
+      "description": "Update Codex to the latest version",
+      "arguments": [],
+      "options": [
+        {
+          "flags": [
+            "-c",
+            "--config"
+          ],
+          "arg": "key=value",
+          "description": "Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed as TOML. If it fails to parse as TOML, the raw string is used as a literal.",
+          "baseline_id": "CLI-OPT-update-c"
+        },
+        {
+          "flags": [
+            "--enable"
+          ],
+          "arg": "FEATURE",
+          "description": "Enable a feature (repeatable). Equivalent to `-c features.<name>=true`",
+          "baseline_id": "CLI-OPT-update-enable"
+        },
+        {
+          "flags": [
+            "--disable"
+          ],
+          "arg": "FEATURE",
+          "description": "Disable a feature (repeatable). Equivalent to `-c features.<name>=false`",
+          "baseline_id": "CLI-OPT-update-disable"
+        },
+        {
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "arg": "",
+          "description": "Print help (see a summary with '-h')",
+          "baseline_id": "CLI-OPT-update-h"
+        }
+      ]
+    }
+  ]
+}

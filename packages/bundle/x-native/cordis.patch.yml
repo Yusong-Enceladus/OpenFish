@@ -1,0 +1,27 @@
+# X native-surface bundle. This is the first product-specific patch layer over
+# the dsh web composition: it adds a native-client bridge without changing any
+# existing host/agent behavior.
+- id: api-gateway
+  config:
+    # A task without a project still needs a stable working directory. Keep it
+    # in Open Fish state rather than inheriting whichever folder launched the
+    # native Host process (commonly Desktop on macOS).
+    defaultSessionDirectory: !!js dshHomePath('openfish', 'sessions', 'no-workspace')
+
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-keychain'
+  config:
+    service: app.openfish.credentials
+
+- insert:
+    - id: openfish-harnesses
+      name: '@deepseek-ai/dsh-harness'
+      config: {}
+    - id: openfish-harness-acp
+      name: '@deepseek-ai/dsh-harness-acp'
+      inject: [harnesses, agents, sessions, subprocess, approval, credentials]
+    - id: x-native
+      name: '@deepseek-ai/dsh-bundle-x-native'
+      inject: [webServer, connection]
+      config:
+        protocolVersion: v2

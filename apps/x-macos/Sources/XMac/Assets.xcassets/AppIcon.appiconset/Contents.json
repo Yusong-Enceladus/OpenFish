@@ -1,0 +1,18 @@
+{
+  "images" : [
+    { "filename" : "OpenFish-16.png", "idiom" : "mac", "scale" : "1x", "size" : "16x16" },
+    { "filename" : "OpenFish-32.png", "idiom" : "mac", "scale" : "2x", "size" : "16x16" },
+    { "filename" : "OpenFish-32.png", "idiom" : "mac", "scale" : "1x", "size" : "32x32" },
+    { "filename" : "OpenFish-64.png", "idiom" : "mac", "scale" : "2x", "size" : "32x32" },
+    { "filename" : "OpenFish-128.png", "idiom" : "mac", "scale" : "1x", "size" : "128x128" },
+    { "filename" : "OpenFish-256.png", "idiom" : "mac", "scale" : "2x", "size" : "128x128" },
+    { "filename" : "OpenFish-256.png", "idiom" : "mac", "scale" : "1x", "size" : "256x256" },
+    { "filename" : "OpenFish-512.png", "idiom" : "mac", "scale" : "2x", "size" : "256x256" },
+    { "filename" : "OpenFish-512.png", "idiom" : "mac", "scale" : "1x", "size" : "512x512" },
+    { "filename" : "OpenFish-1024.png", "idiom" : "mac", "scale" : "2x", "size" : "512x512" }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

@@ -1,0 +1,464 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0ABE7AD0F56A66D7BABB94D6 /* XNativeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67B041C3256A02CB635FDA5 /* XNativeClient.swift */; };
+		2D5EAEFAADE5DAB00E85F432 /* XApiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F86DB4304EEE96D2CAEAF8 /* XApiClient.swift */; };
+		49EFA88B619AC6C3B091D801 /* MacProjectionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935488E794326FEEE724E65C /* MacProjectionCache.swift */; };
+		558068DC6DDDBD860A7FE41D /* OpenCodexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B948195B898FED7704EAAF55 /* OpenCodexStore.swift */; };
+		66F0A1B171C881A86F3D272D /* InAppBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F5D965B56259EC54D8F359 /* InAppBrowserView.swift */; };
+		865886F9C0448DF8CE30194D /* OpenFishHostRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3ED83D9163D0E0D7A6B77AD /* OpenFishHostRuntime.swift */; };
+		8BB3CE491ADF9D414FCEFEA2 /* IdleGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB27FCE7D54782931B955D7D /* IdleGuard.swift */; };
+		9A4FC3496E65F6E43CDA6002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A14A2E36EF0F13717B92176D /* Assets.xcassets */; };
+		A4EBF88B676FFFC15AB869DE /* ConversationProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630AA03645B6532BF2B95635 /* ConversationProjection.swift */; };
+		A6E00687DBD234530823AB82 /* LocalNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6433046F026B1B69E220ECE7 /* LocalNotificationService.swift */; };
+		B354CE14D221CECD379D53F7 /* XMacCoreSurfaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7637BC85B34D2A312CCB4849 /* XMacCoreSurfaceUITests.swift */; };
+		C0DB46714191A83BA34AC6A5 /* LocalVoiceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B868547127C8B6E83D5944 /* LocalVoiceService.swift */; };
+		C4B563BAF922057AD8F29D0A /* XApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCD4EFE65797602061CE677 /* XApp.swift */; };
+		DA26876A92D2DEBA597BD324 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A0ABAA1DDFE8D3C35FDFC93C /* AppIcon.icon */; };
+		E18481F101803FB6355FC341 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73EE348D0C8D5EC8DB87B597 /* ContentView.swift */; };
+		EA9A673906B15E012B21723C /* DshLiveConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36DA095690025A0E805BF398 /* DshLiveConnection.swift */; };
+		FCE254B576CA4CFACF77628E /* NativeConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FBB22A6D216E3AEA283CB5 /* NativeConnectionProfile.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F5E37CEAED5409463A0C908D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 529A7952827773CFB53851C9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6167A949DDD59CAE30162F25;
+			remoteInfo = XMac;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0A6416063D8C032398379D54 /* XMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0DCD4EFE65797602061CE677 /* XApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XApp.swift; sourceTree = "<group>"; };
+		10F86DB4304EEE96D2CAEAF8 /* XApiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XApiClient.swift; sourceTree = "<group>"; };
+		33F5D965B56259EC54D8F359 /* InAppBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InAppBrowserView.swift; sourceTree = "<group>"; };
+		36DA095690025A0E805BF398 /* DshLiveConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshLiveConnection.swift; sourceTree = "<group>"; };
+		630AA03645B6532BF2B95635 /* ConversationProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationProjection.swift; sourceTree = "<group>"; };
+		6433046F026B1B69E220ECE7 /* LocalNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationService.swift; sourceTree = "<group>"; };
+		73EE348D0C8D5EC8DB87B597 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		7637BC85B34D2A312CCB4849 /* XMacCoreSurfaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XMacCoreSurfaceUITests.swift; sourceTree = "<group>"; };
+		935488E794326FEEE724E65C /* MacProjectionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacProjectionCache.swift; sourceTree = "<group>"; };
+		A0ABAA1DDFE8D3C35FDFC93C /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		A14A2E36EF0F13717B92176D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A67B041C3256A02CB635FDA5 /* XNativeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XNativeClient.swift; sourceTree = "<group>"; };
+		B948195B898FED7704EAAF55 /* OpenCodexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodexStore.swift; sourceTree = "<group>"; };
+		D3ED83D9163D0E0D7A6B77AD /* OpenFishHostRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenFishHostRuntime.swift; sourceTree = "<group>"; };
+		D7FBB22A6D216E3AEA283CB5 /* NativeConnectionProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConnectionProfile.swift; sourceTree = "<group>"; };
+		E9F869736A7227D45F56E871 /* XMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = XMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EB27FCE7D54782931B955D7D /* IdleGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleGuard.swift; sourceTree = "<group>"; };
+		F2B868547127C8B6E83D5944 /* LocalVoiceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalVoiceService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		265083AC4D9AE8291E41EF0C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0A6416063D8C032398379D54 /* XMac.app */,
+				E9F869736A7227D45F56E871 /* XMacUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		52CACE7B985590D023D1D773 = {
+			isa = PBXGroup;
+			children = (
+				D4697EDFA7DAA88CF53B4D7B /* UITests */,
+				8367D33C2BE8217881D935DE /* XMac */,
+				265083AC4D9AE8291E41EF0C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8367D33C2BE8217881D935DE /* XMac */ = {
+			isa = PBXGroup;
+			children = (
+				A0ABAA1DDFE8D3C35FDFC93C /* AppIcon.icon */,
+				A14A2E36EF0F13717B92176D /* Assets.xcassets */,
+				73EE348D0C8D5EC8DB87B597 /* ContentView.swift */,
+				630AA03645B6532BF2B95635 /* ConversationProjection.swift */,
+				36DA095690025A0E805BF398 /* DshLiveConnection.swift */,
+				EB27FCE7D54782931B955D7D /* IdleGuard.swift */,
+				33F5D965B56259EC54D8F359 /* InAppBrowserView.swift */,
+				6433046F026B1B69E220ECE7 /* LocalNotificationService.swift */,
+				F2B868547127C8B6E83D5944 /* LocalVoiceService.swift */,
+				935488E794326FEEE724E65C /* MacProjectionCache.swift */,
+				D7FBB22A6D216E3AEA283CB5 /* NativeConnectionProfile.swift */,
+				B948195B898FED7704EAAF55 /* OpenCodexStore.swift */,
+				D3ED83D9163D0E0D7A6B77AD /* OpenFishHostRuntime.swift */,
+				10F86DB4304EEE96D2CAEAF8 /* XApiClient.swift */,
+				0DCD4EFE65797602061CE677 /* XApp.swift */,
+				A67B041C3256A02CB635FDA5 /* XNativeClient.swift */,
+			);
+			name = XMac;
+			path = Sources/XMac;
+			sourceTree = "<group>";
+		};
+		D4697EDFA7DAA88CF53B4D7B /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				7637BC85B34D2A312CCB4849 /* XMacCoreSurfaceUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		167EC09EEE7B7659E71DB7BE /* XMacUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E3FE674A668EFD9996901868 /* Build configuration list for PBXNativeTarget "XMacUITests" */;
+			buildPhases = (
+				9B3F003B63B41D4713B42BB2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F32DD3D793EFA793F0C97DFE /* PBXTargetDependency */,
+			);
+			name = XMacUITests;
+			packageProductDependencies = (
+			);
+			productName = XMacUITests;
+			productReference = E9F869736A7227D45F56E871 /* XMacUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		6167A949DDD59CAE30162F25 /* XMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFECE3F9BA1D53E022710C05 /* Build configuration list for PBXNativeTarget "XMac" */;
+			buildPhases = (
+				34BB6755CFF10C3B9C77F41D /* Sources */,
+				E9B568FBF2403FB6712322F0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = XMac;
+			packageProductDependencies = (
+			);
+			productName = XMac;
+			productReference = 0A6416063D8C032398379D54 /* XMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		529A7952827773CFB53851C9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					167EC09EEE7B7659E71DB7BE = {
+						TestTargetID = 6167A949DDD59CAE30162F25;
+					};
+				};
+			};
+			buildConfigurationList = 5ED18671952EE29BD4DC5FD4 /* Build configuration list for PBXProject "XMac" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 52CACE7B985590D023D1D773;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 265083AC4D9AE8291E41EF0C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6167A949DDD59CAE30162F25 /* XMac */,
+				167EC09EEE7B7659E71DB7BE /* XMacUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E9B568FBF2403FB6712322F0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA26876A92D2DEBA597BD324 /* AppIcon.icon in Resources */,
+				9A4FC3496E65F6E43CDA6002 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		34BB6755CFF10C3B9C77F41D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E18481F101803FB6355FC341 /* ContentView.swift in Sources */,
+				A4EBF88B676FFFC15AB869DE /* ConversationProjection.swift in Sources */,
+				EA9A673906B15E012B21723C /* DshLiveConnection.swift in Sources */,
+				8BB3CE491ADF9D414FCEFEA2 /* IdleGuard.swift in Sources */,
+				66F0A1B171C881A86F3D272D /* InAppBrowserView.swift in Sources */,
+				A6E00687DBD234530823AB82 /* LocalNotificationService.swift in Sources */,
+				C0DB46714191A83BA34AC6A5 /* LocalVoiceService.swift in Sources */,
+				49EFA88B619AC6C3B091D801 /* MacProjectionCache.swift in Sources */,
+				FCE254B576CA4CFACF77628E /* NativeConnectionProfile.swift in Sources */,
+				558068DC6DDDBD860A7FE41D /* OpenCodexStore.swift in Sources */,
+				865886F9C0448DF8CE30194D /* OpenFishHostRuntime.swift in Sources */,
+				2D5EAEFAADE5DAB00E85F432 /* XApiClient.swift in Sources */,
+				C4B563BAF922057AD8F29D0A /* XApp.swift in Sources */,
+				0ABE7AD0F56A66D7BABB94D6 /* XNativeClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9B3F003B63B41D4713B42BB2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B354CE14D221CECD379D53F7 /* XMacCoreSurfaceUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F32DD3D793EFA793F0C97DFE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6167A949DDD59CAE30162F25 /* XMac */;
+			targetProxy = F5E37CEAED5409463A0C908D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		356461B451EF330049726263 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = XMac;
+			};
+			name = Debug;
+		};
+		5690CBCF0964783B5A06B44C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		8226C73C2864867A3121E888 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish converts speech to text on this Mac without a cloud fallback.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
+				PRODUCT_NAME = OpenFish;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		8ACC349B58C7C6F8CC1637B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = XMac;
+			};
+			name = Release;
+		};
+		A11164EE1550DC6B8D7D4DEB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish converts speech to text on this Mac without a cloud fallback.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
+				PRODUCT_NAME = OpenFish;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		AB66B31BE8E74E7DBCE570F3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5ED18671952EE29BD4DC5FD4 /* Build configuration list for PBXProject "XMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5690CBCF0964783B5A06B44C /* Debug */,
+				AB66B31BE8E74E7DBCE570F3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CFECE3F9BA1D53E022710C05 /* Build configuration list for PBXNativeTarget "XMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8226C73C2864867A3121E888 /* Debug */,
+				A11164EE1550DC6B8D7D4DEB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E3FE674A668EFD9996901868 /* Build configuration list for PBXNativeTarget "XMacUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				356461B451EF330049726263 /* Debug */,
+				8ACC349B58C7C6F8CC1637B2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 529A7952827773CFB53851C9 /* Project object */;
+}

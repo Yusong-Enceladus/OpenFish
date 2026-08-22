@@ -1,0 +1,14 @@
+# Hermetic OpenCodex product layer for the native behavior lane. The standard
+# web scaffold remains the runtime; these are the same DSH-owned native and
+# local-voice plugins composed by the shipped OpenCodex profile.
+- insert:
+    - id: voice
+      name: '@deepseek-ai/dsh-voice'
+    - id: voice-apple
+      name: '@deepseek-ai/dsh-voice-apple'
+      inject: [voice]
+    - id: x-native
+      name: '@deepseek-ai/dsh-bundle-x-native'
+      inject: [webServer, connection]
+      config:
+        protocolVersion: v2

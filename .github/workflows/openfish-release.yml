@@ -1,0 +1,118 @@
+name: OpenFish release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/x-macos/**'
+      - 'apps/x-ios/**'
+      - 'packages/harness/**'
+      - 'packages/bundle/x-native/**'
+      - 'packages/host/apiproxy/**'
+      - 'script/**openfish**'
+      - 'script/check_harness_contract.sh'
+      - 'script/check_open_source_privacy.sh'
+      - 'scripts/sanitize-openfish-runtime.mjs'
+      - 'README*'
+      - 'SECURITY*'
+      - 'docs/openfish-*'
+      - '.github/workflows/openfish-release.yml'
+  push:
+    tags: ['openfish-v*']
+
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep jq
+      - name: Verify publishable source tree
+        run: ./script/check_openfish_source_release.sh
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CERTIFICATE_P12: ${{ secrets.OPENFISH_CERTIFICATE_P12 }}
+      CERTIFICATE_PASSWORD: ${{ secrets.OPENFISH_CERTIFICATE_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.OPENFISH_KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.OPENFISH_APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.OPENFISH_APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.OPENFISH_APPLE_APP_PASSWORD }}
+      SIGNING_IDENTITY: ${{ secrets.OPENFISH_SIGNING_IDENTITY }}
+      OPENFISH_MAC_BUNDLE_ID: ${{ vars.OPENFISH_MAC_BUNDLE_ID || 'app.openfish.mac' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.17.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require release credentials
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          test -n "$CERTIFICATE_P12"
+          test -n "$CERTIFICATE_PASSWORD"
+          test -n "$KEYCHAIN_PASSWORD"
+          test -n "$SIGNING_IDENTITY"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$APPLE_APP_PASSWORD"
+      - name: Import Apple signing identity
+        if: startsWith(github.ref, 'refs/tags/') && env.CERTIFICATE_P12 != ''
+        run: |
+          security create-keychain -p "$KEYCHAIN_PASSWORD" openfish-build.keychain
+          security default-keychain -s openfish-build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" openfish-build.keychain
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/openfish.p12"
+          security import "$RUNNER_TEMP/openfish.p12" -k openfish-build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" openfish-build.keychain
+          echo "OPENFISH_DEVELOPER_ID_APPLICATION=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+      - name: Configure Apple notarization
+        if: startsWith(github.ref, 'refs/tags/') && env.APPLE_ID != ''
+        run: |
+          xcrun notarytool store-credentials openfish-ci --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          echo "OPENFISH_NOTARY_PROFILE=openfish-ci" >> "$GITHUB_ENV"
+      - name: Build distributable
+        run: ./script/build_openfish_release.sh '${{ matrix.arch }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenFish-${{ matrix.arch }}
+          path: dist/openfish-${{ matrix.arch }}/*
+
+  ios:
+    runs-on: macos-15
+    env:
+      OPENFISH_IOS_BUNDLE_ID: ${{ vars.OPENFISH_IOS_BUNDLE_ID || 'app.openfish.ios' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build iPhone client
+        run: |
+          xcodebuild -project apps/x-ios/OpenCodexIOS.xcodeproj -scheme OpenFishIOS \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/openfish-ios-release \
+            PRODUCT_BUNDLE_IDENTIFIER="$OPENFISH_IOS_BUNDLE_ID" CODE_SIGNING_ALLOWED=NO build
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [privacy, macos, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OpenFish-*
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
