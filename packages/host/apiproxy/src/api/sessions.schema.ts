@@ -103,12 +103,13 @@ export const sessionSearchValueSchema = z.object({
 export const sessionCreateRequestSchema = z.object({
   workspaceId: workspaceIdSchema.optional(),
   cwd: z.string().optional(),
+  noProject: z.boolean().optional(),
   sessionId: sessionIdSchema.optional(),
   agentPreset: z.string().optional(),
   harnessId: z.string().min(1).optional(),
 }).refine(
-  payload => payload.workspaceId === undefined || payload.cwd === undefined,
-  { message: 'session.create accepts workspaceId or cwd, not both' },
+  payload => [payload.workspaceId !== undefined, payload.cwd !== undefined, payload.noProject === true].filter(Boolean).length <= 1,
+  { message: 'session.create accepts exactly one location mode: workspaceId, cwd, or noProject' },
 ) satisfies z.ZodType<Wire<RequestPayload<'session.create'>>>
 
 /** session.create response value. */

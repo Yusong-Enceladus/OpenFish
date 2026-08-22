@@ -365,6 +365,23 @@ describe('workspace.insertBefore', () => {
 })
 
 describe('session creation and Workspace membership', () => {
+  it('creates explicit No Project sessions in a private managed location instead of the Host cwd', async () => {
+    const managedHome = realpathSync.native(mkdtempSync(join(tmpdir(), 'openfish-no-project-home-')))
+    vi.stubEnv('DSH_HOME', managedHome)
+    try {
+      const { api, ctx, root } = await harness()
+      const sessionId = SessionId('session-no-project')
+      expectOk(await api.sessions.create(request({ noProject: true, sessionId })))
+      const session = ctx.sessions.get(sessionId)
+      expect(session?.header.cwd).toBe(join(managedHome, 'openfish', 'no-project', sessionId))
+      expect(session?.header.cwd).not.toBe(root)
+      expect(existsSync(session?.header.cwd ?? '')).toBe(true)
+      expect(expectOk(await api.workspace.list(request({}))).items.every(item => !item.sessionIds.includes(sessionId))).toBe(true)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

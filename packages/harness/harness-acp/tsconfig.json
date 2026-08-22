@@ -3,6 +3,7 @@
   "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
   "include": ["src/**/*.ts"],
   "references": [
+    { "path": "../../session/session-projection" },
     { "path": "../harness" },
     { "path": "../../core/agent" },
     { "path": "../../credentials/credentials" },

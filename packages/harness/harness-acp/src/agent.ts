@@ -722,6 +722,8 @@ export class AcpHarnessAgent implements Agent {
       protocol: 'acp',
       remoteSessionId: this.remoteSessionId,
     })
+    this.observeKinds(['protocol-adapter'], 'completed', 'ACP connection initialized')
+    this.observeKinds(['agent-session'], 'waiting', 'Harness session ready')
     const buffered = this.pendingStartupUpdates
     this.pendingStartupUpdates = []
     for (const update of buffered) void this.recordSessionUpdate(update)
@@ -890,6 +892,7 @@ export class AcpHarnessAgent implements Agent {
     let reason: TurnEndReason = { kind: 'completed' }
     let stepStarted = false
     this.session.append('turn/start', { turn })
+    this.observeKinds(['agent-session', 'agent-loop', 'context-runtime', 'context-loader'], 'active', `Turn ${turn} started`)
     try {
       const messages = [
         ...this.inbox.claim('next-turn', turn),
@@ -908,6 +911,7 @@ export class AcpHarnessAgent implements Agent {
         sessionId: remoteSessionId,
         prompt: messages.flatMap(promptBlocks),
       })
+      this.observeKinds(['model-client', 'model-router', 'model-registry'], 'completed', `Turn ${turn} inference completed`)
       const assembler = this.activeAssembler
       const content = assembler.blocks()
       if (content.length > 0) {
@@ -923,12 +927,14 @@ export class AcpHarnessAgent implements Agent {
     } catch (error: unknown) {
       if (running.abort.signal.aborted) reason = { kind: 'aborted', reason: running.abort.signal.reason as AgentCancelCause }
       else reason = { kind: 'error', error: { code: 'ACP_ERROR', message: error instanceof Error ? error.message : String(error) } }
+      this.observeKinds(['agent-session', 'agent-loop'], 'failed', `Turn ${turn} failed`)
       throw error
     } finally {
       this.activeAssembler = undefined
       this.activeChunkSeqs = []
       if (stepStarted) this.session.append('step/end', { turn, step: 1 })
       this.session.append('turn/end', { turn, reason })
+      if (reason.kind !== 'error') this.observeKinds(['agent-session', 'agent-loop'], 'waiting', `Turn ${turn} finished`)
     }
   }
 
@@ -944,6 +950,9 @@ export class AcpHarnessAgent implements Agent {
     const update = params.update
     if (update.sessionUpdate === 'config_option_update') this.configOptions = update.configOptions
     this.session.append('harness/native-event', { harnessId: this.pack.id, event: update })
+    if (update.sessionUpdate.includes('tool')) {
+      this.observeKinds(['tool-runtime', 'tool-registry'], 'active', update.sessionUpdate)
+    }
     if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text' && this.activeAssembler !== undefined) {
       const event = this.session.append('assistant/chunk', {
         turn: this.phase.kind === 'running' ? this.phase.turn : 0,
@@ -960,6 +969,7 @@ export class AcpHarnessAgent implements Agent {
     const allow = request.options.find(option => option.kind === 'allow_once' || option.kind === 'allow_always')
     const reject = request.options.find(option => option.kind === 'reject_once' || option.kind === 'reject_always')
     const signal = this.phase.kind === 'running' ? this.phase.abort.signal : undefined
+    this.observeKinds(['permission-policy'], 'active', request.toolCall.title ?? 'Permission requested')
     const outcome = await this.hostCtx.approval.request({
       agent: this,
       toolName: request.toolCall.title ?? 'External Harness action',
@@ -967,9 +977,17 @@ export class AcpHarnessAgent implements Agent {
       ...(signal === undefined ? {} : { signal }),
     })
     const selected = outcome === 'allowed-once' ? allow : reject
+    this.observeKinds(['permission-policy'], 'completed', outcome)
     return selected === undefined
       ? { outcome: { outcome: 'cancelled' } }
       : { outcome: { outcome: 'selected', optionId: selected.optionId } }
+  }
+
+  private observeKinds(kinds: string[], status: 'active' | 'waiting' | 'completed' | 'failed', activity: string): void {
+    for (const node of this.pack.graph.nodes) {
+      if (!kinds.includes(node.kind)) continue
+      this.session.append('harness/runtime-node', { harnessId: this.pack.id, nodeId: node.id, status, activity })
+    }
   }
 
   /** Stop the remote session and release its process and scoped registrations. */

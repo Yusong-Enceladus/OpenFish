@@ -10,7 +10,7 @@
 - 安装级默认 Harness 选择，以及每个任务独立选择 Harness。
 - No Project 任务存储在 OpenFish 专用位置，而不是 Desktop。
 - 由协议驱动的 ACP 模型、思考强度、模式与配置控件。
-- Mac 与 iPhone 上按真实性等级展示 Harness 图，并在 macOS Harness Studio 中创建自定义 Pack、编辑图、导入和无凭证导出。
+- Mac 与 iPhone 使用 Progressive Lens 展示 Harness：面向普通用户的 Simple 说明、有证据支撑的 Architecture Manifest、Runtime 观测视图，以及在 macOS Manifest Editor 中创建自定义 Pack、编辑图、进行不计费预检、导入和无凭证导出。
 - 生成式社区 Pack 目录；通过 Pull Request 发布，无需等待 OpenFish App 发版。
 - 会话固定到创建任务时使用的 Harness Pack 版本。
 - 原生 iPhone 配对、任务投影、审批、队列与语音输入。
@@ -29,6 +29,7 @@
 - ACP Registry 收录只是发现元数据，不代表 OpenFish 安全审计或质量背书。非 ACP Harness 仍需 Driver 插件。
 - 社区发布目前通过受审核的 GitHub Pull Request 完成；OpenFish 尚未运营 App 内账号、排行系统或一键式 Marketplace 后端。
 - 通用执行语义只覆盖可编辑 composable 节点中的 `acpSessionOptions`；除非该 Pack 的 Driver 实现了其他配置，否则其余节点配置只用于描述。
+- 未知 Harness 的内部结构始终只显示一个 opaque 边界。丰富 Architecture 视图必须声明进程边界、至少三个相连的 Runtime 职责，并为每个组件提供证据；UI 不会猜测私有内部结构。
 - 新操作系统可能无法继续安装旧任务固定的 Runtime，从而暴露上游兼容性破坏。请导出重要工作。
 
 ## 五分钟验收

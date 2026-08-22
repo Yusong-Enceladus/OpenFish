@@ -76,6 +76,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-cordis-host-runner/types'
 import type {} from '@deepseek-ai/dsh-skill'
 import type { HarnessId } from '@deepseek-ai/dsh-harness'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 // The settings/credentials seams: brand guards run at this wire boundary; the
 // service reads stay optional (`ctx.get`) so a composition without either
 // provider still serves every other domain.
@@ -2270,7 +2271,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
+        // A task without a Project must never inherit the Host launch directory
+        // (often Desktop). Give it a private, stable per-session working area.
+        const detached = request.payload.noProject === true
+        const cwd = detached ? dshHomePath('openfish', 'no-project', sessionId) : workspace?.path ?? request.payload.cwd ?? defaults.cwd
+        if (detached) await mkdir(cwd, { recursive: true, mode: 0o700 })
         const requestedPreset = request.payload.agentPreset
         let requestedHarness = request.payload.harnessId
         if (requestedHarness === undefined) {
@@ -3484,6 +3489,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             if (action === 'install' || action === 'update') await harnesses.install(harnessId, signal)
             else if (action === 'uninstall') await harnesses.uninstall(harnessId)
             else if (action === 'rollback') await harnesses.rollback(harnessId)
+            else if (action === 'probe') await harnesses.probe(harnessId, signal)
             else if (action === 'remove') await harnesses.removeUserPack(harnessId)
             else if (action === 'default') await harnesses.selectDefault(harnessId)
             else if (action === 'login') {

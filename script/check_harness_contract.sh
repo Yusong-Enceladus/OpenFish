@@ -10,6 +10,8 @@ cd "$ROOT_DIR"
 # artifact can be produced.
 pnpm exec vitest run \
   packages/harness/harness/tests/manifest.spec.ts \
+  packages/harness/harness/tests/conformance.spec.ts \
+  packages/harness/harness/tests/projection.spec.ts \
   packages/harness/harness/tests/service.spec.ts \
   packages/harness/harness-acp/tests/launch.spec.ts \
   packages/host/apiproxy/tests/api-proxy-agent-preset.spec.ts \

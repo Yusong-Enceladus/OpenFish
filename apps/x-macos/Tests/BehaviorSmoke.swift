@@ -10,7 +10,8 @@ struct BehaviorSmoke {
             exit(2)
         }
 
-        let workspace = CommandLine.arguments[2]
+        let workspaceArgument = CommandLine.arguments[2]
+        let workspace: String? = workspaceArgument == "--no-project" ? nil : workspaceArgument
         let promptFile = CommandLine.arguments[3]
         UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
         defer { UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId") }
@@ -30,6 +31,38 @@ struct BehaviorSmoke {
                 throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "session selection failed")
             }
             try await waitUntil("permissions projection") { store.currentPermissions != nil }
+            guard let effectiveWorkspace = store.currentSession?.cwd,
+                  !effectiveWorkspace.isEmpty else {
+                throw BehaviorSmokeError.missingEffectiveWorkspace
+            }
+            if workspace == nil {
+                guard effectiveWorkspace.contains("/openfish/no-project/\(sessionId)") else {
+                    throw BehaviorSmokeError.invalidNoProjectWorkspace(effectiveWorkspace)
+                }
+            }
+
+            // Fresh installations intentionally start without a fabricated
+            // provider selection. Exercise the same first-run model choice a
+            // user makes instead of depending on a developer machine's saved
+            // default; the replay adapter keeps this hermetic and credential-free.
+            try await waitUntil("model directory") { store.sessionModels != nil }
+            if store.sessionModels?.routable != true {
+                guard let group = store.sessionModels?.groups.first(where: { !$0.models.isEmpty }),
+                      let model = group.models.first else {
+                    throw BehaviorSmokeError.missingRoutableModel
+                }
+                await store.chooseModel(
+                    provider: group.id,
+                    model: model,
+                    effort: model.reasoning?.defaultEffort
+                )
+                guard store.errorBanner == nil else {
+                    throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "model switch failed")
+                }
+                try await waitUntil("routable model selection") {
+                    store.sessionModels?.routable == true
+                }
+            }
 
             guard let readOnly = store.currentPermissions?.options.first(where: { $0.value == "read-only" }) else {
                 throw BehaviorSmokeError.missingReadOnlyPreset
@@ -72,7 +105,7 @@ struct BehaviorSmoke {
             }
             await store.shutdown()
 
-            let output = workspace + "/notes.txt"
+            let output = effectiveWorkspace + "/notes.txt"
             guard FileManager.default.fileExists(atPath: output),
                   !(try String(contentsOfFile: output, encoding: .utf8)).isEmpty else {
                 throw BehaviorSmokeError.toolDidNotWrite
@@ -91,7 +124,8 @@ struct BehaviorSmoke {
             }
             await resumed.shutdown()
 
-            print("OpenCodex behavior smoke passed: DSH prompt, approval, tool result, final answer, and restart resume")
+            let mode = workspace == nil ? "No Project" : "project"
+            print("OpenCodex behavior smoke passed (\(mode)): DSH prompt, approval, tool result, final answer, and restart resume")
         } catch {
             fputs("OpenCodex behavior smoke failed: \(error)\n", stderr)
             exit(1)
@@ -114,6 +148,9 @@ struct BehaviorSmoke {
 
 private enum BehaviorSmokeError: Error, CustomStringConvertible {
     case missingReadOnlyPreset
+    case missingRoutableModel
+    case missingEffectiveWorkspace
+    case invalidNoProjectWorkspace(String)
     case missingApproval
     case storeFailure(String)
     case timedOut(String)
@@ -122,6 +159,9 @@ private enum BehaviorSmokeError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .missingReadOnlyPreset: return "DSH did not advertise the read-only permission preset"
+        case .missingRoutableModel: return "DSH did not advertise a routable model for the replay fixture"
+        case .missingEffectiveWorkspace: return "the created session did not expose an effective working directory"
+        case let .invalidNoProjectWorkspace(path): return "No Project resolved outside its private managed directory: \(path)"
         case .missingApproval: return "the pending approval disappeared before it could be answered"
         case let .storeFailure(message): return message
         case let .timedOut(label): return "timed out waiting for \(label)"

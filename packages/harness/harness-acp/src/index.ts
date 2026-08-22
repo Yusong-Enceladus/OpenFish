@@ -78,7 +78,38 @@ export function apply(ctx: Context): void {
   }
 
   const driver: HarnessDriver = {
+    apiVersion: 1,
     protocol: 'acp',
+    async capabilities(pack) {
+      return [
+        { id: 'lifecycle.install', status: 'supported', source: 'driver' },
+        { id: 'lifecycle.update', status: 'supported', source: 'driver' },
+        { id: 'lifecycle.rollback', status: 'supported', source: 'driver' },
+        { id: 'lifecycle.uninstall', status: 'supported', source: 'driver' },
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'session.cancel', status: 'supported', source: 'driver' },
+        { id: 'session.fork', status: 'runtime', source: 'runtime', detail: 'OpenFish can fork visible history; remote Harness continuity depends on ACP resume semantics.' },
+        { id: 'session.archive', status: 'supported', source: 'driver' },
+        { id: 'workspace.project', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.models', status: 'runtime', source: 'runtime', detail: 'Models are reported by the running ACP agent.' },
+        { id: 'configuration.reasoning', status: 'runtime', source: 'runtime', detail: 'Reasoning controls appear only when advertised by the selected model.' },
+        { id: 'configuration.auth', status: 'runtime', source: 'runtime', detail: 'Authentication is discovered from the installed agent and Pack.' },
+        { id: 'interaction.tools', status: 'supported', source: 'driver' },
+        { id: 'interaction.approvals', status: 'supported', source: 'driver' },
+        { id: 'interaction.questions', status: 'unsupported', source: 'driver', detail: 'ACP question requests are not mapped by Driver API v1.' },
+        { id: 'interaction.files', status: 'unsupported', source: 'driver', detail: 'Driver API v1 currently sends text prompts to ACP Harnesses.' },
+        { id: 'interaction.events', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+        { id: 'architecture.runtime-observation', status: 'runtime', source: 'runtime', detail: 'ACP updates provide runtime evidence without claiming private internals.' },
+        { id: 'architecture.edit', status: pack.graph.level === 'composable' ? 'supported' : 'unsupported', source: 'pack' },
+        { id: 'diagnostics.preflight', status: 'supported', source: 'driver' },
+        { id: 'builder.manifest', status: 'supported', source: 'pack' },
+        { id: 'builder.test', status: 'supported', source: 'driver' },
+        { id: 'builder.publish', status: 'unsupported', source: 'pack', detail: 'OpenFish can export a credential-free Pack but does not submit it automatically.' },
+      ]
+    },
     async available(pack) {
       try {
         if (pack.distribution?.kind === 'binary') {

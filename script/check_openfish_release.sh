@@ -14,6 +14,14 @@ case "$APP_BUNDLE" in
 esac
 [[ -d "$APP_BUNDLE/Contents" ]] || { echo "check_openfish_release: app is absent" >&2; exit 1; }
 
+INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
+short_version="$(plutil -extract CFBundleShortVersionString raw -o - "$INFO_PLIST" 2>/dev/null || true)"
+build_version="$(plutil -extract CFBundleVersion raw -o - "$INFO_PLIST" 2>/dev/null || true)"
+[[ -n "$short_version" && -n "$build_version" ]] || {
+  echo "check_openfish_release: app has no user-visible/build version" >&2
+  exit 1
+}
+
 if rg -n '/Users/[A-Za-z0-9._-]+/|file:///Users/[A-Za-z0-9._-]+/' "$APP_BUNDLE/Contents" >/dev/null; then
   echo "check_openfish_release: app contains a build-machine path" >&2
   exit 1

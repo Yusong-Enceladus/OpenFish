@@ -5,16 +5,36 @@ import { describe, expect, it } from 'vitest'
 import { parseHarnessPack } from '../../harness/src/manifest.ts'
 import { acpHarnessConfigCatalog, acpHarnessModelCatalog, launchArgv, managedLaunchArgv, packSessionConfiguration } from '../src/agent.ts'
 
+const evidence = [{ kind: 'declared' as const, source: 'ACP launch test fixture', version: '1' }]
+
+function composableGraph(nodes: Array<Record<string, unknown>>, edges: Array<{ from: string; to: string }>) {
+  return {
+    level: 'composable' as const,
+    manifestVersion: 1 as const,
+    boundary: 'Test ACP Harness process',
+    evidence,
+    nodes: nodes.map(node => ({ responsibility: 'Tested ACP component.', evidence, ...node })),
+    edges,
+  }
+}
+
+const opaqueGraph = {
+  level: 'opaque' as const,
+  nodes: [{ id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false }],
+  edges: [],
+}
+
 describe('ACP Harness launch boundary', () => {
   it('projects only editable composable node defaults into live ACP options', () => {
     const pack = parseHarnessPack({
       schemaVersion: 0, id: 'configured-acp', name: 'Configured ACP', version: '1.0.0', publisher: 'Test',
       verified: false, protocol: 'acp', source: 'user',
       distribution: { kind: 'npx', package: '@example/configured-acp@1.0.0', args: [], env: {} },
-      graph: { level: 'composable', nodes: [
+      graph: composableGraph([
         { id: 'model', kind: 'model', title: 'Model', editable: true, config: { acpSessionOptions: { model: 'gpt-test', sandbox: true } } },
         { id: 'hidden', kind: 'runtime', title: 'Hidden', editable: false, config: { acpSessionOptions: { ignored: 'value' } } },
-      ], edges: [] },
+        { id: 'output', kind: 'output', title: 'Output', editable: false },
+      ], [{ from: 'model', to: 'hidden' }, { from: 'hidden', to: 'output' }]),
     })
     expect(packSessionConfiguration(pack)).toEqual([
       { id: 'model', value: 'gpt-test' },
@@ -27,10 +47,11 @@ describe('ACP Harness launch boundary', () => {
       schemaVersion: 0, id: 'conflicting-acp', name: 'Conflicting ACP', version: '1.0.0', publisher: 'Test',
       verified: false, protocol: 'acp', source: 'user',
       distribution: { kind: 'npx', package: '@example/conflicting-acp@1.0.0', args: [], env: {} },
-      graph: { level: 'composable', nodes: [
+      graph: composableGraph([
         { id: 'one', kind: 'model', title: 'One', editable: true, config: { acpSessionOptions: { model: 'one' } } },
         { id: 'two', kind: 'model', title: 'Two', editable: true, config: { acpSessionOptions: { model: 'two' } } },
-      ], edges: [] },
+        { id: 'output', kind: 'output', title: 'Output', editable: false },
+      ], [{ from: 'one', to: 'output' }, { from: 'two', to: 'output' }]),
     })
     expect(() => packSessionConfiguration(pack)).toThrow('conflicting values')
   })
@@ -102,7 +123,7 @@ describe('ACP Harness launch boundary', () => {
       verified: false,
       protocol: 'acp',
       distribution: { kind: 'npx', package: '@example/test-acp@1.0.0', args: ['--acp'], env: { TEST: '1' } },
-      graph: { level: 'opaque', nodes: [], edges: [] },
+      graph: opaqueGraph,
       source: 'user',
     })
     const launch = launchArgv(pack)
@@ -123,7 +144,7 @@ describe('ACP Harness launch boundary', () => {
       verified: false,
       protocol: 'acp',
       distribution: { kind: 'bunx', package: '@example/bun-acp@1.0.0', args: ['acp'], env: {} },
-      graph: { level: 'opaque', nodes: [], edges: [] },
+      graph: opaqueGraph,
       source: 'user',
     })
     const launch = launchArgv(pack)
@@ -135,7 +156,7 @@ describe('ACP Harness launch boundary', () => {
     const pack = parseHarnessPack({
       schemaVersion: 0, id: 'python-acp', name: 'Python ACP', version: '1.0.0', publisher: 'Test', verified: false,
       protocol: 'acp', distribution: { kind: 'uvx', package: 'python-acp==1.0.0', args: ['--acp'], env: {} },
-      graph: { level: 'opaque', nodes: [], edges: [] }, source: 'user',
+      graph: opaqueGraph, source: 'user',
     })
     const launch = launchArgv(pack)
     expect(launch.argv.slice(1)).toEqual(['tool', 'run', '--from', 'python-acp==1.0.0', 'python-acp', '--acp'])
@@ -152,7 +173,7 @@ describe('ACP Harness launch boundary', () => {
       const pack = parseHarnessPack({
         schemaVersion: 0, id: 'managed-acp', name: 'Managed ACP', version: '2.0.0', publisher: 'Test', verified: false,
         protocol: 'acp', distribution: { kind: 'npx', package: '@example/test-acp@2.0.0', args: ['--acp'], env: {} },
-        graph: { level: 'opaque', nodes: [], edges: [] }, source: 'user',
+        graph: opaqueGraph, source: 'user',
       })
       await expect(managedLaunchArgv(pack, directory)).resolves.toEqual({
         argv: [join(directory, 'node_modules', '.bin', 'test-acp'), '--acp'], env: {},
@@ -172,7 +193,7 @@ describe('ACP Harness launch boundary', () => {
       const pack = parseHarnessPack({
         schemaVersion: 0, id: 'managed-bun-acp', name: 'Managed Bun ACP', version: '2.0.0', publisher: 'Test', verified: false,
         protocol: 'acp', distribution: { kind: 'bunx', package: '@example/bun-acp@2.0.0', args: ['acp'], env: {} },
-        graph: { level: 'opaque', nodes: [], edges: [] }, source: 'user',
+        graph: opaqueGraph, source: 'user',
       })
       const launch = await managedLaunchArgv(pack, directory)
       expect(launch.argv[0]).toContain('/bun/bin/bun.exe')
@@ -198,7 +219,7 @@ describe('ACP Harness launch boundary', () => {
       const pack = parseHarnessPack({
         schemaVersion: 0, id: 'embedded-bun-acp', name: 'Embedded Bun ACP', version: '2.0.0', publisher: 'Test', verified: false,
         protocol: 'acp', distribution: { kind: 'bunx', package: '@example/bun-acp@2.0.0', args: ['acp'], env: {} },
-        graph: { level: 'opaque', nodes: [], edges: [] }, source: 'user',
+        graph: opaqueGraph, source: 'user',
       })
       const launch = await managedLaunchArgv(pack, installation)
       expect(launch.argv[0]).toBe(bundledBun)

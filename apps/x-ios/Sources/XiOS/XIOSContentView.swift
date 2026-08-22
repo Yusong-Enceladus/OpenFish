@@ -15,6 +15,7 @@ public struct OpenCodexIOSView: View {
     @State private var choseInitialWorkspace = false
     @State private var selectedComputer = "all"
     @State private var showsActivity = false
+    @State private var inspectedHomeHarness: MobileHarness?
 
     public init() {
         let demo = ProcessInfo.processInfo.arguments.contains("--openfish-demo")
@@ -41,6 +42,13 @@ public struct OpenCodexIOSView: View {
                         store: store,
                         selection: $selectedComputer
                     )
+
+                    if let harness = homeHarness, !showsActivity {
+                        MobileCurrentHarnessCard(harness: harness) { inspectedHomeHarness = harness }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
+                    }
 
                     if store.workspaces.isEmpty && store.sessions.isEmpty {
                         ContentUnavailableView(
@@ -183,6 +191,12 @@ public struct OpenCodexIOSView: View {
                 MobileConnectionView(store: store)
                     .presentationDetents([.medium, .large])
             }
+            .sheet(item: $inspectedHomeHarness) { harness in
+                MobileHarnessDetailView(store: store, harness: harness) {
+                    Task { await store.selectDefaultHarness(harness) }
+                    inspectedHomeHarness = nil
+                }
+            }
             .sheet(isPresented: $store.showsWorkspaceBrowser) {
                 MobileHostDirectoryBrowser(store: store)
             }
@@ -210,6 +224,7 @@ public struct OpenCodexIOSView: View {
             .onChange(of: store.workspaces) { _, _ in chooseInitialWorkspaceIfNeeded() }
             .onChange(of: store.sessions) { _, _ in chooseInitialWorkspaceIfNeeded() }
             .onChange(of: scenePhase) { _, phase in
+                guard shouldBoot else { return }
                 switch phase {
                 case .active:
                     Task { await store.becameActive() }
@@ -235,6 +250,11 @@ public struct OpenCodexIOSView: View {
 
     private var searchIsActive: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var homeHarness: MobileHarness? {
+        store.harnesses.first(where: { $0.id == store.selectedHarnessId })
+            ?? store.harnesses.first(where: \.isDefault)
     }
 
     private var preferredWorkspaceID: String? {
@@ -374,6 +394,42 @@ public struct XIOSContentView: View {
     public var body: some View { OpenCodexIOSView() }
 }
 
+private struct MobileCurrentHarnessCard: View {
+    let harness: MobileHarness
+    let inspect: () -> Void
+
+    var body: some View {
+        Button(action: inspect) {
+            HStack(spacing: 12) {
+                Image(systemName: "square.3.layers.3d")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.13), in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Current Harness").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(harness.name).font(.headline)
+                        if harness.verified { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue) }
+                    }
+                    Text("\(harness.graph.nodes.count) components · \(harness.graph.level.capitalized) · \(harness.compatibility.status.capitalized)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 5) {
+                    Label("See how it works", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Current Harness \(harness.name), see how this Harness works")
+    }
+}
+
 private struct MobileHarnessOnboardingView: View {
     @ObservedObject var store: MobileOpenCodexStore
     @State private var query = ""
@@ -396,8 +452,8 @@ private struct MobileHarnessOnboardingView: View {
                     Image(systemName: "shippingbox.and.arrow.backward")
                         .font(.system(size: 42, weight: .medium))
                         .foregroundStyle(.tint)
-                    Text("Choose your default Harness").font(.largeTitle.bold())
-                    Text("OpenFish will ask the connected Mac to install it. New tasks use this Harness unless you choose another before starting; existing tasks never change.")
+                    Text("Choose how OpenFish works").font(.largeTitle.bold())
+                    Text("Pick the execution system that owns models, tools, guardrails, and resumable sessions. The connected Mac installs it; existing tasks never change Harnesses.")
                         .foregroundStyle(.secondary)
                     ForEach(filtered) { harness in
                         HStack(spacing: 12) {
@@ -405,11 +461,11 @@ private struct MobileHarnessOnboardingView: View {
                                 Text(harness.name).font(.headline)
                                 Text(harness.description ?? "No description provided.")
                                     .font(.subheadline).foregroundStyle(.secondary)
-                                Text("\(harness.source) · \(harness.compatibility.status) · \(harness.graph.level)")
+                                Text("\(harness.graph.nodes.count) components · \(harness.compatibility.status) · \(harness.graph.level)")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Details") { inspectedHarness = harness }
+                            Button("How it works") { inspectedHarness = harness }
                                 .buttonStyle(.bordered)
                             Button("Use") { requestUse(harness) }
                                 .buttonStyle(.borderedProminent)
@@ -428,7 +484,7 @@ private struct MobileHarnessOnboardingView: View {
             .searchable(text: $query, prompt: "Find a Harness")
         }
         .sheet(item: $inspectedHarness) { harness in
-            MobileHarnessDetailView(harness: harness) {
+            MobileHarnessDetailView(store: store, harness: harness) {
                 requestUse(harness)
                 inspectedHarness = nil
             }
@@ -458,9 +514,12 @@ private struct MobileHarnessOnboardingView: View {
 }
 
 private struct MobileHarnessDetailView: View {
+    @ObservedObject var store: MobileOpenCodexStore
     let harness: MobileHarness
     let use: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var lens = "Simple"
+    @State private var selectedNodeId: String?
 
     private var truthExplanation: String {
         switch harness.graph.level {
@@ -484,21 +543,107 @@ private struct MobileHarnessDetailView: View {
                         if harness.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue).font(.title2) }
                     }
                     if let description = harness.description { Text(description).foregroundStyle(.secondary) }
-                    HStack {
-                        Label(harness.installation.status, systemImage: "shippingbox")
-                        Spacer()
-                        Label(harness.compatibility.status, systemImage: "checkmark.shield")
+                    Picker("Harness lens", selection: $lens) {
+                        Text("Simple").tag("Simple")
+                        Text("Architecture").tag("Architecture")
+                        Text("Runtime").tag("Runtime")
+                        Text("Manifest").tag("Manifest")
                     }
-                    .font(.caption).foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Architecture").font(.headline)
-                            Spacer()
-                            Text(harness.graph.level.capitalized).font(.caption.weight(.semibold))
+                    .pickerStyle(.segmented)
+
+                    if lens == "Simple" {
+                        VStack(spacing: 10) {
+                            MobileLensFact(title: "Models & sign-in", value: harness.auth.status.replacingOccurrences(of: "-", with: " "), icon: "cpu")
+                            MobileLensFact(title: "Installation", value: harness.installation.status.replacingOccurrences(of: "-", with: " "), icon: "shippingbox")
+                            MobileLensFact(title: "Compatibility", value: harness.compatibility.status, icon: "checkmark.shield")
+                            MobileLensFact(title: "Driver contract", value: harness.driver.loaded ? "API v\(harness.driver.apiVersion) · \(harness.capabilities.filter { $0.status != "unsupported" }.count) capabilities" : "Driver not loaded", icon: "puzzlepiece.extension")
                         }
-                        MobileHarnessGraphPreview(graph: harness.graph)
-                            .frame(height: max(180, CGFloat(harness.graph.nodes.count) * 72 + 24))
-                        Text(truthExplanation).font(.footnote).foregroundStyle(.secondary)
+                    } else if lens == "Manifest" {
+                        ContentUnavailableView(
+                            "Manifest Editor is on your Mac",
+                            systemImage: "point.3.connected.trianglepath.dotted",
+                            description: Text("Create, validate, import, preflight, and prepare credential-free Harness Packs on the connected Mac. Registry submission remains an explicit review step; this iPhone is a safe read-only architecture and approval controller.")
+                        )
+                        .frame(minHeight: 250)
+                    } else if lens == "Runtime" {
+                        VStack(alignment: .leading, spacing: 12) {
+                            MobileHarnessGraphPreview(graph: harness.graph, runtime: store.currentHarnessRuntime)
+                                .frame(height: max(190, CGFloat((harness.graph.nodes.count + 1) / 2) * 76 + 24))
+                            if let runtime = store.currentHarnessRuntime, !runtime.nodes.isEmpty {
+                                ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
+                                    if let activity = runtime.nodes[nodeID] {
+                                        MobileLensFact(
+                                            title: harness.graph.nodes.first(where: { $0.id == nodeID })?.title ?? nodeID,
+                                            value: "\(activity.status) · \(activity.activity)",
+                                            icon: activity.status == "failed" ? "exclamationmark.triangle" : "waveform.path.ecg"
+                                        )
+                                    }
+                                }
+                            } else {
+                                ContentUnavailableView("No runtime evidence yet", systemImage: "waveform.path.ecg", description: Text("Start a task with this Harness. Only observed declared components will appear."))
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Label(harness.graph.boundary ?? "Harness process", systemImage: "square.dashed")
+                                Spacer()
+                                Text(harness.graph.level.capitalized).font(.caption.weight(.semibold))
+                            }
+                            .font(.caption.weight(.semibold))
+                            MobileHarnessGraphPreview(graph: harness.graph)
+                                .frame(height: max(190, CGFloat((harness.graph.nodes.count + 1) / 2) * 76 + 24))
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(harness.graph.nodes) { node in
+                                        Button(node.title) { selectedNodeId = node.id }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                            .tint(selectedNodeId == node.id ? Color.accentColor : nil)
+                                    }
+                                }
+                            }
+                            if let node = selectedNode {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack {
+                                        Text(node.title).font(.headline)
+                                        Spacer()
+                                        Text(node.editable ? "Editable" : "Read only").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Text(node.responsibility ?? "This Pack has not supplied a responsibility statement.")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                    if let evidence = node.evidence {
+                                        ForEach(evidence) { item in
+                                            Label(item.kind.replacingOccurrences(of: "-", with: " ").capitalized, systemImage: "doc.text.magnifyingglass")
+                                                .font(.caption.weight(.semibold))
+                                            Text("\(item.source)\(item.version.map { " · \($0)" } ?? "")")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .padding(12)
+                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                            }
+                            Text(truthExplanation).font(.footnote).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Negotiated capabilities").font(.headline)
+                                ForEach(harness.capabilities) { capability in
+                                    HStack {
+                                        Image(systemName: capability.status == "supported" ? "checkmark.circle.fill" : capability.status == "runtime" ? "waveform.path.ecg" : "minus.circle")
+                                            .foregroundStyle(capability.status == "supported" ? Color.green : capability.status == "runtime" ? Color.blue : Color.secondary)
+                                        Text(capability.id.replacingOccurrences(of: ".", with: " · "))
+                                            .font(.footnote)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.72)
+                                        Spacer()
+                                        Text(capability.status).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        }
                     }
                     Button("Install and use for new tasks", action: use)
                         .buttonStyle(.borderedProminent)
@@ -506,21 +651,56 @@ private struct MobileHarnessDetailView: View {
                         .frame(maxWidth: .infinity)
                         .disabled(!harness.available)
                 }
+                // A Pack may advertise arbitrarily long capability ids, evidence
+                // URLs, or component titles. Constrain the content to the phone
+                // viewport so one unbroken value cannot widen and clip the whole
+                // sheet (including its navigation controls).
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(22)
             }
+            .frame(maxWidth: .infinity)
             .navigationTitle("Harness details")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
+        .onAppear { selectedNodeId = harness.graph.nodes.first?.id }
+    }
+
+    private var selectedNode: MobileHarness.GraphNode? {
+        harness.graph.nodes.first(where: { $0.id == selectedNodeId }) ?? harness.graph.nodes.first
+    }
+}
+
+private struct MobileLensFact: View {
+    let title: String
+    let value: String
+    let icon: String
+    var body: some View {
+        HStack {
+            Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
+            Spacer()
+            Text(value.capitalized).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .padding(13)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 13))
     }
 }
 
 private struct MobileHarnessGraphPreview: View {
     let graph: MobileHarness.Graph
+    var runtime: MobileHarnessRuntimeProjection? = nil
+    @State private var scale: CGFloat = 1
+    @GestureState private var gestureScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @GestureState private var gestureOffset: CGSize = .zero
 
     var body: some View {
         GeometryReader { proxy in
+            let columns = graph.nodes.count <= 1 ? 1 : 2
+            let cellWidth = (proxy.size.width - 44) / CGFloat(columns)
             let points = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { index, node in
-                (node.id, CGPoint(x: proxy.size.width / 2, y: 42 + CGFloat(index) * 72))
+                let column = index % columns
+                let row = index / columns
+                return (node.id, CGPoint(x: 18 + cellWidth / 2 + CGFloat(column) * (cellWidth + 8), y: 42 + CGFloat(row) * 76))
             })
             ZStack {
                 ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
@@ -532,19 +712,58 @@ private struct MobileHarnessGraphPreview: View {
                 ForEach(graph.nodes) { node in
                     VStack(spacing: 2) {
                         Image(systemName: node.kind.contains("runtime") ? "cpu" : "square.stack.3d.up")
-                        Text(node.title).font(.caption.weight(.semibold)).lineLimit(1)
-                        Text(node.kind).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(node.title).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
+                        Text(node.kind).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
                     }
-                    .frame(width: min(220, proxy.size.width - 36), height: 54)
-                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25)))
+                    .frame(width: cellWidth, height: 56)
+                    .background(runtimeColor(node.id).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(runtimeColor(node.id).opacity(runtime?.nodes[node.id] == nil ? 0.25 : 0.9), lineWidth: runtime?.nodes[node.id] == nil ? 1 : 2))
                     .position(points[node.id] ?? .zero)
                 }
             }
+            .scaleEffect(scale * gestureScale)
+            .offset(x: offset.width + gestureOffset.width, y: offset.height + gestureOffset.height)
+            .gesture(
+                SimultaneousGesture(
+                    MagnificationGesture()
+                        .updating($gestureScale) { value, state, _ in state = value }
+                        .onEnded { value in scale = min(2.5, max(0.6, scale * value)) },
+                    DragGesture()
+                        .updating($gestureOffset) { value, state, _ in state = value.translation }
+                        .onEnded { value in
+                            offset.width += value.translation.width
+                            offset.height += value.translation.height
+                        }
+                )
+            )
             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .clipped()
+            .overlay(alignment: .topTrailing) {
+                if scale != 1 || offset != .zero {
+                    Button {
+                        withAnimation(.snappy) { scale = 1; offset = .zero }
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .padding(8)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .padding(8)
+                    .accessibilityLabel("Reset graph view")
+                }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(graph.level) Harness architecture with \(graph.nodes.count) nodes")
+    }
+
+    private func runtimeColor(_ nodeId: String) -> Color {
+        switch runtime?.nodes[nodeId]?.status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
+        }
     }
 }
 
@@ -1081,7 +1300,8 @@ private struct MobileConversationOptionsMenu: View {
     @Binding var renaming: Bool
 
     var body: some View {
-        MobileModelSelectionMenu(store: store)
+        if store.harnessCan("configuration.models") { MobileModelSelectionMenu(store: store) }
+        if store.harnessCan("configuration.reasoning") { MobileReasoningSelectionMenu(store: store) }
         MobileHarnessConfigMenu(store: store)
         if store.selectedSession == nil {
             Menu("Project") {
@@ -1173,7 +1393,7 @@ private struct MobileModelSelectionMenu: View {
 
     var body: some View {
         if let models = store.sessionModels, !models.groups.isEmpty {
-            Menu(store.currentModelLabel) {
+            Menu(store.currentModelName) {
                 ForEach(models.groups) { group in
                     Section(group.name) {
                         ForEach(group.models) { model in
@@ -1181,6 +1401,11 @@ private struct MobileModelSelectionMenu: View {
                         }
                     }
                 }
+            }
+        } else {
+            Menu("Models unavailable") {
+                Text(store.errorMessage ?? "This Harness has not advertised model choices yet.")
+                Button("Refresh") { Task { await store.refreshCurrentModels() } }
             }
         }
     }
@@ -1192,37 +1417,44 @@ private struct MobileModelSelectionRow: View {
     let model: MobileCatalogModel
 
     var body: some View {
-        if let reasoning = model.reasoning, reasoning.efforts.count > 1 {
-            Menu(model.name) {
-                ForEach(reasoning.efforts) { effort in
+        Button {
+            Task {
+                await store.chooseModel(
+                    provider: groupID,
+                    model: model,
+                    effort: model.reasoning?.defaultEffort
+                )
+            }
+        } label: {
+            if store.sessionModels?.current.provider == groupID,
+               store.sessionModels?.current.model == model.id {
+                Label(model.name, systemImage: "checkmark")
+            } else {
+                Text(model.name)
+            }
+        }
+    }
+}
+
+private struct MobileReasoningSelectionMenu: View {
+    @ObservedObject var store: MobileOpenCodexStore
+
+    var body: some View {
+        Menu(store.currentReasoningName ?? "Reasoning · Auto") {
+            if store.currentReasoningOptions.isEmpty {
+                Text("This Harness and model did not advertise a reasoning control.")
+                Button("Refresh") { Task { await store.refreshCurrentModels() } }
+            } else {
+                ForEach(store.currentReasoningOptions) { effort in
                     Button {
-                        Task { await store.chooseModel(provider: groupID, model: model, effort: effort.id) }
+                        Task { await store.chooseReasoningEffort(effort.id) }
                     } label: {
-                        if store.sessionModels?.current.provider == groupID,
-                           store.sessionModels?.current.model == model.id,
-                           store.sessionModels?.current.reasoningEffort == effort.id {
+                        if store.sessionModels?.current.reasoningEffort == effort.id {
                             Label(effort.name, systemImage: "checkmark")
                         } else {
                             Text(effort.name)
                         }
                     }
-                }
-            }
-        } else {
-            Button {
-                Task {
-                    await store.chooseModel(
-                        provider: groupID,
-                        model: model,
-                        effort: model.reasoning?.defaultEffort
-                    )
-                }
-            } label: {
-                if store.sessionModels?.current.provider == groupID,
-                   store.sessionModels?.current.model == model.id {
-                    Label(model.name, systemImage: "checkmark")
-                } else {
-                    Text(model.name)
                 }
             }
         }
@@ -1950,10 +2182,17 @@ private struct MobileComposer: View {
                     .font(.body)
                     .padding(.vertical, 8)
                 Button { Task { await store.toggleDictation() } } label: {
-                    Image(systemName: voice.isListening ? "waveform.circle.fill" : "mic")
-                        .foregroundStyle(voice.isListening ? Color.red : Color.primary)
-                        .frame(width: 30, height: 36)
+                    Group {
+                        if voice.isStarting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: voice.isListening ? "waveform.circle.fill" : "mic")
+                                .foregroundStyle(voice.isListening ? Color.red : Color.primary)
+                        }
+                    }
+                    .frame(width: 30, height: 36)
                 }
+                .disabled(voice.isStarting)
                 if store.canSend || store.isSending {
                     Button { Task { await store.send() } } label: {
                         Group {
@@ -2025,7 +2264,8 @@ private struct MobileComposerControls: View {
                         )
                     }
                 }
-                MobileModelSelectionMenu(store: store)
+                if store.harnessCan("configuration.models") { MobileModelSelectionMenu(store: store) }
+                if store.harnessCan("configuration.reasoning") { MobileReasoningSelectionMenu(store: store) }
                 MobileHarnessConfigMenu(store: store)
                 if store.canChooseHarness {
                     Menu {
@@ -2367,7 +2607,7 @@ private struct MobileConnectionView: View {
             .task { await store.loadSettings() }
         }
         .sheet(item: $inspectedHarness) { harness in
-            MobileHarnessDetailView(harness: harness) {
+            MobileHarnessDetailView(store: store, harness: harness) {
                 requestUse(harness)
                 inspectedHarness = nil
             }

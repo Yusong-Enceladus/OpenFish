@@ -31,9 +31,23 @@ OpenFish 当前适合公开评估，尚不承诺稳定兼容。Harness 与 ACP �
 - **控件由协议驱动。** ACP 模型、思考强度、模式与未来标准选项来自正在运行的 Harness，而不是 UI 中按厂商名称写死。
 - **Mac 与 iPhone 共享一个权威状态。** 手机通过 LAN 或 Tailscale 配对到 Mac Host，共用会话日志、审批、队列与任务状态。
 - **任务固定 Harness 版本。** 已有任务继续使用创建时的 Pack；新任务可以选更新版本。
-- **Harness Studio。** 查看 Pack 如实声明的架构图，创建或编辑可组合节点，导入／导出不含凭证的 Manifest，并把 Pack 提交到生成后的 OpenFish 社区目录。
+- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，需要时再检查带证据的架构与实际观测到的 Runtime 活动；Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不计费预检，并交换不含凭证的 Manifest。无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
 
 ![使用合成 DSH、Oh My Pi 与 Codex 条目的 OpenFish 默认 Harness 选择器](docs/assets/openfish-harness-picker-demo.png)
+
+## 实际运行关系
+
+```mermaid
+flowchart LR
+  I[OpenFish on iPhone] <-->|paired task stream| H[OpenFish Host on your Mac]
+  M[OpenFish on macOS] <-->|native RPC| H
+  H -->|versioned Driver API| D[Harness Driver]
+  D -->|pinned Pack + negotiated capabilities| R[Selected Harness runtime]
+  R -->|its own authentication and usage| P[Model provider / local model]
+  H --> S[(durable task log)]
+```
+
+Mac Host 是任务状态和凭据的权威来源。OpenFish 不会把一种 Provider 订阅变成另一种：Codex、DSH、OMP 以及未来 Harness 都保留自己的认证、模型目录、思考选项、Runtime 行为和费用。版本化 Driver 边界只转换 Harness 明确声明的能力；其余能力会明确显示为不支持或保持 Opaque。
 
 详见 [macOS 指南](apps/x-macos/README.md)、[iPhone 指南](apps/x-ios/README.md)与 [Harness Pack 契约](packages/harness/harness/README.md)。Pack 作者可以阅读 [社区发布指南](docs/publishing-harness-packs.md)。
 

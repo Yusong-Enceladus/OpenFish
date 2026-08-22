@@ -33,9 +33,23 @@ OpenFish is ready for evaluation, not a stable compatibility promise. Harnesses 
 - **Protocol-driven controls.** ACP models, reasoning levels, modes, and future standard configuration options come from the live Harness rather than a provider-name switch in the UI.
 - **Mac and iPhone share one authority.** The phone pairs to the Mac Host over LAN or Tailscale and follows the same session log, approvals, queue, and task state.
 - **Version-pinned tasks.** A task remains attached to the Harness Pack version that created it, while new tasks can use an updated version.
-- **Harness Studio.** Inspect a Pack's truthful architecture graph, create or edit composable nodes, import/export credential-free manifests, and submit a Pack to the generated OpenFish community catalog.
+- **Progressive Harness Lens.** Start with a plain-language summary, inspect an evidence-backed architecture and observed runtime activity when needed, then use Manifest Editor on the Mac to create or edit declared composable nodes, run a non-billed preflight, and exchange credential-free manifests. Unknown private internals stay visibly opaque instead of becoming invented diagrams.
 
 ![OpenFish default Harness picker with synthetic DSH, Oh My Pi, and Codex entries](docs/assets/openfish-harness-picker-demo.png)
+
+## What actually runs
+
+```mermaid
+flowchart LR
+  I[OpenFish on iPhone] <-->|paired task stream| H[OpenFish Host on your Mac]
+  M[OpenFish on macOS] <-->|native RPC| H
+  H -->|versioned Driver API| D[Harness Driver]
+  D -->|pinned Pack + negotiated capabilities| R[Selected Harness runtime]
+  R -->|its own authentication and usage| P[Model provider / local model]
+  H --> S[(durable task log)]
+```
+
+The Mac Host is the authority for task state and credentials. OpenFish does not turn one provider subscription into another: Codex, DSH, OMP, and future Harnesses keep their own authentication, model directory, reasoning options, runtime behavior, and charges. The versioned Driver boundary translates only capabilities the Harness declares; anything else stays explicitly unsupported or opaque.
 
 See the [macOS guide](apps/x-macos/README.md), [iPhone guide](apps/x-ios/README.md), and [Harness Pack contract](packages/harness/harness/README.md). Pack authors can follow the [community publishing guide](docs/publishing-harness-packs.md).
 

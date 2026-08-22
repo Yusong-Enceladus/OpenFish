@@ -869,7 +869,7 @@ private struct NewTaskHeader: View {
             }
             .buttonStyle(.plain)
             .help("Start local voice conversation")
-            Text(store.connectionState == .connected ? "Local DSH" : store.connectionState.label)
+            Text(store.connectionState == .connected ? "Mac Host connected" : store.connectionState.label)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 9)
@@ -929,7 +929,7 @@ private struct NewTaskSurface: View {
                     Text("What are we building?")
                         .font(.system(size: 26, weight: .semibold, design: .rounded))
                         .tracking(-0.5)
-                    Text("Start a task in your project. OpenFish will work through DSH, show every action, and ask before sensitive operations.")
+                    Text("Start a task with \(store.currentHarness?.name ?? "your selected Harness"). OpenFish will show its actions and ask before sensitive operations.")
                         .font(.system(size: 13.5))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -1729,53 +1729,67 @@ private struct Composer: View {
             .padding(.top, 7)
 
             HStack(spacing: 8) {
-                ComposerCapabilityMenu(store: store)
-                WorkspacePicker(store: store)
-                PermissionPicker(store: store)
-                if store.canChooseHarness {
-                    HarnessPicker(store: store)
-                }
-                if store.currentHarnessId == "dsh" || store.sessionModels?.groups.isEmpty == false {
-                    ModelPicker(store: store)
-                }
-                if store.sessionModels?.harnessOptions?.contains(where: {
-                    $0.category != "model" && $0.category != "thought_level"
-                }) == true {
-                    HarnessConfigPicker(store: store)
-                }
-                if store.currentHarnessId == "codex-acp" {
-                    HarnessAccountBadge(store: store)
-                }
-                if store.canChooseAgentPreset {
-                    AgentPresetPicker(store: store)
-                }
-                if store.currentSession?.running == true {
-                    Menu {
-                        Button("Queue after current turn") { store.composerMode = "queue" }
-                        Button("Steer current turn") { store.composerMode = "steer" }
-                    } label: {
-                        Label(store.composerMode == "steer" ? "Steer" : "Queue", systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .frame(height: 26)
-                            .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 7))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ComposerCapabilityMenu(store: store)
+                        WorkspacePicker(store: store)
+                        PermissionPicker(store: store)
+                        if store.canChooseHarness {
+                            HarnessPicker(store: store)
+                        }
+                        if store.harnessCan("configuration.models") {
+                            ModelPicker(store: store)
+                        }
+                        if store.harnessCan("configuration.reasoning") {
+                            ReasoningPicker(store: store)
+                        }
+                        if store.sessionModels?.harnessOptions?.contains(where: {
+                            $0.category != "model" && $0.category != "thought_level"
+                        }) == true {
+                            HarnessConfigPicker(store: store)
+                        }
+                        if store.harnessCan("configuration.auth"), store.currentHarness?.auth.methods.isEmpty == false {
+                            HarnessAccountBadge(store: store)
+                        }
+                        if store.canChooseAgentPreset {
+                            AgentPresetPicker(store: store)
+                        }
+                        if store.currentSession?.running == true {
+                            Menu {
+                                Button("Queue after current turn") { store.composerMode = "queue" }
+                                Button("Steer current turn") { store.composerMode = "steer" }
+                            } label: {
+                                Label(store.composerMode == "steer" ? "Steer" : "Queue", systemImage: "arrow.triangle.branch")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 26)
+                                    .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 7))
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                        }
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
                     Task { await store.toggleDictation() }
                 } label: {
-                    Image(systemName: store.voice.isListening ? "waveform.circle.fill" : "mic")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(store.voice.isListening ? Color.red : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.06), in: Circle())
+                    Group {
+                        if store.voice.isStarting {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: store.voice.isListening ? "waveform.circle.fill" : "mic")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(store.voice.isListening ? Color.red : Color.secondary)
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.06), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .disabled(store.voice.isStarting)
                 .help(store.voice.isListening ? "Stop local dictation" : "Dictate locally")
                 .accessibilityIdentifier("OpenFish.Dictation")
 
@@ -2194,6 +2208,8 @@ private struct HarnessPackEditor: View {
     @State private var arguments = ""
     @State private var distributionEnvironment = ""
     @State private var graphLevel = "composable"
+    @State private var graphBoundary = "Harness process"
+    @State private var graphEvidenceSource = "Pack declaration"
     @State private var authMethodId = ""
     @State private var authMethodName = ""
     @State private var authKind = "agent"
@@ -2202,11 +2218,15 @@ private struct HarnessPackEditor: View {
     @State private var authFieldEnv = ""
     @State private var terminalAuthArguments = ""
     @State private var terminalAuthEnvironment = ""
-    @State private var nodes: [HarnessGraphNode] = [HarnessGraphNode(id: "runtime", kind: "harness-runtime", title: "Runtime", editable: true, config: nil)]
-    @State private var edges: [HarnessGraphEdge] = []
-    @State private var positions: [String: CGPoint] = ["runtime": CGPoint(x: 120, y: 90)]
-    @State private var edgeFrom = "runtime"
-    @State private var edgeTo = "runtime"
+    @State private var nodes: [HarnessGraphNode] = [
+        HarnessGraphNode(id: "context", kind: "context-runtime", title: "Context", editable: true, responsibility: "Builds task context for the agent loop.", evidence: [HarnessGraphEvidence(kind: "declared", source: "Pack declaration", version: nil)], config: nil),
+        HarnessGraphNode(id: "loop", kind: "agent-loop", title: "Agent loop", editable: true, responsibility: "Coordinates model inference and tool execution.", evidence: [HarnessGraphEvidence(kind: "declared", source: "Pack declaration", version: nil)], config: nil),
+        HarnessGraphNode(id: "tools", kind: "tool-runtime", title: "Tools", editable: true, responsibility: "Executes the tools exposed by this Harness.", evidence: [HarnessGraphEvidence(kind: "declared", source: "Pack declaration", version: nil)], config: nil),
+    ]
+    @State private var edges: [HarnessGraphEdge] = [HarnessGraphEdge(from: "context", to: "loop"), HarnessGraphEdge(from: "loop", to: "tools")]
+    @State private var positions: [String: CGPoint] = ["context": CGPoint(x: 100, y: 90), "loop": CGPoint(x: 320, y: 90), "tools": CGPoint(x: 540, y: 90)]
+    @State private var edgeFrom = "context"
+    @State private var edgeTo = "loop"
     @State private var saving = false
     @State private var loadedExisting = false
 
@@ -2227,6 +2247,11 @@ private struct HarnessPackEditor: View {
         }
         if distributionKind == "binary" && binaryCommand.isEmpty { issues.append("A binary archive needs its command inside the archive.") }
         if nodes.isEmpty { issues.append("The architecture graph needs at least one truthful runtime boundary node.") }
+        if graphLevel == "opaque" && nodes.count != 1 { issues.append("Opaque graphs expose exactly one runtime boundary node.") }
+        if graphLevel != "opaque" && (nodes.count < 3 || edges.count < 2) { issues.append("Observable and composable graphs explain at least three connected components.") }
+        if graphLevel != "opaque" && graphBoundary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Name the Harness boundary represented by this graph.") }
+        if graphLevel != "opaque" && graphEvidenceSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Architecture evidence needs a source.") }
+        if graphLevel != "opaque" && nodes.contains(where: { ($0.responsibility ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { issues.append("Every visible architecture component needs a responsibility.") }
         if Set(nodes.map(\.id)).count != nodes.count { issues.append("Architecture node ids must be unique.") }
         let nodeIDs = Set(nodes.map(\.id))
         if edges.contains(where: { !nodeIDs.contains($0.from) || !nodeIDs.contains($0.to) }) { issues.append("Every architecture edge must connect existing nodes.") }
@@ -2263,6 +2288,12 @@ private struct HarnessPackEditor: View {
                 Picker("Graph truthfulness", selection: $graphLevel) {
                     Text("Opaque").tag("opaque"); Text("Observable").tag("observable"); Text("Composable").tag("composable")
                 }
+                if graphLevel != "opaque" {
+                    TextField("Harness boundary", text: $graphBoundary)
+                    TextField("Architecture evidence source", text: $graphEvidenceSource)
+                    Text("Use an official manifest, versioned source path, or runtime capability. A name alone is not evidence.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Authentication (optional)") {
                     TextField("Method id", text: $authMethodId)
                     TextField("Method name", text: $authMethodName)
@@ -2291,25 +2322,29 @@ private struct HarnessPackEditor: View {
                         TextField("Node id", text: Binding(get: { nodes[index].id }, set: {
                         let oldID = nodes[index].id
                         let newID = $0
-                        nodes[index] = HarnessGraphNode(id: newID, kind: node.kind, title: node.title, editable: node.editable, config: node.config)
+                        nodes[index] = HarnessGraphNode(id: newID, kind: node.kind, title: node.title, editable: node.editable, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, evidence: node.evidence, config: node.config)
                         positions[newID] = positions.removeValue(forKey: oldID)
                         edges = edges.map { edge in
                             HarnessGraphEdge(from: edge.from == oldID ? newID : edge.from, to: edge.to == oldID ? newID : edge.to)
                         }
                         }))
-                        TextField("Title", text: Binding(get: { nodes[index].title }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: $0, editable: node.editable, config: node.config) }))
-                        TextField("Kind", text: Binding(get: { nodes[index].kind }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: $0, title: node.title, editable: node.editable, config: node.config) }))
-                        Toggle("Editable", isOn: Binding(get: { nodes[index].editable }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: $0, config: node.config) }))
+                        TextField("Title", text: Binding(get: { nodes[index].title }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: $0, editable: node.editable, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, evidence: node.evidence, config: node.config) }))
+                        TextField("Kind", text: Binding(get: { nodes[index].kind }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: $0, title: node.title, editable: node.editable, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, evidence: node.evidence, config: node.config) }))
+                        Toggle("Editable", isOn: Binding(get: { nodes[index].editable }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: $0, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, evidence: node.evidence, config: node.config) }))
                             .toggleStyle(.checkbox)
                             .disabled(graphLevel != "composable")
                         Button(role: .destructive) { nodes.remove(at: index); positions.removeValue(forKey: node.id); edges.removeAll { $0.from == node.id || $0.to == node.id } } label: { Image(systemName: "trash") }
                     }
+                    TextField("Responsibility", text: Binding(
+                        get: { nodes[index].responsibility ?? "" },
+                        set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: node.editable, responsibility: $0, inputs: node.inputs, outputs: node.outputs, evidence: node.evidence, config: node.config) }
+                    ))
                     HarnessNodeConfigEditor(node: Binding(get: { nodes[index] }, set: { nodes[index] = $0 }))
                 }
             }
             HStack {
                 Button("Add node") {
-                    let node = HarnessGraphNode(id: "node-\(nodes.count + 1)", kind: "step", title: "Step", editable: graphLevel == "composable", config: nil)
+                    let node = HarnessGraphNode(id: "node-\(nodes.count + 1)", kind: "step", title: "Step", editable: graphLevel == "composable", responsibility: "Describe what this component owns.", evidence: [HarnessGraphEvidence(kind: "declared", source: graphEvidenceSource, version: version)], config: nil)
                     nodes.append(node); positions[node.id] = CGPoint(x: 140 + nodes.count * 35, y: 100 + nodes.count * 20)
                     edgeTo = node.id
                 }
@@ -2335,7 +2370,7 @@ private struct HarnessPackEditor: View {
             HStack {
                 Spacer()
                 Button("Cancel") { isPresented = false }
-                Button("Save") {
+                Button("Save & Preflight") {
                     saving = true
                     Task {
                         let args = arguments.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
@@ -2345,13 +2380,17 @@ private struct HarnessPackEditor: View {
                             distributionKind: distributionKind, packageOrCommand: packageOrCommand, arguments: args,
                             distributionEnvironment: distributionEnvironment,
                             binaryCommand: binaryCommand, sha256: sha256, graphLevel: graphLevel,
+                            graphBoundary: graphBoundary, graphEvidenceSource: graphEvidenceSource,
                             authMethodId: authMethodId, authMethodName: authMethodName, authKind: authKind,
                             authFieldRef: authFieldRef, authFieldName: authFieldName, authFieldEnv: authFieldEnv,
                             terminalAuthArguments: terminalAuthArguments, terminalAuthEnvironment: terminalAuthEnvironment,
                             nodes: nodes, edges: edges, positions: positions
                         )
                         saving = false
-                        if saved { isPresented = false }
+                        if saved, let savedHarness = store.harnesses.first(where: { $0.id == id }) {
+                            let preflighted = await store.mutateHarness("probe", harness: savedHarness)
+                            if preflighted { isPresented = false }
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -2361,8 +2400,38 @@ private struct HarnessPackEditor: View {
         .padding(22)
         .frame(width: 720, height: 760)
         .onChange(of: graphLevel) { _, level in
-            guard level != "composable" else { return }
-            nodes = nodes.map { HarnessGraphNode(id: $0.id, kind: $0.kind, title: $0.title, editable: false, config: $0.config) }
+            if level == "opaque" {
+                let existingRuntime = nodes.first ?? HarnessGraphNode(
+                    id: "runtime", kind: "harness-runtime", title: name.isEmpty ? "Harness runtime" : name,
+                    editable: false, responsibility: "Runs this Harness while its private internals remain undisclosed.", config: nil
+                )
+                let runtime = HarnessGraphNode(
+                    id: "runtime", kind: "harness-runtime", title: existingRuntime.title,
+                    editable: false, responsibility: existingRuntime.responsibility,
+                    inputs: existingRuntime.inputs, outputs: existingRuntime.outputs,
+                    evidence: existingRuntime.evidence, config: existingRuntime.config
+                )
+                nodes = [runtime]
+                edges = []
+                positions = [runtime.id: CGPoint(x: 320, y: 100)]
+                edgeFrom = runtime.id
+                edgeTo = runtime.id
+                return
+            }
+            if nodes.count == 1 {
+                let source = HarnessGraphEvidence(kind: "declared", source: graphEvidenceSource, version: version)
+                nodes = [
+                    HarnessGraphNode(id: "context", kind: "context-runtime", title: "Context", editable: level == "composable", responsibility: "Builds task context for the agent loop.", evidence: [source], config: nil),
+                    HarnessGraphNode(id: "loop", kind: "agent-loop", title: "Agent loop", editable: level == "composable", responsibility: "Coordinates model inference and tool execution.", evidence: [source], config: nil),
+                    HarnessGraphNode(id: "tools", kind: "tool-runtime", title: "Tools", editable: level == "composable", responsibility: "Executes the tools exposed by this Harness.", evidence: [source], config: nil),
+                ]
+                edges = [HarnessGraphEdge(from: "context", to: "loop"), HarnessGraphEdge(from: "loop", to: "tools")]
+                positions = ["context": CGPoint(x: 100, y: 90), "loop": CGPoint(x: 320, y: 90), "tools": CGPoint(x: 540, y: 90)]
+                edgeFrom = "context"
+                edgeTo = "loop"
+            } else {
+                nodes = nodes.map { HarnessGraphNode(id: $0.id, kind: $0.kind, title: $0.title, editable: level == "composable" ? $0.editable : false, responsibility: $0.responsibility, inputs: $0.inputs, outputs: $0.outputs, evidence: $0.evidence, config: $0.config) }
+            }
         }
         .onAppear { loadExistingIfNeeded() }
     }
@@ -2379,6 +2448,8 @@ private struct HarnessPackEditor: View {
         repository = existing.repository ?? ""
         protocolName = existing.protocolName
         graphLevel = existing.graph.level
+        graphBoundary = existing.graph.boundary ?? "Harness process"
+        graphEvidenceSource = existing.graph.evidence?.first?.source ?? "Pack declaration"
         nodes = existing.graph.nodes
         edges = existing.graph.edges
         positions = Dictionary(uniqueKeysWithValues: nodes.enumerated().map { index, node in
@@ -2443,7 +2514,11 @@ private struct HarnessNodeConfigEditor: View {
                 error = "Node config must be a JSON object."
                 return
             }
-            node = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: node.editable, config: config)
+            node = HarnessGraphNode(
+                id: node.id, kind: node.kind, title: node.title, editable: node.editable,
+                responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs,
+                evidence: node.evidence, config: config
+            )
             error = nil
         } catch {
             self.error = "Invalid JSON: \(error.localizedDescription)"
@@ -2453,10 +2528,18 @@ private struct HarnessNodeConfigEditor: View {
 
 private struct HarnessGraphPreview: View {
     let graph: HarnessGraph
+    var runtime: HarnessRuntimeProjection? = nil
+    var interactive = false
+    @State private var scale: CGFloat = 1
+    @GestureState private var gestureScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @GestureState private var gestureOffset: CGSize = .zero
+    @State private var query = ""
 
     var body: some View {
         GeometryReader { proxy in
-            let columnCount = max(1, min(3, graph.nodes.count))
+            let responsiveColumns = max(1, Int((proxy.size.width + 12) / 124))
+            let columnCount = max(1, min(3, responsiveColumns, graph.nodes.count))
             let horizontalStep = columnCount == 1 ? 0 : max(1, (proxy.size.width - 120) / CGFloat(columnCount - 1))
             let points = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { index, node in
                 let column = index % columnCount
@@ -2477,12 +2560,70 @@ private struct HarnessGraphPreview: View {
                     }
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .frame(width: 112)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(.secondary.opacity(0.35)))
+                    .background(runtimeColor(node.id).opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(
+                        nodeColor(node).opacity(runtime?.nodes[node.id] == nil && !matches(node) ? 0.35 : 0.9),
+                        lineWidth: runtime?.nodes[node.id] == nil && !matches(node) ? 1 : 1.7
+                    ))
                     .position(points[node.id] ?? .zero)
                 }
             }
+            .scaleEffect(scale * gestureScale)
+            .offset(x: offset.width + gestureOffset.width, y: offset.height + gestureOffset.height)
+            .gesture(
+                SimultaneousGesture(
+                    MagnificationGesture()
+                        .updating($gestureScale) { value, state, _ in if interactive { state = value } }
+                        .onEnded { value in if interactive { scale = min(2.5, max(0.55, scale * value)) } },
+                    DragGesture()
+                        .updating($gestureOffset) { value, state, _ in if interactive { state = value.translation } }
+                        .onEnded { value in
+                            if interactive {
+                                offset.width += value.translation.width
+                                offset.height += value.translation.height
+                            }
+                        }
+                )
+            )
             .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            .clipped()
+            .overlay(alignment: .topTrailing) {
+                if interactive {
+                    HStack(spacing: 5) {
+                        TextField("Find node", text: $query)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 118)
+                        Button { scale = min(2.5, scale + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                        Button { scale = max(0.55, scale - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                        Button { scale = 1; offset = .zero; query = "" } label: { Image(systemName: "arrow.counterclockwise") }
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(7)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(7)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(graph.level) Harness architecture with \(graph.nodes.count) components")
+    }
+
+    private func matches(_ node: HarnessGraphNode) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !needle.isEmpty && (node.title.localizedCaseInsensitiveContains(needle) || node.kind.localizedCaseInsensitiveContains(needle))
+    }
+
+    private func nodeColor(_ node: HarnessGraphNode) -> Color {
+        matches(node) ? .purple : runtimeColor(node.id)
+    }
+
+    private func runtimeColor(_ nodeId: String) -> Color {
+        switch runtime?.nodes[nodeId]?.status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
         }
     }
 }
@@ -2490,6 +2631,8 @@ private struct HarnessGraphPreview: View {
 private struct HarnessDetailPanel: View {
     let harness: HarnessCatalogEntry
     var compact = false
+    var runtime: HarnessRuntimeProjection? = nil
+    @State private var selectedNodeId: String?
 
     private var truthExplanation: String {
         switch harness.graph.level {
@@ -2519,9 +2662,78 @@ private struct HarnessDetailPanel: View {
             if !compact, let description = harness.description {
                 Text(description).font(.callout).foregroundStyle(.secondary)
             }
-            HarnessGraphPreview(graph: harness.graph)
-                .frame(height: compact ? 112 : 190)
+            if let boundary = harness.graph.boundary {
+                HStack {
+                    Label(boundary, systemImage: "square.dashed")
+                    Spacer()
+                    Text("Harness boundary").foregroundStyle(.secondary)
+                }
+                .font(.caption2.weight(.semibold))
+            }
+            if compact {
+                let columns = harness.graph.nodes.count <= 1 ? 1 : 2
+                let rows = max(1, Int(ceil(Double(harness.graph.nodes.count) / Double(columns))))
+                HarnessGraphPreview(graph: harness.graph, runtime: runtime)
+                    .frame(height: max(112, CGFloat(rows) * 62 + 12))
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HarnessGraphPreview(graph: harness.graph, runtime: runtime, interactive: true).frame(height: 190)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(harness.graph.nodes) { node in
+                                    Button(node.title) { selectedNodeId = node.id }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .tint(selectedNodeId == node.id ? Color.accentColor : nil)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    if let node = selectedNode {
+                        HarnessNodeEvidencePanel(node: node)
+                            .frame(width: 250)
+                    }
+                }
+            }
             Text(truthExplanation).font(.caption2).foregroundStyle(.secondary)
+            if !compact {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Negotiated capabilities").font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("Driver API v\(harness.driver.apiVersion) · \(harness.driver.loaded ? "loaded" : "not loaded")")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 6)], alignment: .leading, spacing: 6) {
+                        ForEach(harness.capabilities) { capability in
+                            HStack(spacing: 6) {
+                                Image(systemName: capability.status == "supported" ? "checkmark.circle.fill" : capability.status == "runtime" ? "waveform.path.ecg" : "minus.circle")
+                                    .foregroundStyle(capability.status == "supported" ? Color.green : capability.status == "runtime" ? Color.blue : Color.secondary)
+                                Text(capability.id.replacingOccurrences(of: ".", with: " · "))
+                                    .lineLimit(1).minimumScaleFactor(0.8)
+                                Spacer(minLength: 0)
+                            }
+                            .font(.caption2)
+                            .help(capability.detail ?? "Declared by \(capability.source)")
+                        }
+                    }
+                }
+                .padding(9)
+                .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 9))
+            }
+            if !compact, let evidence = harness.graph.evidence, !evidence.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Evidence").font(.caption2.weight(.semibold))
+                    ForEach(evidence) { item in
+                        Text(item.kind.replacingOccurrences(of: "-", with: " ").capitalized)
+                            .font(.caption2).padding(.horizontal, 7).frame(height: 20)
+                            .background(evidenceColor(item.kind).opacity(0.13), in: Capsule())
+                            .help("\(item.source)\(item.version.map { " · \($0)" } ?? "")")
+                    }
+                }
+            }
             HStack(spacing: 12) {
                 Label(harness.installation.status.replacingOccurrences(of: "-", with: " "), systemImage: "shippingbox")
                 Label(harness.auth.status.replacingOccurrences(of: "-", with: " "), systemImage: "person.crop.circle.badge.checkmark")
@@ -2535,6 +2747,56 @@ private struct HarnessDetailPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.border))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(harness.name) Harness details, \(harness.graph.level) architecture")
+        .onAppear { if selectedNodeId == nil { selectedNodeId = harness.graph.nodes.first?.id } }
+        .onChange(of: harness.id) { _, _ in selectedNodeId = harness.graph.nodes.first?.id }
+    }
+
+    private var selectedNode: HarnessGraphNode? {
+        harness.graph.nodes.first(where: { $0.id == selectedNodeId }) ?? harness.graph.nodes.first
+    }
+
+    private func evidenceColor(_ kind: String) -> Color {
+        switch kind {
+        case "runtime-observed": return .green
+        case "source-derived": return .blue
+        default: return .secondary
+        }
+    }
+}
+
+private struct HarnessNodeEvidencePanel: View {
+    let node: HarnessGraphNode
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: node.editable ? "slider.horizontal.3" : "lock")
+                Text(node.title).font(.caption.weight(.semibold))
+                Spacer()
+                Text(node.editable ? "Editable" : "Read only").font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(node.responsibility ?? "This Pack has not supplied a responsibility statement.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let inputs = node.inputs, !inputs.isEmpty {
+                Text("Inputs").font(.caption2.weight(.semibold))
+                Text(inputs.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let outputs = node.outputs, !outputs.isEmpty {
+                Text("Outputs").font(.caption2.weight(.semibold))
+                Text(outputs.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let evidence = node.evidence, !evidence.isEmpty {
+                Divider()
+                ForEach(evidence) { item in
+                    Label(item.kind.replacingOccurrences(of: "-", with: " ").capitalized, systemImage: "doc.text.magnifyingglass")
+                        .font(.caption2.weight(.semibold))
+                    Text("\(item.source)\(item.version.map { " · \($0)" } ?? "")")
+                        .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+        }
+        .padding(11)
+        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.border))
     }
 }
 
@@ -2707,31 +2969,13 @@ private struct ModelPicker: View {
 
     @ViewBuilder
     private func modelButton(_ model: CatalogModel, groupID: String, catalog: SessionModels) -> some View {
-        if let efforts = model.reasoning?.efforts, !efforts.isEmpty {
-            Menu(model.name) {
-                ForEach(efforts) { effort in
-                    Button {
-                        Task { await store.chooseModel(provider: groupID, model: model, effort: effort.id) }
-                    } label: {
-                        if catalog.current.provider == groupID,
-                           catalog.current.model == model.id,
-                           catalog.current.reasoningEffort == effort.id {
-                            Label(effort.name, systemImage: "checkmark")
-                        } else {
-                            Text(effort.name)
-                        }
-                    }
-                }
-            }
-        } else {
-            Button {
-                Task { await store.chooseModel(provider: groupID, model: model) }
-            } label: {
-                if catalog.current.provider == groupID, catalog.current.model == model.id {
-                    Label(model.name, systemImage: "checkmark")
-                } else {
-                    Text(model.name)
-                }
+        Button {
+            Task { await store.chooseModel(provider: groupID, model: model, effort: model.reasoning?.defaultEffort) }
+        } label: {
+            if catalog.current.provider == groupID, catalog.current.model == model.id {
+                Label(model.name, systemImage: "checkmark")
+            } else {
+                Text(model.name)
             }
         }
     }
@@ -2777,7 +3021,7 @@ private struct ModelPicker: View {
                     Text("Loading models…")
                         .lineLimit(1)
                 } else {
-                    Text(store.currentModelLabel)
+                    Text(store.currentModelName)
                         .lineLimit(1)
                     Image(systemName: store.sessionModelsError == nil ? "chevron.down" : "exclamationmark.triangle")
                         .font(.system(size: 7, weight: .bold))
@@ -2793,6 +3037,54 @@ private struct ModelPicker: View {
         .fixedSize()
         .accessibilityIdentifier("OpenFish.ModelPicker")
         .help(store.sessionModelsError == nil ? "Choose a model" : "Model choices could not be loaded. Open to retry.")
+    }
+}
+
+private struct ReasoningPicker: View {
+    @ObservedObject var store: OpenCodexStore
+
+    var body: some View {
+        Menu {
+            if store.currentReasoningOptions.isEmpty {
+                if store.isLoadingSessionModels {
+                    Text("Discovering reasoning controls…")
+                } else {
+                    Text("This Harness and model did not advertise a reasoning control.")
+                    Divider()
+                    Button("Refresh capabilities") { Task { await store.retryCurrentModels() } }
+                }
+            } else {
+                ForEach(store.currentReasoningOptions) { effort in
+                    Button {
+                        Task { await store.chooseReasoningEffort(effort.id) }
+                    } label: {
+                        if store.sessionModels?.current.reasoningEffort == effort.id {
+                            Label(effort.name, systemImage: "checkmark")
+                        } else {
+                            Text(effort.name)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 10))
+                Text(store.currentReasoningName ?? (store.currentReasoningOptions.isEmpty ? "Reasoning · Auto" : "Reasoning"))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 7))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityIdentifier("OpenFish.ReasoningPicker")
+        .help("Choose the reasoning level advertised by this Harness")
     }
 }
 
@@ -2856,16 +3148,23 @@ private struct HarnessConfigPicker: View {
 private struct HarnessAccountBadge: View {
     @ObservedObject var store: OpenCodexStore
 
-    private var selectedMethod: String? { store.currentHarness?.auth.selectedMethod }
+    private var harness: HarnessCatalogEntry? { store.currentHarness }
+    private var selectedMethod: String? { harness?.auth.selectedMethod }
+    private var methodName: String? { harness?.auth.methods.first(where: { $0.id == selectedMethod })?.name }
     private var title: String {
-        switch selectedMethod {
+        if harness?.id != "codex-acp" { return methodName ?? "Sign-in required" }
+        return switch selectedMethod {
         case "chat-gpt": "ChatGPT · Codex plan"
         case "api-key": "OpenAI API · usage billing"
         default: "Codex sign-in unknown"
         }
     }
     private var detail: String {
-        switch selectedMethod {
+        if harness?.id != "codex-acp" {
+            if let methodName { return "\(harness?.name ?? "This Harness") is using the \(methodName) authentication method owned by its installed runtime." }
+            return "Open Harness settings to choose and verify how this Harness authenticates."
+        }
+        return switch selectedMethod {
         case "chat-gpt": "This task reuses the Codex login on this Mac and uses ChatGPT subscription access."
         case "api-key": "This task uses an OpenAI API key and is billed to the OpenAI Platform account."
         default: "Open Harness settings to choose and verify a Codex authentication method."
@@ -3031,6 +3330,9 @@ private struct HarnessOnboardingView: View {
     @State private var authSelection: HarnessAuthSelection?
     @State private var query = ""
     @State private var pendingCommunityHarness: HarnessCatalogEntry?
+    @State private var selectedHarnessId: String?
+    @State private var lens = "Simple"
+    @State private var showingCreateEditor = false
 
     private var filtered: [HarnessCatalogEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -3046,92 +3348,84 @@ private struct HarnessOnboardingView: View {
         }
     }
 
+    private var selectedHarness: HarnessCatalogEntry? {
+        if let selectedHarnessId, let selected = store.harnesses.first(where: { $0.id == selectedHarnessId }) {
+            return selected
+        }
+        return filtered.first
+    }
+
+    private var harnessColumns: [GridItem] {
+        if filtered.count <= 3 {
+            return Array(repeating: GridItem(.flexible(minimum: 220), spacing: 11, alignment: .top), count: max(1, filtered.count))
+        }
+        return [GridItem(.adaptive(minimum: 220), spacing: 11, alignment: .top)]
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            VStack(alignment: .leading, spacing: 7) {
-                Image(systemName: "shippingbox.and.arrow.backward")
-                    .font(.system(size: 34, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                Text("Choose your default Harness")
-                    .font(.system(size: 26, weight: .semibold))
-                Text("Open Fish will install and configure it. Every new task uses this Harness unless you choose another one before the task starts.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("OpenFish setup", systemImage: "shippingbox.and.arrow.backward")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                    Text("Choose how OpenFish works").font(.system(size: 27, weight: .semibold))
+                    Text("Pick the execution system that owns models, tools, guardrails, and resumable sessions. You can change the default later; existing tasks keep their original Harness.")
+                        .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                TextField("Find a Harness", text: $query).textFieldStyle(.roundedBorder).frame(width: 220)
             }
 
-            TextField("Find a Harness by name", text: $query)
-                .textFieldStyle(.roundedBorder)
-
-            Group {
-                if store.isLoadingHarnessCatalog && store.harnesses.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading available Harnesses…")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if filtered.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: store.harnesses.isEmpty ? "exclamationmark.triangle" : "magnifyingglass")
-                            .font(.system(size: 28))
-                            .foregroundStyle(store.harnesses.isEmpty ? Color.orange : Color.secondary)
-                        Text(store.harnesses.isEmpty ? "Harness catalog could not be loaded" : "No Harnesses match your search")
-                            .font(.system(size: 15, weight: .semibold))
-                        if let error = store.harnessCatalogError, store.harnesses.isEmpty {
-                            Text(error)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(4)
-                        }
-                        if store.harnesses.isEmpty {
-                            Button("Try Again") {
-                                Task { await store.loadHarnessCatalogForOnboarding(forceRefresh: true) }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+            if store.isLoadingHarnessCatalog && store.harnesses.isEmpty {
+                ProgressView("Loading available Harnesses…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filtered.isEmpty {
+                ContentUnavailableView(
+                    store.harnesses.isEmpty ? "Harness catalog could not be loaded" : "No matching Harness",
+                    systemImage: store.harnesses.isEmpty ? "exclamationmark.triangle" : "magnifyingglass",
+                    description: Text(store.harnessCatalogError ?? "Try another name.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        LazyVGrid(columns: harnessColumns, spacing: 11) {
                             ForEach(filtered) { harness in
-                                VStack(spacing: 8) {
-                                    HarnessChoiceCard(
-                                        harness: harness,
-                                        busy: store.harnessOperationId != nil,
-                                        ready: harness.available && (harness.id != "dsh" || !store.hostModels.groups.isEmpty),
-                                        action: { requestDefault(harness) },
-                                        authAction: { method in
-                                            if method.fields.isEmpty {
-                                                Task {
-                                                    _ = await store.configureHarness(
-                                                        harness, method: method, makeDefault: true, completesOnboarding: true
-                                                    )
-                                                }
-                                            } else {
-                                                authSelection = HarnessAuthSelection(
-                                                    harness: harness, method: method, makeDefault: true, completesOnboarding: true
-                                                )
-                                            }
-                                        }
-                                    )
-                                    if harness.id == "dsh" && store.hostModels.groups.isEmpty {
-                                        DshProviderQuickSetup(store: store)
-                                    }
-                                }
+                                HarnessChoiceCard(
+                                    harness: harness,
+                                    selected: selectedHarness?.id == harness.id,
+                                    action: { selectedHarnessId = harness.id }
+                                )
                             }
                         }
-                        .padding(1)
+                        if let harness = selectedHarness {
+                            HarnessProgressiveLensPanel(
+                                store: store,
+                                harness: harness,
+                                lens: $lens,
+                                showingCreateEditor: $showingCreateEditor
+                            )
+                            if harness.id == "dsh" && store.hostModels.groups.isEmpty {
+                                DshProviderQuickSetup(store: store)
+                            }
+                        }
                     }
+                    .padding(1)
                 }
             }
-            .frame(maxHeight: .infinity)
+
+            Divider()
+            HStack {
+                Label("Credentials stay in the Mac Host credential service.", systemImage: "lock.shield")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let harness = selectedHarness { primaryControl(for: harness) }
+            }
         }
-        .padding(32)
+        .padding(26)
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }
+        .sheet(isPresented: $showingCreateEditor) {
+            HarnessPackEditor(store: store, isPresented: $showingCreateEditor)
+        }
         .alert("Install an unverified Harness?", isPresented: Binding(
             get: { pendingCommunityHarness != nil },
             set: { if !$0 { pendingCommunityHarness = nil } }
@@ -3149,6 +3443,36 @@ private struct HarnessOnboardingView: View {
             async let settings: Void = store.loadSettings()
             async let catalog: Void = store.loadHarnessCatalogForOnboarding()
             _ = await (settings, catalog)
+            if selectedHarnessId == nil { selectedHarnessId = filtered.first?.id }
+        }
+    }
+
+    @ViewBuilder
+    private func primaryControl(for harness: HarnessCatalogEntry) -> some View {
+        let ready = harness.available && (harness.id != "dsh" || !store.hostModels.groups.isEmpty)
+        if harness.auth.status != "not-required" && harness.auth.status != "configured" {
+            Menu("Choose sign-in for \(harness.name)") {
+                ForEach(harness.auth.methods) { method in
+                    Button(method.name) { configure(harness, method: method) }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.harnessOperationId != nil)
+        } else {
+            Button(harness.installation.status == "builtin" || harness.installation.status == "installed" ? "Use \(harness.name)" : "Install and use \(harness.name)") {
+                requestDefault(harness)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(store.harnessOperationId != nil || !ready)
+        }
+    }
+
+    private func configure(_ harness: HarnessCatalogEntry, method: HarnessCatalogEntry.Authentication.Method) {
+        if method.fields.isEmpty {
+            Task { _ = await store.configureHarness(harness, method: method, makeDefault: true, completesOnboarding: true) }
+        } else {
+            authSelection = HarnessAuthSelection(harness: harness, method: method, makeDefault: true, completesOnboarding: true)
         }
     }
 
@@ -3173,12 +3497,11 @@ struct HarnessOnboardingPreview: View {
 
 private struct HarnessChoiceCard: View {
     let harness: HarnessCatalogEntry
-    let busy: Bool
-    let ready: Bool
+    let selected: Bool
     let action: () -> Void
-    let authAction: (HarnessCatalogEntry.Authentication.Method) -> Void
 
     var body: some View {
+        Button(action: action) {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text(harness.name).font(.system(size: 15, weight: .semibold))
@@ -3186,50 +3509,131 @@ private struct HarnessChoiceCard: View {
                 if harness.verified {
                     Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.accentColor)
                 }
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
             }
             Text(harness.description ?? "No description provided.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
             HStack {
-                Text(harness.protocolName.uppercased())
+                Label(harness.protocolName.uppercased(), systemImage: "point.3.connected.trianglepath.dotted")
                 Spacer()
                 Text(harness.installation.status == "builtin" || harness.installation.status == "installed" ? "Installed" : "Will install")
             }
             .font(.system(size: 10.5, weight: .medium))
             .foregroundStyle(.secondary)
-            HStack {
-                Text("Architecture").font(.caption.weight(.semibold))
+            HStack(spacing: 6) {
+                Label(harness.graph.level.capitalized, systemImage: "square.3.layers.3d")
+                Text("· \(harness.graph.nodes.count) components")
                 Spacer()
-                Text(harness.graph.level.capitalized).font(.caption2).foregroundStyle(.secondary)
+                Text(harness.auth.status == "configured" || harness.auth.status == "not-required" ? "Ready" : "Sign-in needed")
             }
-            HarnessGraphPreview(graph: harness.graph).frame(height: 82)
-            if harness.auth.status != "not-required" && harness.auth.status != "configured" {
-                Divider()
-                Text("Choose how to sign in")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(harness.auth.methods) { method in
-                    Button(method.name) { authAction(method) }
-                        .buttonStyle(.bordered)
-                        .disabled(busy)
-                }
-            } else {
-                Button(harness.installation.status == "builtin" || harness.installation.status == "installed" ? "Use this Harness" : "Install and use") {
-                    action()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(busy || !ready)
-                if !ready {
-                    Text("Configure at least one usable model provider below.")
-                        .font(.system(size: 10.5)).foregroundStyle(.orange)
-                }
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 142, alignment: .leading)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Color.accentColor : OpenCodexPalette.border, lineWidth: selected ? 1.5 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct HarnessProgressiveLensPanel: View {
+    @ObservedObject var store: OpenCodexStore
+    let harness: HarnessCatalogEntry
+    @Binding var lens: String
+    @Binding var showingCreateEditor: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Picker("Harness lens", selection: $lens) {
+                Text("Simple").tag("Simple")
+                Text("Architecture").tag("Architecture")
+                Text("Runtime").tag("Runtime")
+                Text("Manifest").tag("Manifest")
+            }
+            .pickerStyle(.segmented)
+            switch lens {
+            case "Simple": simple
+            case "Runtime": HarnessRuntimePanel(store: store, harness: harness)
+            case "Manifest": manifestEditor
+            default: HarnessDetailPanel(harness: harness)
             }
         }
-        .padding(15)
-        .frame(maxWidth: .infinity, minHeight: 250, alignment: .leading)
-        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.border))
+        .padding(12)
+        .background(OpenCodexPalette.hover.opacity(0.55), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private var simple: some View {
+        HStack(spacing: 10) {
+            LensFact(title: "Recommended for", value: harness.description ?? "Coding tasks", icon: "person.crop.circle")
+            LensFact(title: "Models & sign-in", value: harness.auth.status == "not-required" ? "Configured on the Host" : harness.auth.status.replacingOccurrences(of: "-", with: " "), icon: "cpu")
+            LensFact(title: "Compatibility", value: harness.compatibility.status == "failed" ? "Needs attention" : "\(harness.compatibility.status.capitalized) on this Mac", icon: "checkmark.shield")
+            LensFact(title: "Driver contract", value: harness.driver.loaded ? "API v\(harness.driver.apiVersion) · \(harness.capabilities.filter { $0.status != "unsupported" }.count) capabilities" : "Driver not loaded", icon: "puzzlepiece.extension")
+        }
+    }
+
+    private var manifestEditor: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 28)).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Create or import a Harness").font(.headline)
+                Text("Manifest Editor changes only Pack-declared composable components, validates exact distributions and credential references, runs a non-billed preflight, and prepares a credential-free Pack for review.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Import Pack") { chooseHarnessPackImport(store: store) }
+            Button("Create Pack") { showingCreateEditor = true }.buttonStyle(.borderedProminent)
+        }
+        .padding(10)
+    }
+}
+
+private struct HarnessRuntimePanel: View {
+    @ObservedObject var store: OpenCodexStore
+    let harness: HarnessCatalogEntry
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            HarnessGraphPreview(graph: harness.graph, runtime: store.currentHarnessRuntime, interactive: true)
+                .frame(maxWidth: .infinity, minHeight: 190)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Observed in this task", systemImage: "waveform.path.ecg").font(.headline)
+                if let runtime = store.currentHarnessRuntime, !runtime.nodes.isEmpty {
+                    ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
+                        if let activity = runtime.nodes[nodeID] {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(harness.graph.nodes.first(where: { $0.id == nodeID })?.title ?? nodeID)
+                                    .font(.caption.weight(.semibold))
+                                Text("\(activity.status.capitalized) · \(activity.activity)")
+                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                        }
+                    }
+                } else {
+                    Text("Start a task with this Harness. OpenFish will light up only the declared components it actually observes, without capturing prompt or credential content for the graph.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(width: 250, alignment: .topLeading)
+        }
+    }
+}
+
+private struct LensFact: View {
+    let title: String
+    let value: String
+    let icon: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: icon).font(.caption.weight(.semibold))
+            Text(value).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+        }
+        .padding(11).frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.border))
     }
 }
 
@@ -3270,6 +3674,7 @@ private struct HarnessSettingsView: View {
     @State private var showingCreateEditor = false
     @State private var editingHarness: HarnessCatalogEntry?
     @State private var pendingCommunityHarness: HarnessCatalogEntry?
+    @State private var lens = "Simple"
 
     private var filtered: [HarnessCatalogEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -3345,6 +3750,7 @@ private struct HarnessSettingsView: View {
                                     if harness.compatibility.status == "failed" {
                                         Button("Retry") { Task { await store.mutateHarness("install", harness: harness) } }
                                     }
+                                    Button("Run preflight") { Task { await store.mutateHarness("probe", harness: harness) } }
                                     if harness.auth.methods.contains(where: { $0.kind == "terminal" }) {
                                         Menu("Sign in again") {
                                             ForEach(harness.auth.methods.filter { $0.kind == "terminal" }) { method in
@@ -3364,10 +3770,12 @@ private struct HarnessSettingsView: View {
                 }
             }
             if let inspected = store.harnesses.first(where: { $0.id == inspectedHarnessId }) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Harness architecture").font(.headline)
-                    HarnessDetailPanel(harness: inspected)
-                }
+                HarnessProgressiveLensPanel(
+                    store: store,
+                    harness: inspected,
+                    lens: $lens,
+                    showingCreateEditor: $showingCreateEditor
+                )
             }
         }
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }
@@ -3417,8 +3825,10 @@ private struct HarnessSettingsView: View {
         let lines: [String?] = [
             "Open Fish Harness diagnostics", "id=\(harness.id)", "version=\(harness.version)",
             "source=\(harness.source)", "protocol=\(harness.protocolName)",
+            "driver_api=\(harness.driver.apiVersion)", "driver_loaded=\(harness.driver.loaded)",
             "installation=\(harness.installation.status)", "auth=\(harness.auth.status)",
             "compatibility=\(harness.compatibility.status)",
+            "capabilities=\(harness.capabilities.sorted { $0.id < $1.id }.map { "\($0.id):\($0.status):\($0.source)" }.joined(separator: ","))",
             harness.unavailableReason.map { "unavailable=\(redacted($0))" },
             harness.installation.error.map { "install_error=\(redacted($0))" },
             harness.compatibility.message.map { "compatibility_message=\(redacted($0))" },
@@ -3866,22 +4276,31 @@ private struct TaskInspector: View {
                     }
                     if let harness = store.currentHarness {
                         InspectorSection(title: "Harness architecture · \(harness.graph.level)") {
-                            ForEach(harness.graph.nodes) { node in
-                                HStack(spacing: 8) {
-                                    Image(systemName: node.editable ? "slider.horizontal.3" : "square.dashed")
-                                        .foregroundStyle(node.editable ? Color.accentColor : Color.secondary)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(node.title).font(.system(size: 12, weight: .medium))
-                                        Text(node.kind).font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                            HarnessGraphPreview(graph: harness.graph, runtime: store.currentHarnessRuntime)
+                                // The inspector uses the graph's compact two-column layout.  Size
+                                // against that same layout so the final row is never clipped.
+                                .frame(height: max(150, CGFloat((harness.graph.nodes.count + 1) / 2) * 62 + 12))
+                            if let runtime = store.currentHarnessRuntime, !runtime.nodes.isEmpty {
+                                ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
+                                    if let activity = runtime.nodes[nodeID],
+                                       let node = harness.graph.nodes.first(where: { $0.id == nodeID }) {
+                                        HStack(alignment: .top, spacing: 7) {
+                                            Circle().fill(activity.status == "failed" ? Color.red : activity.status == "active" ? Color.blue : Color.green)
+                                                .frame(width: 7, height: 7).padding(.top, 4)
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text("\(node.title) · \(activity.status)").font(.system(size: 11.5, weight: .medium))
+                                                Text(activity.activity).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2)
+                                            }
+                                        }
                                     }
-                                    Spacer()
                                 }
-                                .padding(7)
-                                .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 7))
+                            } else {
+                                Text("Runtime evidence will light up this graph as the Harness executes.")
+                                    .font(.system(size: 10.5)).foregroundStyle(.secondary)
                             }
                         }
                     }
-                    InspectorSection(title: "DSH runtime") {
+                    InspectorSection(title: "Host runtime") {
                         InspectorRow(label: "Version", value: store.hostDescription?.version ?? "—")
                         InspectorRow(label: "Provider", value: store.sessionModels?.current.provider ?? store.hostDescription?.provider ?? "Default")
                         InspectorRow(label: "Preset", value: store.currentSession?.agentPreset ?? "Composition default")

@@ -210,17 +210,58 @@ final class MobileOpenCodexStore: ObservableObject {
             protocolName: "acp", source: "acp-registry",
             graph: .init(
                 level: "observable",
+                manifestVersion: 1,
+                boundary: "Codex ACP agent process",
+                evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")],
                 nodes: [
-                    .init(id: "client", kind: "native-shell", title: "OpenFish", editable: false, config: nil),
-                    .init(id: "runtime", kind: "harness-runtime", title: "Codex ACP", editable: false, config: nil),
-                    .init(id: "model", kind: "model-provider", title: "ChatGPT", editable: false, config: nil),
+                    .init(id: "acp", kind: "protocol-adapter", title: "ACP interface", editable: false, responsibility: "Translates client sessions and permissions for Codex.", evidence: [.init(kind: "declared", source: "ACP Registry codex-acp", version: "demo")], config: nil),
+                    .init(id: "session", kind: "agent-session", title: "Thread & turn", editable: false, responsibility: "Owns the thread, current turn, and streamed items.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "context", kind: "context-runtime", title: "Context", editable: false, responsibility: "Builds model input from instructions, history, and environment.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "model", kind: "model-client", title: "Model client", editable: false, responsibility: "Streams inference through the selected Codex account and model.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "tools", kind: "tool-runtime", title: "Tools", editable: false, responsibility: "Dispatches enabled coding and computer tools.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "sandbox", kind: "execution-boundary", title: "Sandbox", editable: false, responsibility: "Constrains filesystem and network effects.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "approvals", kind: "permission-policy", title: "Approvals", editable: false, responsibility: "Stops boundary-crossing operations for review.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
+                    .init(id: "persistence", kind: "session-storage", title: "Persistence", editable: false, responsibility: "Retains resumable thread identity and state.", evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")], config: nil),
                 ],
-                edges: [.init(from: "client", to: "runtime"), .init(from: "runtime", to: "model")]
+                edges: [
+                    .init(from: "acp", to: "session"), .init(from: "session", to: "context"), .init(from: "context", to: "model"),
+                    .init(from: "model", to: "session"), .init(from: "session", to: "tools"), .init(from: "tools", to: "approvals"),
+                    .init(from: "approvals", to: "sandbox"), .init(from: "session", to: "persistence"),
+                ]
             ),
             available: true, unavailableReason: nil,
             installation: .init(status: "installed", installedVersion: "demo", availableVersion: "demo", previousVersions: [], error: nil),
             auth: .init(methods: [], selectedMethod: "chat-gpt", status: "configured", missingFields: []),
-            compatibility: .init(status: "compatible", checkedAt: nil, message: "Synthetic demo runtime")
+            compatibility: .init(status: "compatible", checkedAt: nil, message: "Synthetic demo runtime"),
+            capabilities: [
+                .init(id: "lifecycle.install", status: "supported", source: "driver", detail: nil),
+                .init(id: "lifecycle.update", status: "supported", source: "driver", detail: nil),
+                .init(id: "lifecycle.rollback", status: "supported", source: "driver", detail: nil),
+                .init(id: "lifecycle.uninstall", status: "supported", source: "driver", detail: nil),
+                .init(id: "session.create", status: "supported", source: "driver", detail: nil),
+                .init(id: "session.resume", status: "supported", source: "driver", detail: nil),
+                .init(id: "session.cancel", status: "supported", source: "driver", detail: nil),
+                .init(id: "session.fork", status: "supported", source: "driver", detail: nil),
+                .init(id: "session.archive", status: "supported", source: "driver", detail: nil),
+                .init(id: "workspace.project", status: "supported", source: "driver", detail: nil),
+                .init(id: "workspace.no-project", status: "supported", source: "driver", detail: nil),
+                .init(id: "configuration.models", status: "runtime", source: "runtime", detail: nil),
+                .init(id: "configuration.reasoning", status: "runtime", source: "runtime", detail: nil),
+                .init(id: "configuration.auth", status: "runtime", source: "runtime", detail: nil),
+                .init(id: "interaction.tools", status: "supported", source: "driver", detail: nil),
+                .init(id: "interaction.approvals", status: "supported", source: "driver", detail: nil),
+                .init(id: "interaction.questions", status: "unsupported", source: "driver", detail: "Not advertised by the demo ACP agent."),
+                .init(id: "interaction.files", status: "unsupported", source: "driver", detail: "Not advertised by the demo ACP agent."),
+                .init(id: "interaction.events", status: "supported", source: "driver", detail: nil),
+                .init(id: "architecture.manifest", status: "supported", source: "pack", detail: nil),
+                .init(id: "architecture.runtime-observation", status: "runtime", source: "runtime", detail: nil),
+                .init(id: "architecture.edit", status: "unsupported", source: "pack", detail: "This demo Pack is observable, not composable."),
+                .init(id: "diagnostics.preflight", status: "supported", source: "driver", detail: nil),
+                .init(id: "builder.manifest", status: "supported", source: "pack", detail: nil),
+                .init(id: "builder.test", status: "supported", source: "driver", detail: nil),
+                .init(id: "builder.publish", status: "unsupported", source: "pack", detail: "Publication export is prepared on the Mac."),
+            ],
+            driver: .init(apiVersion: 1, protocol: "acp", loaded: true)
         )]
         store.selectedHarnessId = "codex-acp"
         store.selectedWorkspaceId = workspace.workspaceId
@@ -244,6 +285,9 @@ final class MobileOpenCodexStore: ObservableObject {
 
     var currentAgentPreset: String? { controlSession?.agentPreset }
     var currentHarnessId: String { controlSession?.harnessId ?? draftHarnessId ?? selectedHarnessId }
+    var currentHarness: MobileHarness? { harnesses.first { $0.id == currentHarnessId } }
+    func harnessCapability(_ id: String) -> String? { currentHarness?.capabilities.first(where: { $0.id == id })?.status }
+    func harnessCan(_ id: String) -> Bool { harnessCapability(id) != nil && harnessCapability(id) != "unsupported" }
     var canChooseHarness: Bool { selectedSessionId == nil && controlSession?.blank == true }
     var canChooseAgentPreset: Bool { controlSession?.blank == true && currentHarnessId == "dsh" }
 
@@ -312,6 +356,12 @@ final class MobileOpenCodexStore: ObservableObject {
         return projections[conversationSessionId]?["todos"]
     }
 
+    var currentHarnessRuntime: MobileHarnessRuntimeProjection? {
+        guard let conversationSessionId,
+              let value = projections[conversationSessionId]?["harnessRuntime"] else { return nil }
+        return try? value.decode(MobileHarnessRuntimeProjection.self)
+    }
+
     var currentModelName: String {
         guard let sessionModels else { return "Default model" }
         return sessionModels.groups
@@ -329,6 +379,22 @@ final class MobileOpenCodexStore: ObservableObject {
             .reasoning?.efforts.first(where: { $0.id == effort })?.name
             ?? effort
         return "\(currentModelName) · \(effortName)"
+    }
+
+    var currentModel: MobileCatalogModel? {
+        guard let sessionModels else { return nil }
+        return sessionModels.groups
+            .first(where: { $0.id == sessionModels.current.provider })?
+            .models.first(where: { $0.id == sessionModels.current.model })
+    }
+
+    var currentReasoningOptions: [MobileModelReasoningEffort] {
+        currentModel?.reasoning?.efforts ?? []
+    }
+
+    var currentReasoningName: String? {
+        guard let effort = sessionModels?.current.reasoningEffort else { return nil }
+        return currentReasoningOptions.first(where: { $0.id == effort })?.name ?? effort
     }
 
     var selectedQuestions: [MobilePendingQuestion] {
@@ -396,7 +462,7 @@ final class MobileOpenCodexStore: ObservableObject {
     }
 
     func workspaceTitle(for session: MobileSession) -> String {
-        workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title ?? "Other"
+        workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title ?? "No Project"
     }
 
     var archivedSessions: [MobileSession] {
@@ -859,6 +925,22 @@ final class MobileOpenCodexStore: ObservableObject {
             errorMessage = nil
             scheduleCache()
         } catch { errorMessage = "Could not switch models: \(error.localizedDescription)" }
+    }
+
+    func chooseReasoningEffort(_ effort: String) async {
+        guard let models = sessionModels,
+              let model = currentModel else { return }
+        await chooseModel(provider: models.current.provider, model: model, effort: effort)
+    }
+
+    func refreshCurrentModels() async {
+        guard let selectedSessionId = controlSessionId else { return }
+        do {
+            sessionModels = try await api.models(sessionId: selectedSessionId)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not load model choices: \(error.localizedDescription)"
+        }
     }
 
     func chooseHarnessConfig(_ option: MobileHarnessConfigOption, value: MobileJSONValue) async {

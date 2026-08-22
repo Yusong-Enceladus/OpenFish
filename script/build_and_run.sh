@@ -53,9 +53,19 @@ if [[ "$INSTALLED_APP" != "$EXPECTED_INSTALLED_APP" ]]; then
   echo "Refusing unexpected install destination: $INSTALLED_APP" >&2
   exit 1
 fi
+# Remove the exact previous bundle from Launch Services before replacing it.
+# This matters when upgrading from the historical ai.deepseek.opencodex id:
+# otherwise Spotlight can keep both identities for one on-disk application.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -d "$INSTALLED_APP" && -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -u "$INSTALLED_APP" >/dev/null 2>&1 || true
+fi
 rm -rf "$INSTALLED_APP"
 mkdir -p "$USER_APPLICATIONS"
 mv "$APP_BUNDLE" "$INSTALLED_APP"
+if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -f "$INSTALLED_APP" >/dev/null 2>&1 || true
+fi
 
 open_app() {
   /usr/bin/open -n "$INSTALLED_APP"

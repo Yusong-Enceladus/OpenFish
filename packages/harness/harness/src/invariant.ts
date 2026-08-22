@@ -18,8 +18,11 @@ function validate(events: readonly SessionEvent[], fail: InvariantFailure): void
   }
   const selectedId = selected[0]?.data.harnessId
   for (const event of events) {
-    if (event.type === 'harness/native-event' && event.data.harnessId !== selectedId) {
-      fail(`Harness native event ${event.seq} does not match the selected Harness`)
+    if ((event.type === 'harness/native-event' || event.type === 'harness/runtime-node') && event.data.harnessId !== selectedId) {
+      fail(`Harness event ${event.seq} does not match the selected Harness`)
+    }
+    if (event.type === 'harness/runtime-node') {
+      if (event.data.nodeId.length === 0 || event.data.activity.length === 0) fail(`Harness runtime event ${event.seq} is incomplete`)
     }
   }
 }
@@ -30,7 +33,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return
     const [session, event] = args as [Session, SessionEvent]
-    if (event.type !== 'harness/selected' && event.type !== 'harness/native-event') return
+    if (event.type !== 'harness/selected' && event.type !== 'harness/native-event' && event.type !== 'harness/runtime-node') return
     validate([...session.events, event], fail)
   }, { global: true })
 }, { inject: ['sessions'] })

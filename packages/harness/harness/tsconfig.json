@@ -6,6 +6,7 @@
     { "path": "../../util/home-paths" },
     { "path": "../../core/agent" },
     { "path": "../../core/session" },
+    { "path": "../../session/session-projection" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

@@ -10,7 +10,7 @@ This release is for developers and early adopters who can inspect an agent's act
 - Per-install default Harness selection and per-task Harness selection.
 - No Project tasks stored in a dedicated OpenFish location rather than Desktop.
 - Protocol-driven ACP model, reasoning, mode, and configuration controls.
-- Truthfulness-level Harness graphs on Mac and iPhone, plus macOS Harness Studio for custom Pack creation, graph editing, import, and credential-free export.
+- Progressive Lens Harness views on Mac and iPhone: a plain-language Simple view, an evidence-backed Architecture Manifest, a runtime-observation view, and a macOS Manifest Editor for custom Pack creation, graph editing, non-billed preflight, import, and credential-free export.
 - A generated community Pack catalog whose pull-request publishing path does not require an OpenFish app release.
 - Session pinning to the Harness Pack version that created the task.
 - Native iPhone pairing, task projection, approvals, queueing, and voice input.
@@ -29,6 +29,7 @@ This release is for developers and early adopters who can inspect an agent's act
 - ACP Registry inclusion is discovery metadata, not an OpenFish security audit or quality endorsement. Non-ACP Harnesses still require a Driver plugin.
 - Community publishing currently uses a reviewed GitHub pull request; OpenFish does not yet operate an in-app account, ranking system, or one-click marketplace backend.
 - Only `acpSessionOptions` on editable composable nodes has generic execution semantics. Other node config is descriptive unless that Pack's Driver implements it.
+- Unknown Harness internals remain one opaque boundary. Rich Architecture views require a declared process boundary, at least three connected runtime responsibilities, and evidence for every component; the UI does not infer private internals.
 - Older tasks can expose upstream compatibility breaks when their pinned runtime is no longer installable on a newer OS. Export important work.
 
 ## Five-minute acceptance check

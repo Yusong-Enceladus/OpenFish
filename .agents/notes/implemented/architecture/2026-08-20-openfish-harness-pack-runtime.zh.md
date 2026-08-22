@@ -10,11 +10,11 @@ Open Fish 原本是单一 DSH Runtime 的原生壳子。如果把 Codex、Pi、O
 
 ## Decision
 
-Open Fish 按会话选择 Harness。Harness Pack v0 负责身份、协议、分发、发布者元数据、可用性和如实的架构图。图声明 `opaque`、`observable` 或 `composable`；只有 Pack 声明为可编辑的节点才能修改。壳子搜索分离的目录，不内置提供方 id。
+Open Fish 按会话选择 Harness。Harness 是把用户意图、上下文与模型转化为受控、可观察、可恢复行动的执行系统；它拥有 Agent Loop、工具、权限、会话语义和面向模型提供方的配置。Harness Pack v0 负责身份、协议、分发、发布者元数据、可用性和有证据支撑的 Architecture Manifest。图声明 `opaque`、`observable` 或 `composable`；opaque Pack 必须只展示一个如实的 Runtime 边界，observable 与 composable Pack 则必须声明边界、至少三个相连的职责，并为每个可见组件提供证据。只有 Pack 声明为可编辑的节点才能修改。壳子搜索分离的目录，不内置提供方 id。
 
 DSH 保留为内置原生路径。通用 ACP Driver 通过壳子自带的 Node/npm 或固定版本 Bun 安装每个包版本并启动精确的受管快照，持久化 ACP 远端身份，把文本输出和生命周期映射到公共 Session 表面，桥接审批与取消，并保留每个原生 ACP 更新。官方 ACP Registry 与生成后的 OpenFish 社区目录会在启动时填充发现数据。内置和已配置用户 Pack 覆盖所有冲突，官方 ACP 条目优先于社区条目。社区条目始终标记为未验证，并遵循相同的准确版本准入规则。curated Oh My Pi Pack 使用 Bun，因为其发布的 CLI 要求 Bun 1.3.14 或更高版本，而且尚未进入 Registry。
 
-`session.create` 接受 `harnessId`。现有会话会拒绝冲突选择；每个冷 API 入口都恢复 `harness/selected` 记录的 Harness，绝不会悄悄让 DSH 恢复外部历史。Agent Preset 仍是 DSH 专属概念，ACP 模型、思考强度与其他标准选项则来自每个实时 ACP 会话。可编辑的 composable 节点可以声明 `acpSessionOptions`；通用 Driver 会在新建会话时应用这些默认值，并拒绝 Harness 未声明支持的值。Host 持久化共享默认项、安装、认证偏好、活动版本和回滚快照。macOS Landing 流程要求用户选择一个默认 Harness，并在需要时安装所选 Pack；macOS 与 iOS 设置修改同一个 Host 默认项，而每个空白任务在第一轮之前仍可另选 Harness。原生选择界面会在使用前展示来源、安装、认证、兼容性与 Pack 真实性等级图。macOS Harness Studio 可以创建、编辑、导入和导出自定义 Pack；发布通过不含凭证的 Manifest 贡献到生成后的社区目录。
+`session.create` 接受 `harnessId`。现有会话会拒绝冲突选择；每个冷 API 入口都恢复 `harness/selected` 记录的 Harness，绝不会悄悄让 DSH 恢复外部历史。Agent Preset 仍是 DSH 专属概念，ACP 模型、思考强度与其他标准选项则来自每个实时 ACP 会话。可编辑的 composable 节点可以声明 `acpSessionOptions`；通用 Driver 会在新建会话时应用这些默认值，并拒绝 Harness 未声明支持的值。Host 持久化共享默认项、安装、认证偏好、活动版本和回滚快照。macOS Landing 流程要求用户选择一个默认 Harness，并在需要时安装所选 Pack；macOS 与 iOS 设置修改同一个 Host 默认项，而每个空白任务在第一轮之前仍可另选 Harness。原生选择采用 Progressive Lens：Simple 说明 Harness 适合谁以及如何登录；Architecture 只展示 Harness 边界内有证据支撑的 Runtime 职责；Builder 用于创建、导入、验证和导出 Pack。iPhone 提供同样的 Simple 与 Architecture 理解层以及只读 Builder 交接；发布和涉及凭证的编辑留在权威 Mac Host 上。发布通过不含凭证的 Manifest 贡献到生成后的社区目录。
 
 原生组合为未指定 Workspace 的会话提供 Host 自有的 `$DSH_HOME/openfish/sessions/no-workspace` cwd。启动器的当前目录绝不会把未分组任务错误归类成用户项目。
 
@@ -27,8 +27,8 @@ DSH 保留为内置原生路径。通用 ACP Driver 通过壳子自带的 Node/n
 
 ## Verification
 
-Manifest 与生命周期测试覆盖 Pack 准入、悬空图边拒绝、任意 ACP Registry 映射、第三方 Driver 注册、原子状态恢复、更新和回滚。ACP 测试证明会话从受管安装快照启动。API Carrier 测试覆盖目录变更与 `harnessId` 会话线协议。原生构建覆盖 macOS 图编辑、iOS 选择、Host 组合和冷恢复边界。
+Manifest 与生命周期测试覆盖 Pack 准入、装饰性图拒绝、证据与边界要求、悬空图边拒绝、任意 ACP Registry 映射、第三方 Driver 注册、原子状态恢复、更新和回滚。ACP 测试证明会话从受管安装快照启动。API Carrier 测试覆盖目录变更与 `harnessId` 会话线协议。原生构建覆盖 macOS Progressive Lens 与图编辑、iOS 选择与架构查看、Host 组合、语音权限失败和冷恢复边界。
 
 ## Consequences
 
-任何发布兼容 Registry 元数据的 npm ACP Agent 都可以无需修改壳子代码直接出现、安装并运行。Codex 与 Pi 当前来自 Registry，Oh My Pi 则作为 curated Pack 复用同一个 ACP Driver。新协议实现导出的 `HarnessDriver` 接口即可，无需修改壳子或 Session 代码。Codex 的 ACP 适配器底层运行官方 Codex 包，但未来直接 App Server Driver 会保留更多提供方原生保真度。图编辑仅对 Pack 声明的 composable 节点开放；浏览器登录仍归 Harness，API Key 留在 Host credential 服务，对话不会声称可跨 Harness 移植。
+任何发布兼容 Registry 元数据的 npm ACP Agent 都可以无需修改壳子代码直接出现、安装并运行。未知 Registry Agent 在获得更强证据之前始终只显示一个 opaque 边界。DSH、Codex 与 curated Oh My Pi 使用从源码推导的 Manifest 和有意义的职责；Open Fish UI、操作系统与模型提供方均位于 Harness 边界之外。Codex 与 Pi 当前来自 Registry，Oh My Pi 则作为 curated Pack 复用同一个 ACP Driver。新协议实现导出的 `HarnessDriver` 接口即可，无需修改壳子或 Session 代码。Codex 的 ACP 适配器底层运行官方 Codex 包，但未来直接 App Server Driver 会保留更多提供方原生保真度。图编辑仅对 Pack 声明的 composable 节点开放；浏览器登录仍归 Harness，API Key 留在 Host credential 服务，对话不会声称可跨 Harness 移植。

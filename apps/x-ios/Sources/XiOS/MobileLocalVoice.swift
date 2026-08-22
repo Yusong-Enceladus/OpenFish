@@ -14,6 +14,7 @@ final class MobileLocalVoice: NSObject, ObservableObject {
     let providerID = "apple-local"
     let providerName = "Apple On-Device Speech"
     @Published private(set) var isListening = false
+    @Published private(set) var isStarting = false
     @Published private(set) var isSpeaking = false
     @Published private(set) var errorMessage: String?
     @Published var preferredVoiceIdentifier: String {
@@ -32,6 +33,7 @@ final class MobileLocalVoice: NSObject, ObservableObject {
     private var handler: ((String, Bool) -> Void)?
     private var speechFinishedHandler: (() -> Void)?
     private var hasInputTap = false
+    private var audioObservers: [NSObjectProtocol] = []
 
     private var effectiveSpeechRate: Float { min(max(speechRate, 0.35), 0.62) }
 
@@ -41,6 +43,46 @@ final class MobileLocalVoice: NSObject, ObservableObject {
         speechRate = storedRate == 0 ? AVSpeechUtteranceDefaultSpeechRate : Float(storedRate)
         super.init()
         synthesizer.delegate = self
+        installAudioObservers()
+    }
+
+    deinit {
+        for observer in audioObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    private func installAudioObservers() {
+        let center = NotificationCenter.default
+        let names: [Notification.Name] = [
+            AVAudioSession.interruptionNotification,
+            AVAudioSession.routeChangeNotification,
+            AVAudioSession.mediaServicesWereResetNotification,
+        ]
+        audioObservers = names.map { name in
+            center.addObserver(forName: name, object: AVAudioSession.sharedInstance(), queue: .main) { [weak self] notification in
+                let action: Int
+                if name == AVAudioSession.interruptionNotification {
+                    let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+                    action = raw.flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began ? 1 : 0
+                } else if name == AVAudioSession.mediaServicesWereResetNotification {
+                    action = 2
+                } else {
+                    action = 3
+                }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if action == 1 {
+                        self.errorMessage = "Dictation stopped because iPhone audio was interrupted. Tap the microphone to resume."
+                        self.stopListening()
+                    } else if action == 2 {
+                        self.errorMessage = "iPhone audio services restarted. Tap the microphone to begin again."
+                        self.stopListening()
+                    } else if action == 3, self.isListening {
+                        self.errorMessage = "The microphone route changed. Dictation stopped safely; tap the microphone to resume."
+                        self.stopListening()
+                    }
+                }
+            }
+        }
     }
 
     var availableVoices: [MobileVoiceChoice] {
@@ -62,11 +104,15 @@ final class MobileLocalVoice: NSObject, ObservableObject {
     }
 
     func toggle(onTranscript: @escaping (String, Bool) -> Void) async {
+        guard !isStarting else { return }
         if isListening { stopListening(); return }
         await startListening(onTranscript: onTranscript)
     }
 
     func startListening(onTranscript: @escaping (String, Bool) -> Void) async {
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         stopSpeaking()
         stopListening()
         errorMessage = nil
@@ -102,7 +148,10 @@ final class MobileLocalVoice: NSObject, ObservableObject {
                 stopListening()
                 return
             }
-            input.removeTap(onBus: 0)
+            if hasInputTap {
+                input.removeTap(onBus: 0)
+                hasInputTap = false
+            }
             Self.installInputTap(on: input, format: format, request: request)
             hasInputTap = true
             engine.prepare()

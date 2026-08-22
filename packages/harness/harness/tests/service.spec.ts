@@ -7,6 +7,7 @@ import { HarnessService } from '../src/index.ts'
 import type { HarnessDriver, HarnessPack } from '../src/types.ts'
 
 function pack(version: string): unknown {
+  const evidence = [{ kind: 'declared', source: 'Harness test fixture', version }]
   return {
     schemaVersion: 0, id: 'community.driver-demo', name: 'Driver demo', version, publisher: 'Community',
     verified: false, protocol: 'community-protocol',
@@ -14,8 +15,15 @@ function pack(version: string): unknown {
     distribution: { kind: 'executable', command: '/usr/bin/true', args: [], env: {} },
     graph: {
       level: 'composable',
-      nodes: [{ id: 'input', kind: 'input', title: 'Input', editable: true, config: { x: 10, y: 20 } }],
-      edges: [],
+      manifestVersion: 1,
+      boundary: 'Driver demo Harness process',
+      evidence,
+      nodes: [
+        { id: 'input', kind: 'input', title: 'Input', editable: true, responsibility: 'Accepts user intent.', evidence, config: { x: 10, y: 20 } },
+        { id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false, responsibility: 'Runs the agent loop.', evidence },
+        { id: 'output', kind: 'output', title: 'Output', editable: false, responsibility: 'Publishes session updates.', evidence },
+      ],
+      edges: [{ from: 'input', to: 'runtime' }, { from: 'runtime', to: 'output' }],
     },
     source: 'user',
   }
@@ -29,7 +37,13 @@ describe('Harness lifecycle and Driver SDK', () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-state-'))
     const installed: string[] = []
     const driver: HarnessDriver = {
+      apiVersion: 1,
       protocol: 'community-protocol',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      ],
       available: async () => undefined,
       install: async (candidate: HarnessPack) => { installed.push(candidate.version) },
       create: async () => { throw new Error('not used') },
@@ -123,7 +137,7 @@ describe('Harness lifecycle and Driver SDK', () => {
     const communityPack = {
       schemaVersion: 0, id: 'community.driver-demo', name: 'Published demo', version: '3.0.0', publisher: 'Community',
       protocol: 'community-protocol', distribution: { kind: 'npx', package: '@community/driver-demo@3.0.0', args: [], env: {} },
-      graph: { level: 'opaque', nodes: [], edges: [] },
+      graph: { level: 'opaque', nodes: [{ id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false }], edges: [] },
     }
     try {
       vi.stubGlobal('fetch', vi.fn(async (input) => {

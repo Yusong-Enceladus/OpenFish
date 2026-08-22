@@ -321,6 +321,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
@@ -329,6 +330,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
 				PRODUCT_NAME = OpenFish;
 				SDKROOT = macosx;
@@ -357,6 +359,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
@@ -365,6 +368,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
 				PRODUCT_NAME = OpenFish;
 				SDKROOT = macosx;

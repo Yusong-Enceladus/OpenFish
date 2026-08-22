@@ -268,8 +268,10 @@ export interface SessionsApi {
   ): Promise<RpcResponse<{ items: SessionSearchItem[]; hasMore: boolean }>>
 
   /**
-   * Creates a real session and its idle agent. At most one of `workspaceId` /
-   * `cwd` is accepted; an omitted project uses the Host cwd. A caller may
+   * Creates a real session and its idle agent. At most one of `workspaceId`,
+   * `cwd`, or explicit `noProject` is accepted; No Project uses a private
+   * OpenFish-managed working directory while a legacy omitted location uses
+   * the Host cwd. A caller may
    * preallocate `sessionId`: retries with the same id and cwd return the same
    * session, while a different cwd fails with `session-conflict`. Workspace
    * creation attaches the session after publication; an attach failure
@@ -285,6 +287,8 @@ export interface SessionsApi {
   create(request: RpcRequest<{
     workspaceId?: WorkspaceId
     cwd?: string
+    /** Explicit first-class No Project mode with a private managed working directory. */
+    noProject?: boolean
     sessionId?: SessionId
     agentPreset?: string
     harnessId?: string

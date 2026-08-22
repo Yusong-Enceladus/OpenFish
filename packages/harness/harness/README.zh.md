@@ -12,7 +12,7 @@ Open Fish 使用此包作为可互换 Agent Harness 的控制平面。Harness Pa
 
 Pack v0 支持固定版本的 npm、Bun 和 Python／uvx 包、带校验和的平台二进制，以及由用户明确选择的现有可执行文件。ACP 认证契约从已安装 Harness 动态发现：Agent／浏览器登录仍由 Harness 所有；环境凭证只进入 Open Fish 的只写凭证库，并只注入对应进程；终端登录只会在用户明确操作后启动。Registry 收录状态与 Open Fish 实际运行兼容性分开呈现。会话成功启动后记录兼容；失败则记录经过脱敏、可用于恢复的诊断。
 
-架构图是一份真实性契约，而不是猜测私有内部后的装饰。`opaque` 只展示运行边界，`observable` 描述真实数据流，`composable` 只允许编辑 Pack 明确标为 `editable: true` 的节点。自定义 Pack 可给这些节点附加任意 JSON 配置。可编辑节点中的 `acpSessionOptions` 对象具有实际运行语义：通用 ACP Driver 会在新建会话时应用其中声明的 select 或 boolean 默认值，并拒绝目标 Harness 实时 ACP 目录中不存在的 id 或值；其余节点配置仍是 Pack 自有元数据。Manifest 准入会拒绝未知 schema 版本、非法身份、非法认证契约、缺少非 DSH 分发信息的 Pack，以及悬空图边。
+架构图是一份有证据支撑的 Architecture Manifest，而不是猜测私有内部后的装饰。`opaque` 必须只展示一个 Runtime 边界。`observable` 与 `composable` 必须写明 Harness 边界、解释至少三个相连的 Runtime 职责，并给每个可见组件附上 declared、source-derived 或 runtime-observed 证据。除非实际位于该 Harness 进程内部，否则 Open Fish、操作系统与模型提供方都不是图节点。`composable` 只允许编辑 Pack 明确标为 `editable: true` 的节点。自定义 Pack 可给这些节点附加任意 JSON 配置。可编辑节点中的 `acpSessionOptions` 对象具有实际运行语义：通用 ACP Driver 会在新建会话时应用其中声明的 select 或 boolean 默认值，并拒绝目标 Harness 实时 ACP 目录中不存在的 id 或值；其余节点配置仍是 Pack 自有元数据。Manifest 准入会拒绝未知 schema 版本、非法身份、非法认证契约、缺少非 DSH 分发信息的 Pack、装饰性的单节点 observable 图、缺少证据的组件，以及悬空图边。原生客户端用同一套 Progressive Lens 展示 Manifest：Simple、Architecture、Runtime 与 Manifest Editor。
 
 ## 扩展 Open Fish
 

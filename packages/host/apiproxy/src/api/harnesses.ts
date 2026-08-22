@@ -3,12 +3,23 @@ import type { RpcRequest, RpcResponse } from './rpc.ts'
 /** Truthfulness level of a Harness Pack graph. */
 export type HarnessGraphLevel = 'opaque' | 'observable' | 'composable'
 
+/** Provenance for a graph or component fact shown by native clients. */
+export interface HarnessGraphEvidence {
+  kind: 'declared' | 'source-derived' | 'runtime-observed'
+  source: string
+  version?: string
+}
+
 /** One graph node exposed by a Harness Pack. */
 export interface HarnessGraphNode {
   id: string
   kind: string
   title: string
   editable: boolean
+  responsibility?: string
+  inputs?: string[]
+  outputs?: string[]
+  evidence?: HarnessGraphEvidence[]
   config?: Record<string, unknown>
 }
 
@@ -18,6 +29,9 @@ export interface HarnessGraphEdge { from: string; to: string }
 /** Client-safe Harness architecture graph. */
 export interface HarnessGraph {
   level: HarnessGraphLevel
+  manifestVersion?: 1
+  boundary?: string
+  evidence?: HarnessGraphEvidence[]
   nodes: HarnessGraphNode[]
   edges: HarnessGraphEdge[]
 }
@@ -61,6 +75,19 @@ export interface HarnessCatalogEntry {
     missingFields: string[]
   }
   compatibility: { status: 'untested' | 'ready' | 'compatible' | 'failed'; checkedAt?: string; message?: string }
+  capabilities: Array<{
+    id: 'lifecycle.install' | 'lifecycle.update' | 'lifecycle.rollback' | 'lifecycle.uninstall'
+      | 'session.create' | 'session.resume' | 'session.cancel' | 'session.fork' | 'session.archive'
+      | 'workspace.project' | 'workspace.no-project'
+      | 'configuration.models' | 'configuration.reasoning' | 'configuration.auth'
+      | 'interaction.tools' | 'interaction.approvals' | 'interaction.questions' | 'interaction.files' | 'interaction.events'
+      | 'architecture.manifest' | 'architecture.runtime-observation' | 'architecture.edit'
+      | 'diagnostics.preflight' | 'builder.manifest' | 'builder.test' | 'builder.publish'
+    status: 'supported' | 'runtime' | 'unsupported'
+    source: 'pack' | 'driver' | 'runtime'
+    detail?: string
+  }>
+  driver: { apiVersion: 1; protocol: string; loaded: boolean }
 }
 
 /** User-authored Pack document accepted by the graphical editor. */
@@ -95,7 +122,7 @@ export interface HarnessesApi {
   list(request: RpcRequest<{ query?: string }>): Promise<RpcResponse<{ items: HarnessCatalogEntry[] }>>
   refresh(request: RpcRequest<Record<string, never>>): Promise<RpcResponse<{ items: HarnessCatalogEntry[] }>>
   mutate(request: RpcRequest<{
-    action: 'install' | 'uninstall' | 'update' | 'rollback' | 'remove' | 'auth' | 'login' | 'default' | 'clear-default' | 'upsert'
+    action: 'install' | 'uninstall' | 'update' | 'rollback' | 'remove' | 'auth' | 'login' | 'probe' | 'default' | 'clear-default' | 'upsert'
     id?: string
     authMethod?: string
     pack?: CustomHarnessPackInput

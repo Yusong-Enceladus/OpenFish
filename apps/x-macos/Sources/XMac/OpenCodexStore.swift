@@ -242,11 +242,27 @@ final class OpenCodexStore: ObservableObject {
                 kind: "npx", package: "@zed-industries/codex-acp@0.10.0", archive: nil,
                 sha256: nil, command: nil, args: [], env: [:]
             ),
-            graph: HarnessGraph(level: "observable", nodes: [HarnessGraphNode(id: "runtime", kind: "runtime", title: "Codex ACP runtime", editable: false, config: nil)], edges: []),
+            graph: HarnessGraph(
+                level: "observable", manifestVersion: 1, boundary: "Codex ACP agent process",
+                evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")],
+                nodes: Self.demoArchitectureNodes(names: [
+                    ("acp", "protocol-adapter", "ACP interface", "Translates client sessions and permissions for Codex."),
+                    ("session", "agent-session", "Thread & turn", "Owns the current thread, turn, and streamed items."),
+                    ("context", "context-runtime", "Context", "Builds model input from instructions, history, and environment."),
+                    ("model", "model-client", "Model client", "Streams inference through the selected Codex account and model."),
+                    ("tools", "tool-runtime", "Tools", "Dispatches enabled coding and computer tools."),
+                    ("sandbox", "execution-boundary", "Sandbox", "Constrains filesystem and network effects."),
+                    ("approvals", "permission-policy", "Approvals", "Stops boundary-crossing operations for review."),
+                    ("persistence", "session-storage", "Persistence", "Retains resumable thread identity and state."),
+                ], source: "https://github.com/openai/codex", version: "demo"),
+                edges: Self.demoArchitectureEdges(ids: ["acp", "session", "context", "model", "tools", "approvals", "sandbox", "persistence"])
+            ),
             available: true, unavailableReason: nil,
             installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
             auth: .init(methods: [], selectedMethod: "chat-gpt", status: "configured", missingFields: []),
-            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in")
+            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in"),
+            capabilities: Self.visualCapabilities(protocolName: "acp", graphLevel: "observable"),
+            driver: .init(apiVersion: 1, protocol: "acp", loaded: true)
         )]
         store.sessions = store.sessions.map { session in
             SessionSummary(
@@ -297,18 +313,26 @@ final class OpenCodexStore: ObservableObject {
             publisher: "DeepSeek", license: "MIT", repository: "https://github.com/deepseek-ai/deepseek-harness", icon: nil,
             verified: true, protocolName: "dsh", source: "builtin", distribution: nil,
             graph: HarnessGraph(
-                level: "observable",
-                nodes: [
-                    HarnessGraphNode(id: "plugins", kind: "plugin-runtime", title: "Cordis plugins", editable: false, config: nil),
-                    HarnessGraphNode(id: "loop", kind: "agent-loop", title: "Agent loop", editable: false, config: nil),
-                    HarnessGraphNode(id: "tools", kind: "tool-runtime", title: "Tools", editable: false, config: nil),
-                ],
-                edges: [HarnessGraphEdge(from: "plugins", to: "loop"), HarnessGraphEdge(from: "loop", to: "tools")]
+                level: "observable", manifestVersion: 1, boundary: "DeepSeek Harness process",
+                evidence: [.init(kind: "source-derived", source: "docs/architecture.md", version: "builtin")],
+                nodes: Self.demoArchitectureNodes(names: [
+                    ("context", "context-runtime", "Context", "Builds model-visible context."),
+                    ("loop", "agent-loop", "Agent loop", "Coordinates inference and tools."),
+                    ("models", "model-router", "Models", "Routes configured model providers."),
+                    ("tools", "tool-runtime", "Tools", "Validates and executes active tools."),
+                    ("approvals", "permission-policy", "Approvals", "Controls sensitive operations."),
+                    ("sandbox", "execution-boundary", "Execution", "Bounds process and filesystem effects."),
+                    ("session", "session-storage", "Persistence", "Stores resumable session events."),
+                    ("extensions", "extension-runtime", "Extensions", "Loads versioned runtime extensions and skills."),
+                ], source: "docs/architecture.md", version: "builtin"),
+                edges: Self.demoArchitectureEdges(ids: ["context", "loop", "models", "tools", "approvals", "sandbox", "session", "extensions"])
             ),
             available: true, unavailableReason: nil,
             installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
             auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
-            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in")
+            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in"),
+            capabilities: Self.visualCapabilities(protocolName: "dsh", graphLevel: "observable"),
+            driver: .init(apiVersion: 1, protocol: "dsh", loaded: true)
         )
         let omp = HarnessCatalogEntry(
             id: "oh-my-pi", isDefault: false, name: "Oh My Pi", version: "17.4.0",
@@ -320,14 +344,26 @@ final class OpenCodexStore: ObservableObject {
                 sha256: nil, command: nil, args: ["acp"], env: [:]
             ),
             graph: HarnessGraph(
-                level: "observable",
-                nodes: [HarnessGraphNode(id: "runtime", kind: "harness-runtime", title: "OMP ACP", editable: false, config: nil)],
-                edges: []
+                level: "observable", manifestVersion: 1, boundary: "Oh My Pi agent process",
+                evidence: [.init(kind: "source-derived", source: "https://github.com/can1357/oh-my-pi", version: "17.4.0")],
+                nodes: Self.demoArchitectureNodes(names: [
+                    ("resources", "context-loader", "Resources", "Discovers context, skills, and configuration."),
+                    ("session", "agent-session", "Agent session", "Owns the agent loop and lifecycle."),
+                    ("models", "model-registry", "Models", "Combines bundled, configured, and discovered providers."),
+                    ("tools", "tool-registry", "Tools", "Selects built-in and discoverable tools."),
+                    ("permissions", "permission-policy", "Permissions", "Controls guarded tool effects."),
+                    ("execution", "execution-runtime", "Execution", "Runs coding tools and shells."),
+                    ("extensions", "extension-runtime", "Extensions", "Adds tools, providers, and events."),
+                    ("persistence", "session-storage", "Persistence", "Stores branches and resumable state."),
+                ], source: "https://github.com/can1357/oh-my-pi", version: "17.4.0"),
+                edges: Self.demoArchitectureEdges(ids: ["resources", "session", "models", "tools", "permissions", "execution", "extensions", "persistence"])
             ),
             available: true, unavailableReason: nil,
             installation: .init(status: "not-installed", installedVersion: nil, availableVersion: "17.4.0", previousVersions: [], error: nil),
             auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
-            compatibility: .init(status: "ready", checkedAt: nil, message: "Ready to install")
+            compatibility: .init(status: "ready", checkedAt: nil, message: "Ready to install"),
+            capabilities: Self.visualCapabilities(protocolName: "acp", graphLevel: "observable"),
+            driver: .init(apiVersion: 1, protocol: "acp", loaded: true)
         )
         store.harnesses = [dsh] + store.harnesses + [omp]
         store.selectedSessionId = nil
@@ -335,6 +371,55 @@ final class OpenCodexStore: ObservableObject {
         store.needsHarnessOnboarding = true
         store.isLoadingHarnessCatalog = false
         return store
+    }
+
+    private static func visualCapabilities(protocolName: String, graphLevel: String) -> [HarnessCatalogEntry.Capability] {
+        let external = protocolName != "dsh"
+        return [
+            .init(id: "lifecycle.install", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
+            .init(id: "lifecycle.update", status: external ? "supported" : "runtime", source: "driver", detail: nil),
+            .init(id: "lifecycle.rollback", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
+            .init(id: "lifecycle.uninstall", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
+            .init(id: "session.create", status: "supported", source: "driver", detail: nil),
+            .init(id: "session.resume", status: "supported", source: "driver", detail: nil),
+            .init(id: "session.cancel", status: "supported", source: "driver", detail: nil),
+            .init(id: "session.fork", status: external ? "runtime" : "supported", source: "runtime", detail: nil),
+            .init(id: "session.archive", status: "supported", source: "driver", detail: nil),
+            .init(id: "workspace.project", status: "supported", source: "driver", detail: nil),
+            .init(id: "workspace.no-project", status: "supported", source: "driver", detail: nil),
+            .init(id: "configuration.models", status: "runtime", source: "runtime", detail: "Discovered from the running Harness."),
+            .init(id: "configuration.reasoning", status: "runtime", source: "runtime", detail: "Shown only when the model advertises it."),
+            .init(id: "configuration.auth", status: "runtime", source: "runtime", detail: nil),
+            .init(id: "interaction.tools", status: "supported", source: "driver", detail: nil),
+            .init(id: "interaction.approvals", status: "supported", source: "driver", detail: nil),
+            .init(id: "interaction.questions", status: external ? "unsupported" : "supported", source: "driver", detail: nil),
+            .init(id: "interaction.files", status: external ? "unsupported" : "supported", source: "driver", detail: nil),
+            .init(id: "interaction.events", status: "supported", source: "driver", detail: nil),
+            .init(id: "architecture.manifest", status: "supported", source: "pack", detail: nil),
+            .init(id: "architecture.runtime-observation", status: "runtime", source: "runtime", detail: "Evidence appears while the task runs."),
+            .init(id: "architecture.edit", status: graphLevel == "composable" ? "supported" : "unsupported", source: "pack", detail: nil),
+            .init(id: "diagnostics.preflight", status: "supported", source: "driver", detail: nil),
+            .init(id: "builder.manifest", status: "supported", source: "pack", detail: nil),
+            .init(id: "builder.test", status: "supported", source: "driver", detail: nil),
+            .init(id: "builder.publish", status: "unsupported", source: "pack", detail: nil),
+        ]
+    }
+
+    private static func demoArchitectureNodes(
+        names: [(String, String, String, String)], source: String, version: String
+    ) -> [HarnessGraphNode] {
+        names.map { id, kind, title, responsibility in
+            HarnessGraphNode(
+                id: id, kind: kind, title: title, editable: false,
+                responsibility: responsibility,
+                evidence: [HarnessGraphEvidence(kind: "source-derived", source: source, version: version)],
+                config: nil
+            )
+        }
+    }
+
+    private static func demoArchitectureEdges(ids: [String]) -> [HarnessGraphEdge] {
+        zip(ids, ids.dropFirst()).map { HarnessGraphEdge(from: $0.0, to: $0.1) }
     }
 
     var currentSession: SessionSummary? {
@@ -352,6 +437,10 @@ final class OpenCodexStore: ObservableObject {
     var currentAgentPreset: String? { controlSession?.agentPreset }
     var currentHarnessId: String { controlSession?.harnessId ?? draftHarnessId ?? selectedHarnessId }
     var currentHarness: HarnessCatalogEntry? { harnesses.first { $0.id == currentHarnessId } }
+    func harnessCapability(_ id: String) -> String? {
+        currentHarness?.capabilities.first(where: { $0.id == id })?.status
+    }
+    func harnessCan(_ id: String) -> Bool { harnessCapability(id) != "unsupported" && harnessCapability(id) != nil }
     var defaultHarness: HarnessCatalogEntry? { harnesses.first(where: \.isDefault) }
     var canChooseHarness: Bool { selectedSessionId == nil && controlSession?.blank == true }
     var canChooseAgentPreset: Bool { controlSession?.blank == true && currentHarnessId == "dsh" }
@@ -410,6 +499,22 @@ final class OpenCodexStore: ObservableObject {
         return "\(currentModelName) · \(effortName)"
     }
 
+    var currentModel: CatalogModel? {
+        guard let models = sessionModels else { return nil }
+        return models.groups
+            .first(where: { $0.id == models.current.provider })?
+            .models.first(where: { $0.id == models.current.model })
+    }
+
+    var currentReasoningOptions: [ModelReasoningEffort] {
+        currentModel?.reasoning?.efforts ?? []
+    }
+
+    var currentReasoningName: String? {
+        guard let effort = sessionModels?.current.reasoningEffort else { return nil }
+        return currentReasoningOptions.first(where: { $0.id == effort })?.name ?? effort
+    }
+
     var currentPermissions: PermissionSelect? {
         guard let controlSessionId,
               let value = projectionsBySession[controlSessionId]?["permissions"]?.value else { return nil }
@@ -426,6 +531,12 @@ final class OpenCodexStore: ObservableObject {
         guard let id = conversationSessionId,
               let value = projectionsBySession[id]?["plan"]?.value else { return nil }
         return try? value.decode(PlanProjection.self)
+    }
+
+    var currentHarnessRuntime: HarnessRuntimeProjection? {
+        guard let id = conversationSessionId,
+              let value = projectionsBySession[id]?["harnessRuntime"]?.value else { return nil }
+        return try? value.decode(HarnessRuntimeProjection.self)
     }
 
     var currentTodos: JSONValue? {
@@ -654,7 +765,22 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func selectSession(_ sessionId: String) async {
-        guard sessions.contains(where: { $0.sessionId == sessionId }) else { return }
+        // A task can be opened immediately after creation (or from a deep link)
+        // before the live baseline has announced it. Refresh once instead of
+        // silently ignoring the selection and leaving all session controls empty.
+        if !sessions.contains(where: { $0.sessionId == sessionId }) {
+            do {
+                mergeSessionBaseline(try await api.sessions())
+            } catch {
+                guard !Task.isCancelled, !isOpenFishCancellation(error) else { return }
+                errorBanner = "Could not open this task: \(error)"
+                return
+            }
+        }
+        guard sessions.contains(where: { $0.sessionId == sessionId }) else {
+            errorBanner = "Could not open this task because the Host has not published it yet."
+            return
+        }
         if let abandonedDraft = draftSessionId, abandonedDraft != sessionId {
             draftSessionId = nil
             _ = try? await api.archiveSession(abandonedDraft)
@@ -815,6 +941,12 @@ final class OpenCodexStore: ObservableObject {
         } catch {
             errorBanner = "Could not switch models: \(error)"
         }
+    }
+
+    func chooseReasoningEffort(_ effort: String) async {
+        guard let models = sessionModels,
+              let model = currentModel else { return }
+        await chooseModel(provider: models.current.provider, model: model, effort: effort)
     }
 
     func chooseHarnessConfig(_ option: HarnessConfigOption, value: JSONValue) async {
@@ -1023,16 +1155,19 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
-    func mutateHarness(_ action: String, harness: HarnessCatalogEntry, authMethod: String? = nil) async {
-        guard harnessOperationId == nil else { return }
+    @discardableResult
+    func mutateHarness(_ action: String, harness: HarnessCatalogEntry, authMethod: String? = nil) async -> Bool {
+        guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
         defer { harnessOperationId = nil }
         do {
             harnesses = try await api.mutateHarness(action: action, id: harness.id, authMethod: authMethod)
             errorBanner = nil
+            return true
         } catch {
             errorBanner = "Could not \(action) \(harness.name): \(error)"
             harnesses = (try? await api.harnesses()) ?? harnesses
+            return false
         }
     }
 
@@ -1088,6 +1223,7 @@ final class OpenCodexStore: ObservableObject {
         distributionKind: String, packageOrCommand: String, arguments: [String],
         distributionEnvironment: String,
         binaryCommand: String, sha256: String, graphLevel: String,
+        graphBoundary: String, graphEvidenceSource: String,
         authMethodId: String, authMethodName: String, authKind: String,
         authFieldRef: String, authFieldName: String, authFieldEnv: String,
         terminalAuthArguments: String, terminalAuthEnvironment: String,
@@ -1119,16 +1255,39 @@ final class OpenCodexStore: ObservableObject {
             var config = node.config ?? [:]
             config["x"] = .number(position.x)
             config["y"] = .number(position.y)
-            return .object([
+            var value: [String: JSONValue] = [
                 "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
                 "config": .object(config),
-            ])
+            ]
+            if let responsibility = node.responsibility, !responsibility.isEmpty { value["responsibility"] = .string(responsibility) }
+            if let inputs = node.inputs { value["inputs"] = .array(inputs.map(JSONValue.string)) }
+            if let outputs = node.outputs { value["outputs"] = .array(outputs.map(JSONValue.string)) }
+            let evidence = graphLevel == "opaque"
+                ? (node.evidence ?? [])
+                : [HarnessGraphEvidence(kind: "declared", source: graphEvidenceSource, version: version)]
+            if !evidence.isEmpty {
+                value["evidence"] = .array(evidence.map { item in
+                    var evidenceValue: [String: JSONValue] = ["kind": .string(item.kind), "source": .string(item.source)]
+                    if let version = item.version { evidenceValue["version"] = .string(version) }
+                    return .object(evidenceValue)
+                })
+            }
+            return .object(value)
         }
         let graphEdges: [JSONValue] = edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }
+        var graphObject: [String: JSONValue] = [
+            "level": .string(graphLevel), "manifestVersion": .number(1), "nodes": .array(graphNodes), "edges": .array(graphEdges),
+        ]
+        if graphLevel != "opaque" {
+            graphObject["boundary"] = .string(graphBoundary)
+            graphObject["evidence"] = .array([.object([
+                "kind": .string("declared"), "source": .string(graphEvidenceSource), "version": .string(version),
+            ])])
+        }
         var packObject: [String: JSONValue] = [
             "schemaVersion": .number(0), "id": .string(id), "name": .string(name), "version": .string(version),
             "publisher": .string(publisher.isEmpty ? "OpenFish user" : publisher), "protocol": .string(protocolName), "distribution": distribution,
-            "graph": .object(["level": .string(graphLevel), "nodes": .array(graphNodes), "edges": .array(graphEdges)]),
+            "graph": .object(graphObject),
         ]
         if !description.isEmpty { packObject["description"] = .string(description) }
         if !license.isEmpty { packObject["license"] = .string(license) }
@@ -1210,23 +1369,44 @@ final class OpenCodexStore: ObservableObject {
         if let sha256 = distribution.sha256 { distributionObject["sha256"] = .string(sha256) }
         if let command = distribution.command { distributionObject["command"] = .string(command) }
 
+        var graphObject: [String: JSONValue] = [
+            "level": .string(harness.graph.level),
+            "nodes": .array(harness.graph.nodes.map { node in
+                var value: [String: JSONValue] = [
+                    "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
+                ]
+                if let responsibility = node.responsibility { value["responsibility"] = .string(responsibility) }
+                if let inputs = node.inputs { value["inputs"] = .array(inputs.map(JSONValue.string)) }
+                if let outputs = node.outputs { value["outputs"] = .array(outputs.map(JSONValue.string)) }
+                if let evidence = node.evidence {
+                    value["evidence"] = .array(evidence.map { item in
+                        var evidenceValue: [String: JSONValue] = ["kind": .string(item.kind), "source": .string(item.source)]
+                        if let version = item.version { evidenceValue["version"] = .string(version) }
+                        return .object(evidenceValue)
+                    })
+                }
+                if let config = node.config { value["config"] = .object(config) }
+                return .object(value)
+            }),
+            "edges": .array(harness.graph.edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }),
+        ]
+        if let manifestVersion = harness.graph.manifestVersion { graphObject["manifestVersion"] = .number(Double(manifestVersion)) }
+        if let boundary = harness.graph.boundary { graphObject["boundary"] = .string(boundary) }
+        if let evidence = harness.graph.evidence {
+            graphObject["evidence"] = .array(evidence.map { item in
+                var evidenceValue: [String: JSONValue] = ["kind": .string(item.kind), "source": .string(item.source)]
+                if let version = item.version { evidenceValue["version"] = .string(version) }
+                return .object(evidenceValue)
+            })
+        }
+
         var pack: [String: JSONValue] = [
             "$schema": .string("https://openfish.dev/schemas/harness-pack-v0.json"),
             "schemaVersion": .number(0), "id": .string(harness.id), "name": .string(harness.name),
             "version": .string(harness.version), "publisher": .string(harness.publisher),
             "verified": .bool(false), "protocol": .string(harness.protocolName), "source": .string("user"),
             "distribution": .object(distributionObject),
-            "graph": .object([
-                "level": .string(harness.graph.level),
-                "nodes": .array(harness.graph.nodes.map { node in
-                    var value: [String: JSONValue] = [
-                        "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
-                    ]
-                    if let config = node.config { value["config"] = .object(config) }
-                    return .object(value)
-                }),
-                "edges": .array(harness.graph.edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }),
-            ]),
+            "graph": .object(graphObject),
         ]
         if let description = harness.description { pack["description"] = .string(description) }
         if let license = harness.license { pack["license"] = .string(license) }

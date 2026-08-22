@@ -9,8 +9,15 @@ fi
 APP_BUNDLE="$1"
 RUNTIME="$APP_BUNDLE/Contents/Resources/OpenFishHostRuntime"
 NODE="$RUNTIME/node/bin/node"
+BUN="$RUNTIME/app/node_modules/bun/bin/bun.exe"
+UV="$RUNTIME/uv/uv"
 HOST="$RUNTIME/app/lib/bin.js"
-[[ -x "$NODE" && -f "$HOST" ]] || { echo "smoke_openfish_bundle: embedded Host is incomplete" >&2; exit 1; }
+[[ -x "$NODE" && -x "$BUN" && -x "$UV" && -f "$HOST" ]] || {
+  echo "smoke_openfish_bundle: embedded Node/Bun/uv/Host runtime is incomplete" >&2
+  exit 1
+}
+"$BUN" --version >/dev/null
+"$UV" --version >/dev/null
 if [[ $# -eq 2 ]]; then
   EXPECTED_ARCH="$2"
   case "$EXPECTED_ARCH" in

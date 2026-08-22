@@ -94,6 +94,13 @@ struct MobileProjectionBlock: Codable, Equatable, Sendable {
     let values: [String: MobileJSONValue]
 }
 
+struct MobileHarnessRuntimeProjection: Codable, Equatable, Sendable {
+    struct Node: Codable, Equatable, Sendable {
+        let status: String; let activity: String; let seq: Int; let time: Double
+    }
+    let nodes: [String: Node]
+}
+
 struct MobileSessionEvent: Codable, Identifiable, Equatable, Sendable {
     let type: String
     let seq: Int
@@ -221,12 +228,25 @@ struct MobileAgentPresetCatalog: Decodable, Equatable, Sendable {
 }
 
 struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
+    struct Capability: Decodable, Identifiable, Equatable, Sendable {
+        let id: String; let status: String; let source: String; let detail: String?
+    }
+    struct Driver: Decodable, Equatable, Sendable {
+        let apiVersion: Int; let `protocol`: String; let loaded: Bool
+    }
+    struct GraphEvidence: Decodable, Identifiable, Equatable, Sendable {
+        let kind: String; let source: String; let version: String?
+        var id: String { "\(kind):\(source):\(version ?? "")" }
+    }
     struct GraphNode: Decodable, Identifiable, Equatable, Sendable {
-        let id: String; let kind: String; let title: String; let editable: Bool; let config: [String: MobileJSONValue]?
+        let id: String; let kind: String; let title: String; let editable: Bool
+        var responsibility: String? = nil; var inputs: [String]? = nil; var outputs: [String]? = nil
+        var evidence: [GraphEvidence]? = nil; let config: [String: MobileJSONValue]?
     }
     struct GraphEdge: Decodable, Equatable, Sendable { let from: String; let to: String }
     struct Graph: Decodable, Equatable, Sendable {
-        let level: String; let nodes: [GraphNode]; let edges: [GraphEdge]
+        let level: String; var manifestVersion: Int? = nil; var boundary: String? = nil
+        var evidence: [GraphEvidence]? = nil; let nodes: [GraphNode]; let edges: [GraphEdge]
     }
     struct Installation: Decodable, Equatable, Sendable {
         let status: String
@@ -263,8 +283,10 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let capabilities: [Capability]
+    let driver: Driver
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, verified, source, graph, available, unavailableReason, installation, auth, compatibility
+        case id, isDefault, name, version, description, publisher, verified, source, graph, available, unavailableReason, installation, auth, compatibility, capabilities, driver
         case protocolName = "protocol"
     }
 }
@@ -856,9 +878,9 @@ public actor XIOSClient {
     }
 
     func createSession(workspaceId: String?, harnessId: String? = nil) async throws -> String {
-        struct Payload: Encodable, Sendable { let workspaceId: String?; let harnessId: String? }
+        struct Payload: Encodable, Sendable { let workspaceId: String?; let noProject: Bool?; let harnessId: String? }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String }
-        let value: Value = try await rpc("session.create", Payload(workspaceId: workspaceId, harnessId: harnessId))
+        let value: Value = try await rpc("session.create", Payload(workspaceId: workspaceId, noProject: workspaceId == nil ? true : nil, harnessId: harnessId))
         return value.sessionId
     }
 

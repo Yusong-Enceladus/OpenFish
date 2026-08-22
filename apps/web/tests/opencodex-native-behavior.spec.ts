@@ -18,40 +18,41 @@ describe.skipIf(behaviorBinary === undefined)('OpenCodex native composed-runtime
       throw new Error('approval-composer replay fixture must contain exactly one user prompt')
     }
 
-    const scaffold = await launchWebScaffold({
-      extraOverlayPath: resolve(import.meta.dirname, 'fixtures/opencodex-native.patch.yml'),
-      replayFixture: fixture,
-      paceMs: 1,
-    })
-    let primaryFailure: unknown
-    try {
-      const workspace = join(scaffold.workspaceCwd, 'workspace')
-      const promptFile = join(scaffold.workspaceCwd, 'opencodex-behavior-prompt.txt')
-      await mkdir(workspace, { recursive: true })
-      await writeFile(promptFile, prompt)
-
-      await new Promise<void>((resolveRun, rejectRun) => {
-        const child = spawn(behaviorBinary, [scaffold.baseUrl, workspace, promptFile], {
-          stdio: ['ignore', 'inherit', 'inherit'],
-        })
-        child.once('error', rejectRun)
-        child.once('exit', (code, signal) => {
-          if (code === 0) resolveRun()
-          else rejectRun(new Error(`Swift behavior smoke exited with code ${String(code)} signal ${String(signal)}`))
-        })
+    for (const workspaceMode of ['project', 'no-project'] as const) {
+      const scaffold = await launchWebScaffold({
+        extraOverlayPath: resolve(import.meta.dirname, 'fixtures/opencodex-native.patch.yml'),
+        replayFixture: fixture,
+        paceMs: 1,
       })
-    } catch (error) {
-      primaryFailure = error
-    } finally {
+      let primaryFailure: unknown
       try {
-        await scaffold.close()
+        const workspace = join(scaffold.workspaceCwd, 'workspace')
+        const promptFile = join(scaffold.workspaceCwd, 'opencodex-behavior-prompt.txt')
+        await mkdir(workspace, { recursive: true })
+        await writeFile(promptFile, prompt)
+        const location = workspaceMode === 'project' ? workspace : '--no-project'
+        await new Promise<void>((resolveRun, rejectRun) => {
+          const child = spawn(behaviorBinary, [scaffold.baseUrl, location, promptFile], {
+            stdio: ['ignore', 'inherit', 'inherit'],
+          })
+          child.once('error', rejectRun)
+          child.once('exit', (code, signal) => {
+            if (code === 0) resolveRun()
+            else rejectRun(new Error(`Swift behavior smoke exited with code ${String(code)} signal ${String(signal)}`))
+          })
+        })
       } catch (error) {
-        primaryFailure = primaryFailure === undefined
-          ? error
-          : new AggregateError([primaryFailure, error], 'behavior smoke and scaffold teardown both failed')
+        primaryFailure = error
+      } finally {
+        try {
+          await scaffold.close()
+        } catch (error) {
+          primaryFailure = primaryFailure === undefined
+            ? error
+            : new AggregateError([primaryFailure, error], 'behavior smoke and scaffold teardown both failed')
+        }
       }
+      if (primaryFailure !== undefined) throw primaryFailure
     }
-
-    if (primaryFailure !== undefined) throw primaryFailure
   }, 120_000)
 })

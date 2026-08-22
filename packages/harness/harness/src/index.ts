@@ -8,6 +8,8 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { packsFromAcpRegistry, packsFromOpenFishCommunity, parseHarnessPack } from './manifest.ts'
+import { harnessRuntimeProjectionDefinition } from './projection.ts'
+import { assertHarnessDriverConformance } from './conformance.ts'
 import type {
   HarnessCatalogEntry,
   HarnessDriver,
@@ -17,6 +19,9 @@ import type {
 } from './types.ts'
 
 export * from './manifest.ts'
+export * from './projection.ts'
+export * from './conformance.ts'
+export type * from './projection.types.ts'
 export type * from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -29,6 +34,13 @@ declare module '@deepseek-ai/dsh-session/types' {
     'harness/selected': { harnessId: HarnessId; version: string; protocol: string; remoteSessionId?: string }
     /** Lossless provider event retained when no common Open Fish presentation exists. */
     'harness/native-event': { harnessId: HarnessId; event: unknown }
+    /** Runtime evidence that a declared architecture component participated in this session. */
+    'harness/runtime-node': {
+      harnessId: HarnessId
+      nodeId: string
+      status: 'active' | 'waiting' | 'completed' | 'failed'
+      activity: string
+    }
   }
 }
 
@@ -56,7 +68,7 @@ interface StoredInstall {
   active?: HarnessPack
   previous: HarnessPack[]
   authMethod?: string
-  compatibility?: { status: 'compatible' | 'failed'; checkedAt: string; message?: string }
+  compatibility?: { status: 'ready' | 'compatible' | 'failed'; checkedAt: string; message?: string }
 }
 
 interface StoredHarnessState {
@@ -78,7 +90,8 @@ const EMPTY_STATE: StoredHarnessState = { version: 2, customPacks: [], registryP
  */
 function parseStoredHarnessPack(input: unknown, fallback?: HarnessPack): HarnessPack {
   if (typeof input !== 'object' || input === null) return parseHarnessPack(input)
-  const record = input as Record<string, unknown>
+  const inputRecord = input as Record<string, unknown>
+  const record = migrateStoredArchitecture(inputRecord)
   const methods = Array.isArray(record.authMethods)
     ? record.authMethods.map((candidate) => {
       if (typeof candidate !== 'object' || candidate === null) return candidate
@@ -92,6 +105,38 @@ function parseStoredHarnessPack(input: unknown, fallback?: HarnessPack): Harness
   return parseHarnessPack({ ...record, ...(methods === undefined ? {} : { authMethods: methods }) })
 }
 
+/** Downgrade legacy decorative graphs instead of preserving an unsupported observable claim. */
+function migrateStoredArchitecture(record: Record<string, unknown>): Record<string, unknown> {
+  const graph = record.graph
+  if (typeof graph !== 'object' || graph === null || Array.isArray(graph)) return record
+  const candidate = graph as Record<string, unknown>
+  const nodes = Array.isArray(candidate.nodes) ? candidate.nodes : []
+  const edges = Array.isArray(candidate.edges) ? candidate.edges : []
+  if (candidate.level === 'opaque' && nodes.length === 1) return record
+  const supported = candidate.level !== 'opaque' && nodes.length >= 3 && edges.length >= 2
+    && typeof candidate.boundary === 'string' && Array.isArray(candidate.evidence)
+    && nodes.every(node => typeof node === 'object' && node !== null
+      && typeof (node as Record<string, unknown>).responsibility === 'string'
+      && Array.isArray((node as Record<string, unknown>).evidence))
+  if (supported) return record
+  const first = nodes.find(node => typeof node === 'object' && node !== null) as Record<string, unknown> | undefined
+  const title = typeof first?.title === 'string' ? first.title : typeof record.name === 'string' ? record.name : 'Harness runtime'
+  return {
+    ...record,
+    graph: {
+      level: 'opaque', manifestVersion: 1, boundary: `${title} process`,
+      evidence: [{ kind: 'declared', source: 'Legacy Pack boundary' }],
+      nodes: [{
+        id: 'runtime', kind: 'harness-runtime', title, editable: false,
+        responsibility: 'Runs the Harness while its internal architecture remains undisclosed.',
+        inputs: ['protocol requests'], outputs: ['protocol updates'],
+        evidence: [{ kind: 'declared', source: 'Legacy Pack boundary' }],
+      }],
+      edges: [],
+    },
+  }
+}
+
 const BUILTIN_DSH = parseHarnessPack({
   schemaVersion: 0,
   id: 'dsh',
@@ -103,8 +148,65 @@ const BUILTIN_DSH = parseHarnessPack({
   protocol: 'dsh',
   graph: {
     level: 'observable',
-    nodes: [{ id: 'runtime', kind: 'harness-runtime', title: 'DSH plugin runtime', editable: false }],
-    edges: [],
+    manifestVersion: 1,
+    boundary: 'DeepSeek Harness process',
+    evidence: [{ kind: 'source-derived', source: 'docs/architecture.md', version: 'builtin' }],
+    nodes: [
+      {
+        id: 'context', kind: 'context-runtime', title: 'Context assembly', editable: false,
+        responsibility: 'Builds the model-visible prompt from instructions, workspace context, skills, and session history.',
+        inputs: ['user intent', 'workspace', 'session history'], outputs: ['model context'],
+        evidence: [{ kind: 'source-derived', source: 'packages/context', version: 'builtin' }],
+      },
+      {
+        id: 'loop', kind: 'agent-loop', title: 'Agent loop', editable: false,
+        responsibility: 'Coordinates inference, tool calls, approvals, and turn termination.',
+        inputs: ['model context', 'session controls'], outputs: ['assistant events', 'tool requests'],
+        evidence: [{ kind: 'source-derived', source: 'packages/core/agent-loop', version: 'builtin' }],
+      },
+      {
+        id: 'models', kind: 'model-router', title: 'Model routing', editable: false,
+        responsibility: 'Resolves a configured provider, model, and reasoning controls for each inference request.',
+        inputs: ['model selection', 'credentials'], outputs: ['streamed inference'],
+        evidence: [{ kind: 'source-derived', source: 'packages/llm', version: 'builtin' }],
+      },
+      {
+        id: 'tools', kind: 'tool-runtime', title: 'Tool runtime', editable: false,
+        responsibility: 'Publishes active tools, validates arguments, and records structured results.',
+        inputs: ['tool request', 'active catalog'], outputs: ['tool result', 'render intent'],
+        evidence: [{ kind: 'source-derived', source: 'packages/core/tools', version: 'builtin' }],
+      },
+      {
+        id: 'sandbox', kind: 'execution-boundary', title: 'Execution boundary', editable: false,
+        responsibility: 'Constrains filesystem, subprocess, and network effects to the selected environment.',
+        inputs: ['approved operation', 'workspace policy'], outputs: ['bounded effect'],
+        evidence: [{ kind: 'source-derived', source: 'packages/sandbox', version: 'builtin' }],
+      },
+      {
+        id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false,
+        responsibility: 'Stops sensitive operations until the configured policy or user grants permission.',
+        inputs: ['operation risk', 'preset policy'], outputs: ['allow or deny decision'],
+        evidence: [{ kind: 'source-derived', source: 'packages/guard', version: 'builtin' }],
+      },
+      {
+        id: 'session', kind: 'session-runtime', title: 'Session persistence', editable: false,
+        responsibility: 'Persists events, selected Harness identity, and resumable conversation state.',
+        inputs: ['agent events', 'control state'], outputs: ['durable session', 'replay'],
+        evidence: [{ kind: 'source-derived', source: 'packages/session', version: 'builtin' }],
+      },
+      {
+        id: 'extensions', kind: 'plugin-runtime', title: 'Plugin composition', editable: false,
+        responsibility: 'Composes optional capabilities without changing the core agent loop.',
+        inputs: ['plugin manifests', 'configuration'], outputs: ['capability graph'],
+        evidence: [{ kind: 'source-derived', source: 'packages/core', version: 'builtin' }],
+      },
+    ],
+    edges: [
+      { from: 'context', to: 'loop' }, { from: 'loop', to: 'models' }, { from: 'models', to: 'loop' },
+      { from: 'loop', to: 'tools' }, { from: 'tools', to: 'approvals' }, { from: 'approvals', to: 'sandbox' },
+      { from: 'sandbox', to: 'tools' }, { from: 'loop', to: 'session' }, { from: 'extensions', to: 'loop' },
+      { from: 'extensions', to: 'tools' },
+    ],
   },
   source: 'builtin',
 })
@@ -123,8 +225,71 @@ function curatedOmp(version = '17.4.0'): HarnessPack {
     distribution: { kind: 'bunx', package: `@oh-my-pi/pi-coding-agent@${version}`, args: ['acp'], env: {} },
     graph: {
       level: 'observable',
-      nodes: [{ id: 'runtime', kind: 'harness-runtime', title: 'Oh My Pi ACP runtime', editable: false }],
-      edges: [],
+      manifestVersion: 1,
+      boundary: 'Oh My Pi agent process',
+      evidence: [{ kind: 'source-derived', source: 'https://github.com/can1357/oh-my-pi', version }],
+      nodes: [
+        {
+          id: 'resources', kind: 'context-loader', title: 'Resource loader', editable: false,
+          responsibility: 'Discovers context files, prompts, skills, and project configuration.',
+          inputs: ['workspace', 'OMP configuration'], outputs: ['agent resources'],
+          evidence: [{ kind: 'source-derived', source: 'packages/coding-agent/src', version }],
+        },
+        {
+          id: 'session', kind: 'agent-session', title: 'Agent session', editable: false,
+          responsibility: 'Owns the conversation, agent loop, compaction, and lifecycle events.',
+          inputs: ['prompt', 'agent resources'], outputs: ['messages', 'tool requests'],
+          evidence: [{ kind: 'source-derived', source: 'packages/coding-agent/src/session', version }],
+        },
+        {
+          id: 'models', kind: 'model-registry', title: 'Model registry', editable: false,
+          responsibility: 'Combines bundled, configured, discovered, and extension-provided model catalogs.',
+          inputs: ['provider config', 'credentials'], outputs: ['available model route'],
+          evidence: [{ kind: 'source-derived', source: 'docs/providers.md', version }],
+        },
+        {
+          id: 'tools', kind: 'tool-registry', title: 'Tool registry', editable: false,
+          responsibility: 'Selects built-in and discoverable tools for the active session.',
+          inputs: ['tool configuration', 'session'], outputs: ['validated tool execution'],
+          evidence: [{ kind: 'source-derived', source: 'packages/coding-agent/src/tools', version }],
+        },
+        {
+          id: 'permissions', kind: 'permission-policy', title: 'Permission policy', editable: false,
+          responsibility: 'Classifies tool effects and requests approval for guarded operations.',
+          inputs: ['tool request', 'policy'], outputs: ['permission decision'],
+          evidence: [{ kind: 'source-derived', source: 'packages/coding-agent/src', version }],
+        },
+        {
+          id: 'execution', kind: 'execution-runtime', title: 'Execution runtime', editable: false,
+          responsibility: 'Runs filesystem, shell, language, browser, and other coding tools.',
+          inputs: ['approved tool request'], outputs: ['workspace effect', 'tool result'],
+          evidence: [{ kind: 'source-derived', source: 'README.md', version }],
+        },
+        {
+          id: 'extensions', kind: 'extension-runtime', title: 'Extensions', editable: false,
+          responsibility: 'Adds tools, commands, event handlers, providers, and custom interaction behavior.',
+          inputs: ['extension packages'], outputs: ['runtime contributions'],
+          evidence: [{ kind: 'source-derived', source: 'docs/extensions.md', version }],
+        },
+        {
+          id: 'persistence', kind: 'session-storage', title: 'Persistence', editable: false,
+          responsibility: 'Stores session entries, branches, checkpoints, and resumable agent state.',
+          inputs: ['session events'], outputs: ['durable history'],
+          evidence: [{ kind: 'source-derived', source: 'packages/coding-agent/src/session/session-manager.ts', version }],
+        },
+        {
+          id: 'acp', kind: 'protocol-adapter', title: 'ACP interface', editable: false,
+          responsibility: 'Projects the OMP session into ACP prompts, updates, controls, and permission requests.',
+          inputs: ['ACP client requests', 'agent events'], outputs: ['ACP session updates'],
+          evidence: [{ kind: 'declared', source: 'omp acp command', version }],
+        },
+      ],
+      edges: [
+        { from: 'resources', to: 'session' }, { from: 'models', to: 'session' }, { from: 'extensions', to: 'session' },
+        { from: 'extensions', to: 'models' }, { from: 'extensions', to: 'tools' }, { from: 'session', to: 'tools' },
+        { from: 'tools', to: 'permissions' }, { from: 'permissions', to: 'execution' }, { from: 'execution', to: 'session' },
+        { from: 'session', to: 'persistence' }, { from: 'acp', to: 'session' }, { from: 'session', to: 'acp' },
+      ],
     },
     source: 'builtin',
   })
@@ -228,6 +393,8 @@ export class HarnessService extends Service {
    * @returns Disposer that removes only this exact registration.
    */
   registerDriver(driver: HarnessDriver): () => void {
+    if (driver.apiVersion !== 1) throw new Error(`Harness driver "${driver.protocol}" uses an unsupported API version`)
+    if (!/^[a-z0-9][a-z0-9._-]*$/u.test(driver.protocol)) throw new Error(`Harness driver protocol "${driver.protocol}" is invalid`)
     if (this.drivers.has(driver.protocol)) throw new Error(`Harness driver "${driver.protocol}" is already registered`)
     this.drivers.set(driver.protocol, driver)
     return () => { if (this.drivers.get(driver.protocol) === driver) this.drivers.delete(driver.protocol) }
@@ -319,10 +486,51 @@ export class HarnessService extends Service {
         ? { status: 'compatible' as const, checkedAt: new Date(0).toISOString(), message: 'Built in to this Open Fish runtime.' }
         : { status: 'untested' as const })
       const isDefault = this.state.defaultHarnessId === pack.id
-      if (pack.protocol === 'dsh') return { ...pack, isDefault, available: true, installation, auth, compatibility }
+      const builtinCapabilities = [
+        { id: 'lifecycle.install', status: 'unsupported', source: 'driver', detail: 'DSH is built into the OpenFish Host.' },
+        { id: 'lifecycle.update', status: 'runtime', source: 'driver', detail: 'DSH updates with the OpenFish runtime.' },
+        { id: 'lifecycle.rollback', status: 'unsupported', source: 'driver' },
+        { id: 'lifecycle.uninstall', status: 'unsupported', source: 'driver' },
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'session.cancel', status: 'supported', source: 'driver' },
+        { id: 'session.fork', status: 'supported', source: 'driver' },
+        { id: 'session.archive', status: 'supported', source: 'driver' },
+        { id: 'workspace.project', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.models', status: 'supported', source: 'runtime' },
+        { id: 'configuration.reasoning', status: 'supported', source: 'runtime' },
+        { id: 'configuration.auth', status: 'supported', source: 'runtime' },
+        { id: 'interaction.tools', status: 'supported', source: 'driver' },
+        { id: 'interaction.approvals', status: 'supported', source: 'driver' },
+        { id: 'interaction.questions', status: 'supported', source: 'driver' },
+        { id: 'interaction.files', status: 'supported', source: 'driver' },
+        { id: 'interaction.events', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+        { id: 'architecture.runtime-observation', status: 'runtime', source: 'runtime', detail: 'Runtime node evidence appears as the DSH session executes.' },
+        { id: 'architecture.edit', status: pack.graph.level === 'composable' ? 'supported' : 'unsupported', source: 'pack' },
+        { id: 'diagnostics.preflight', status: 'supported', source: 'driver' },
+        { id: 'builder.manifest', status: 'supported', source: 'pack' },
+        { id: 'builder.test', status: 'supported', source: 'driver' },
+        { id: 'builder.publish', status: 'unsupported', source: 'pack', detail: 'Publication is prepared locally; registry submission is not automated.' },
+      ] as const
+      const driverInfo = { apiVersion: 1 as const, protocol: pack.protocol, loaded: pack.protocol === 'dsh' || driver !== undefined }
+      if (pack.protocol === 'dsh') return { ...pack, isDefault, available: true, installation, auth, compatibility, capabilities: [...builtinCapabilities], driver: driverInfo }
       if (driver === undefined) {
         return {
           ...pack, isDefault, available: false, unavailableReason: `No ${pack.protocol} driver is loaded`, installation, auth, compatibility,
+          capabilities: [{ id: 'architecture.manifest', status: 'supported', source: 'pack' }], driver: driverInfo,
+        }
+      }
+      let capabilities
+      try {
+        capabilities = await assertHarnessDriverConformance(driver, effectivePack)
+      } catch (error: unknown) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return {
+          ...pack, isDefault, available: false, unavailableReason: reason, installation, auth,
+          compatibility: { status: 'failed' as const, checkedAt: new Date().toISOString(), message: reason },
+          capabilities: await driver.capabilities(effectivePack).catch(() => []), driver: driverInfo,
         }
       }
       const unavailableReason = await driver.available(pack)
@@ -330,7 +538,7 @@ export class HarnessService extends Service {
         ...pack,
         isDefault,
         available: unavailableReason === undefined,
-        ...(unavailableReason === undefined ? {} : { unavailableReason }), installation, auth,
+        ...(unavailableReason === undefined ? {} : { unavailableReason }), installation, auth, capabilities, driver: driverInfo,
         compatibility: install?.compatibility ?? (unavailableReason === undefined
           ? { status: 'ready' as const, message: 'Launch prerequisites are present; first session has not been verified yet.' }
           : { status: 'failed' as const, checkedAt: new Date().toISOString(), message: unavailableReason }),
@@ -373,6 +581,29 @@ export class HarnessService extends Service {
         throw error
       }
     })
+  }
+
+  /** Run a non-secret admission preflight without creating or billing a model session. */
+  async probe(id: HarnessId, signal?: AbortSignal): Promise<void> {
+    await this.initialRefresh
+    const pack = this.require(id)
+    if (pack.protocol === 'dsh') {
+      await this.recordCompatibility(id, { status: 'compatible', checkedAt: new Date().toISOString(), message: 'Built-in runtime and Driver API v1 are loaded.' })
+      return
+    }
+    if (this.state.installs[id]?.active === undefined) await this.install(id, signal)
+    const effective = this.state.installs[id]?.active ?? pack
+    const driver = this.drivers.get(effective.protocol)
+    if (driver === undefined) throw new Error(`No ${effective.protocol} Harness driver is loaded`)
+    await assertHarnessDriverConformance(driver, effective)
+    const unavailable = await driver.available(effective)
+    if (unavailable !== undefined) throw new Error(unavailable)
+    const selectedMethod = this.state.installs[id]?.authMethod
+    const auth = await this.authenticationState(effective, selectedMethod, driver)
+    const message = auth.status === 'configured' || auth.status === 'not-required'
+      ? 'Driver API v1, installation, launch prerequisites, and authentication preflight passed. A real session has not been billed.'
+      : `Driver and installation passed; authentication is ${auth.status.replaceAll('-', ' ')}.`
+    await this.recordCompatibility(id, { status: 'ready', checkedAt: new Date().toISOString(), message })
   }
 
   /**
@@ -615,5 +846,10 @@ export class HarnessService extends Service {
 }
 
 export const name = 'harnesses'
-export function apply(ctx: Context, config: HarnessConfig): void { ctx.plugin(HarnessService, config) }
+export function apply(ctx: Context, config: HarnessConfig): void {
+  ctx.plugin(HarnessService, config)
+  ctx.inject(['sessionProjections'], (projectionCtx) => {
+    projectionCtx.sessionProjections.register(harnessRuntimeProjectionDefinition)
+  })
+}
 export default HarnessService

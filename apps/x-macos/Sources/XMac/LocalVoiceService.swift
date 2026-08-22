@@ -18,6 +18,7 @@ final class LocalVoiceService: NSObject, ObservableObject {
     let providerID = "apple-local"
     let providerName = "Apple On-Device Speech"
     @Published private(set) var isListening = false
+    @Published private(set) var isStarting = false
     @Published private(set) var isSpeaking = false
     @Published private(set) var partialTranscript = ""
     @Published private(set) var errorMessage: String?
@@ -36,6 +37,8 @@ final class LocalVoiceService: NSObject, ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var transcriptHandler: ((String, Bool) -> Void)?
     private var speechFinishedHandler: (() -> Void)?
+    private var hasInputTap = false
+    private var audioObservers: [NSObjectProtocol] = []
 
     private var effectiveSpeechRate: Float { min(max(speechRate, 0.35), 0.62) }
 
@@ -45,6 +48,24 @@ final class LocalVoiceService: NSObject, ObservableObject {
         speechRate = storedRate == 0 ? AVSpeechUtteranceDefaultSpeechRate : Float(storedRate)
         super.init()
         synthesizer.delegate = self
+        installAudioObservers()
+    }
+
+    deinit {
+        for observer in audioObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    private func installAudioObservers() {
+        let center = NotificationCenter.default
+        audioObservers = [Notification.Name.AVAudioEngineConfigurationChange].map { name in
+            center.addObserver(forName: name, object: audioEngine, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isListening else { return }
+                    self.errorMessage = "The microphone configuration changed. Dictation stopped safely; tap the microphone to resume."
+                    self.stopListening()
+                }
+            }
+        }
     }
 
     var availableVoices: [LocalVoiceChoice] {
@@ -66,6 +87,7 @@ final class LocalVoiceService: NSObject, ObservableObject {
     }
 
     func toggleListening(onTranscript: @escaping (String, Bool) -> Void) async {
+        guard !isStarting else { return }
         if isListening {
             stopListening()
             return
@@ -74,6 +96,9 @@ final class LocalVoiceService: NSObject, ObservableObject {
     }
 
     func startListening(onTranscript: @escaping (String, Bool) -> Void) async {
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         stopSpeaking()
         stopListening()
         errorMessage = nil
@@ -112,13 +137,20 @@ final class LocalVoiceService: NSObject, ObservableObject {
             errorMessage = "No microphone input is available. Check the input device in System Settings."
             return
         }
-        input.removeTap(onBus: 0)
+        if hasInputTap {
+            input.removeTap(onBus: 0)
+            hasInputTap = false
+        }
         Self.installInputTap(on: input, format: format, request: request)
+        hasInputTap = true
         audioEngine.prepare()
         do {
             try audioEngine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            if hasInputTap {
+                input.removeTap(onBus: 0)
+                hasInputTap = false
+            }
             recognitionRequest = nil
             transcriptHandler = nil
             errorMessage = "Could not start the microphone: \(error.localizedDescription)"
@@ -176,7 +208,10 @@ final class LocalVoiceService: NSObject, ObservableObject {
     func stopListening() {
         guard isListening || recognitionRequest != nil || recognitionTask != nil else { return }
         if audioEngine.isRunning { audioEngine.stop() }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if hasInputTap {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            hasInputTap = false
+        }
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionRequest = nil

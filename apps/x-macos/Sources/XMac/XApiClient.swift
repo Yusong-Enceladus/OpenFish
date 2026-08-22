@@ -473,6 +473,16 @@ struct PlanProjection: Codable, Equatable, Sendable {
     let pending: Bool
 }
 
+struct HarnessRuntimeProjection: Codable, Equatable, Sendable {
+    struct Node: Codable, Equatable, Sendable {
+        let status: String
+        let activity: String
+        let seq: Int
+        let time: Double
+    }
+    let nodes: [String: Node]
+}
+
 struct SkillEntry: Decodable, Identifiable, Equatable, Sendable {
     let name: String
     let description: String
@@ -496,11 +506,22 @@ struct AgentPresetCatalog: Decodable, Equatable, Sendable {
     let hasDocument: Bool
 }
 
+struct HarnessGraphEvidence: Codable, Identifiable, Equatable, Sendable {
+    let kind: String
+    let source: String
+    let version: String?
+    var id: String { "\(kind):\(source):\(version ?? "")" }
+}
+
 struct HarnessGraphNode: Codable, Identifiable, Equatable, Sendable {
     let id: String
     let kind: String
     let title: String
     let editable: Bool
+    var responsibility: String? = nil
+    var inputs: [String]? = nil
+    var outputs: [String]? = nil
+    var evidence: [HarnessGraphEvidence]? = nil
     let config: [String: JSONValue]?
 }
 
@@ -511,6 +532,9 @@ struct HarnessGraphEdge: Codable, Equatable, Sendable {
 
 struct HarnessGraph: Codable, Equatable, Sendable {
     let level: String
+    var manifestVersion: Int? = nil
+    var boundary: String? = nil
+    var evidence: [HarnessGraphEvidence]? = nil
     let nodes: [HarnessGraphNode]
     let edges: [HarnessGraphEdge]
 }
@@ -526,6 +550,17 @@ struct HarnessDistribution: Codable, Equatable, Sendable {
 }
 
 struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
+    struct Capability: Decodable, Identifiable, Equatable, Sendable {
+        let id: String
+        let status: String
+        let source: String
+        let detail: String?
+    }
+    struct Driver: Decodable, Equatable, Sendable {
+        let apiVersion: Int
+        let `protocol`: String
+        let loaded: Bool
+    }
     struct Installation: Decodable, Equatable, Sendable {
         let status: String
         let installedVersion: String?
@@ -596,9 +631,11 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let capabilities: [Capability]
+    let driver: Driver
 
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, distribution, graph, available, unavailableReason, installation, auth, compatibility
+        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, distribution, graph, available, unavailableReason, installation, auth, compatibility, capabilities, driver
         case protocolName = "protocol"
     }
 }
@@ -846,13 +883,14 @@ actor DshApiClient {
         struct Payload: Encodable, Sendable {
             let workspaceId: String?
             let cwd: String?
+            let noProject: Bool?
             let agentPreset: String?
             let harnessId: String?
         }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String; let agentPreset: String? }
         let value: Value = try await rpc(
             "session.create",
-            Payload(workspaceId: workspaceId, cwd: cwd, agentPreset: agentPreset, harnessId: harnessId)
+            Payload(workspaceId: workspaceId, cwd: cwd, noProject: workspaceId == nil && cwd == nil ? true : nil, agentPreset: agentPreset, harnessId: harnessId)
         )
         return value.sessionId
     }

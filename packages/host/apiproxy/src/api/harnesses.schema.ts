@@ -2,16 +2,29 @@ import { z } from 'zod'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 
+const graphEvidenceSchema = z.object({
+  kind: z.enum(['declared', 'source-derived', 'runtime-observed']),
+  source: z.string().min(1),
+  version: z.string().min(1).optional(),
+})
+
 const graphNodeSchema = z.object({
   id: z.string().min(1),
   kind: z.string().min(1),
   title: z.string().min(1),
   editable: z.boolean(),
+  responsibility: z.string().min(1).optional(),
+  inputs: z.array(z.string().min(1)).optional(),
+  outputs: z.array(z.string().min(1)).optional(),
+  evidence: z.array(graphEvidenceSchema).min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 })
 
 const graphSchema = z.object({
   level: z.enum(['opaque', 'observable', 'composable']),
+  manifestVersion: z.literal(1).optional(),
+  boundary: z.string().min(1).optional(),
+  evidence: z.array(graphEvidenceSchema).min(1).optional(),
   nodes: z.array(graphNodeSchema),
   edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })),
 })
@@ -23,6 +36,21 @@ const distributionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('binary'), archive: z.string().url(), sha256: z.string().optional(), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
   z.object({ kind: z.literal('executable'), command: z.string().min(1), args: z.array(z.string()), env: z.record(z.string(), z.string()) }),
 ])
+
+const harnessCapabilitySchema = z.object({
+  id: z.enum([
+    'lifecycle.install', 'lifecycle.update', 'lifecycle.rollback', 'lifecycle.uninstall',
+    'session.create', 'session.resume', 'session.cancel', 'session.fork', 'session.archive',
+    'workspace.project', 'workspace.no-project',
+    'configuration.models', 'configuration.reasoning', 'configuration.auth',
+    'interaction.tools', 'interaction.approvals', 'interaction.questions', 'interaction.files', 'interaction.events',
+    'architecture.manifest', 'architecture.runtime-observation', 'architecture.edit',
+    'diagnostics.preflight', 'builder.manifest', 'builder.test', 'builder.publish',
+  ]),
+  status: z.enum(['supported', 'runtime', 'unsupported']),
+  source: z.enum(['pack', 'driver', 'runtime']),
+  detail: z.string().optional(),
+})
 
 /** Detached Harness catalog row schema. */
 export const harnessCatalogEntrySchema = z.object({
@@ -74,6 +102,12 @@ export const harnessCatalogEntrySchema = z.object({
     checkedAt: z.string().optional(),
     message: z.string().optional(),
   }),
+  capabilities: z.array(harnessCapabilitySchema),
+  driver: z.object({
+    apiVersion: z.literal(1),
+    protocol: z.string().min(1),
+    loaded: z.boolean(),
+  }),
 })
 
 /** harness.list request payload. */
@@ -108,7 +142,7 @@ const customPackSchema = z.object({
 
 /** harness.mutate lifecycle/editor request payload. */
 export const harnessMutateRequestSchema = z.object({
-  action: z.enum(['install', 'uninstall', 'update', 'rollback', 'remove', 'auth', 'login', 'default', 'clear-default', 'upsert']),
+  action: z.enum(['install', 'uninstall', 'update', 'rollback', 'remove', 'auth', 'login', 'probe', 'default', 'clear-default', 'upsert']),
   id: z.string().optional(), authMethod: z.string().optional(), pack: customPackSchema.optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'harness.mutate'>>>
 /** harness.mutate response value. */

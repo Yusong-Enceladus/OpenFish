@@ -7,12 +7,27 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 /** Stable registry identity of one Harness Pack. */
 export type HarnessId = Branded<'HarnessId'>
 
+/** Provenance for one architecture fact exposed by a Harness Pack. */
+export interface HarnessGraphEvidence {
+  kind: 'declared' | 'source-derived' | 'runtime-observed'
+  source: string
+  version?: string
+}
+
 /** One node exposed by a Harness Pack for read-only or editable visualization. */
 export interface HarnessGraphNode {
   id: string
   kind: string
   title: string
   editable: boolean
+  /** Human-readable ownership statement shown before implementation detail. */
+  responsibility?: string
+  /** Logical values or capabilities accepted by this component. */
+  inputs?: string[]
+  /** Logical values, events, or effects produced by this component. */
+  outputs?: string[]
+  /** Evidence supporting this component without claiming private internals. */
+  evidence?: HarnessGraphEvidence[]
   config?: Record<string, unknown>
 }
 
@@ -28,6 +43,12 @@ export type HarnessGraphLevel = 'opaque' | 'observable' | 'composable'
 /** Graph descriptor published by a Harness Pack. */
 export interface HarnessGraph {
   level: HarnessGraphLevel
+  /** Version of the architecture-description contract, independent from Pack v0. */
+  manifestVersion?: 1
+  /** Label for the process or subsystem boundary represented by this graph. */
+  boundary?: string
+  /** Evidence that applies to the complete graph. */
+  evidence?: HarnessGraphEvidence[]
   nodes: HarnessGraphNode[]
   edges: HarnessGraphEdge[]
 }
@@ -110,6 +131,25 @@ export interface HarnessPack {
   source: 'builtin' | 'acp-registry' | 'openfish-community' | 'user'
 }
 
+/** Stable feature identifiers negotiated between Open Fish and a Harness driver. */
+export type HarnessCapabilityId =
+  | 'lifecycle.install' | 'lifecycle.update' | 'lifecycle.rollback' | 'lifecycle.uninstall'
+  | 'session.create' | 'session.resume' | 'session.cancel'
+  | 'session.fork' | 'session.archive'
+  | 'workspace.project' | 'workspace.no-project'
+  | 'configuration.models' | 'configuration.reasoning' | 'configuration.auth'
+  | 'interaction.tools' | 'interaction.approvals' | 'interaction.questions' | 'interaction.files' | 'interaction.events'
+  | 'architecture.manifest' | 'architecture.runtime-observation' | 'architecture.edit'
+  | 'diagnostics.preflight' | 'builder.manifest' | 'builder.test' | 'builder.publish'
+
+/** Truthful support state. Runtime means support is discovered after launch, not assumed. */
+export interface HarnessCapability {
+  id: HarnessCapabilityId
+  status: 'supported' | 'runtime' | 'unsupported'
+  source: 'pack' | 'driver' | 'runtime'
+  detail?: string
+}
+
 /** Detached catalog row safe for native and web clients. */
 export interface HarnessCatalogEntry extends HarnessPack {
   isDefault: boolean
@@ -118,6 +158,9 @@ export interface HarnessCatalogEntry extends HarnessPack {
   installation: HarnessInstallation
   auth: HarnessAuthentication
   compatibility: HarnessCompatibility
+  /** Negotiated capabilities drive native UI visibility and admission diagnostics. */
+  capabilities: HarnessCapability[]
+  driver: { apiVersion: 1; protocol: string; loaded: boolean }
 }
 
 /** User-controlled lifecycle state for one Harness installation. */
@@ -168,7 +211,11 @@ export interface HarnessSessionRequest {
 
 /** One protocol implementation registered on the Harness service. */
 export interface HarnessDriver {
+  /** Versioned Open Fish driver contract. Unknown versions are rejected at registration. */
+  readonly apiVersion: 1
   readonly protocol: string
+  /** Declare only what this driver can expose for the concrete Pack. */
+  capabilities(pack: HarnessPack): Promise<HarnessCapability[]>
   available(pack: HarnessPack): Promise<string | undefined>
   create(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>
   resume(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>

@@ -17,15 +17,27 @@ const distribution = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('executable'), command: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
 ])
+const graphEvidence = z.object({
+  kind: z.enum(['declared', 'source-derived', 'runtime-observed']),
+  source: z.string().min(1),
+  version: z.string().min(1).optional(),
+})
 const graphNode = z.object({
   id: z.string().min(1),
   kind: z.string().min(1),
   title: z.string().min(1),
   editable: z.boolean(),
+  responsibility: z.string().min(1).optional(),
+  inputs: z.array(z.string().min(1)).optional(),
+  outputs: z.array(z.string().min(1)).optional(),
+  evidence: z.array(graphEvidence).min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 })
 const graph = z.object({
   level: z.enum(['opaque', 'observable', 'composable']),
+  manifestVersion: z.literal(1).optional(),
+  boundary: z.string().min(1).optional(),
+  evidence: z.array(graphEvidence).min(1).optional(),
   nodes: z.array(graphNode),
   edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })),
 })
@@ -94,6 +106,21 @@ export function parseHarnessPack(input: unknown): HarnessPack {
   }
   if (pack.graph.level !== 'composable' && pack.graph.nodes.some(node => node.editable)) {
     throw new Error(`Harness Pack "${pack.id}" may expose editable nodes only at graph level "composable"`)
+  }
+  if (pack.graph.level === 'opaque' && pack.graph.nodes.length !== 1) {
+    throw new Error(`Harness Pack "${pack.id}" opaque graph must expose exactly one runtime boundary node`)
+  }
+  if (pack.graph.level !== 'opaque') {
+    if (pack.graph.nodes.length < 3 || pack.graph.edges.length < 2) {
+      throw new Error(`Harness Pack "${pack.id}" ${pack.graph.level} graph must explain at least three connected components`)
+    }
+    if (pack.graph.boundary === undefined || pack.graph.evidence === undefined) {
+      throw new Error(`Harness Pack "${pack.id}" ${pack.graph.level} graph requires a boundary and graph evidence`)
+    }
+    const unsupported = pack.graph.nodes.find(node => node.responsibility === undefined || node.evidence === undefined)
+    if (unsupported !== undefined) {
+      throw new Error(`Harness Pack "${pack.id}" architecture node "${unsupported.id}" requires responsibility and evidence`)
+    }
   }
   if (pack.protocol !== 'dsh' && pack.distribution === undefined) {
     throw new Error(`Harness Pack "${pack.id}" requires a distribution`)
@@ -218,14 +245,84 @@ export function packsFromAcpRegistry(input: unknown): HarnessPack[] {
         ] },
       ] } : {}),
       distribution: selected,
-      graph: {
-        level: 'opaque',
-        nodes: [{ id: 'runtime', kind: 'harness-runtime', title: agent.name, editable: false }],
-        edges: [],
-      },
+      graph: registryArchitecture(agent),
       source: 'acp-registry',
     })]
   })
+}
+
+function registryArchitecture(agent: z.infer<typeof acpRegistrySchema>['agents'][number]): HarnessPack['graph'] {
+  if (agent.id !== 'codex-acp') {
+    return {
+      level: 'opaque',
+      manifestVersion: 1,
+      boundary: `${agent.name} process`,
+      evidence: [{ kind: 'declared', source: 'ACP Registry', version: agent.version }],
+      nodes: [{
+        id: 'runtime', kind: 'harness-runtime', title: agent.name, editable: false,
+        responsibility: 'Runs the ACP agent while its private internal architecture remains undisclosed.',
+        inputs: ['ACP requests'], outputs: ['ACP updates'],
+        evidence: [{ kind: 'declared', source: 'ACP Registry', version: agent.version }],
+      }],
+      edges: [],
+    }
+  }
+  const codexEvidence = { kind: 'source-derived' as const, source: 'https://github.com/openai/codex', version: agent.version }
+  return {
+    level: 'observable',
+    manifestVersion: 1,
+    boundary: 'Codex ACP agent process',
+    evidence: [codexEvidence, { kind: 'declared', source: 'ACP Registry codex-acp', version: agent.version }],
+    nodes: [
+      {
+        id: 'acp', kind: 'protocol-adapter', title: 'ACP interface', editable: false,
+        responsibility: 'Translates ACP session calls, updates, configuration, and permissions for Codex.',
+        inputs: ['ACP initialize', 'session prompt', 'client capabilities'], outputs: ['session updates', 'permission requests'],
+        evidence: [{ kind: 'declared', source: 'ACP Registry codex-acp', version: agent.version }],
+      },
+      {
+        id: 'session', kind: 'agent-session', title: 'Thread & turn runtime', editable: false,
+        responsibility: 'Owns the thread, current turn, cancellation, and streamed item lifecycle.',
+        inputs: ['prompt', 'thread options'], outputs: ['turn items', 'terminal state'], evidence: [codexEvidence],
+      },
+      {
+        id: 'context', kind: 'context-runtime', title: 'Context assembly', editable: false,
+        responsibility: 'Builds model input from instructions, conversation history, skills, and environment context.',
+        inputs: ['instructions', 'history', 'environment'], outputs: ['model input'], evidence: [codexEvidence],
+      },
+      {
+        id: 'model', kind: 'model-client', title: 'Model client', editable: false,
+        responsibility: 'Streams inference through the selected Codex account, provider, model, and reasoning level.',
+        inputs: ['model input', 'model configuration'], outputs: ['assistant and tool-call stream'], evidence: [codexEvidence],
+      },
+      {
+        id: 'tools', kind: 'tool-runtime', title: 'Tool runtime', editable: false,
+        responsibility: 'Dispatches shell, file, MCP, skill, browser, and other enabled tool operations.',
+        inputs: ['tool call', 'active capabilities'], outputs: ['tool result', 'workspace change'], evidence: [codexEvidence],
+      },
+      {
+        id: 'sandbox', kind: 'execution-boundary', title: 'Sandbox', editable: false,
+        responsibility: 'Constrains filesystem and network effects according to the active sandbox policy.',
+        inputs: ['command', 'sandbox policy'], outputs: ['bounded process effect'], evidence: [codexEvidence],
+      },
+      {
+        id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false,
+        responsibility: 'Requests a user or reviewer decision when an operation crosses its permitted boundary.',
+        inputs: ['planned effect', 'approval policy'], outputs: ['approval decision'], evidence: [codexEvidence],
+      },
+      {
+        id: 'persistence', kind: 'session-storage', title: 'Session persistence', editable: false,
+        responsibility: 'Retains thread identity and resumable conversation state owned by Codex.',
+        inputs: ['thread events'], outputs: ['resumable thread'], evidence: [codexEvidence],
+      },
+    ],
+    edges: [
+      { from: 'acp', to: 'session' }, { from: 'session', to: 'context' }, { from: 'context', to: 'model' },
+      { from: 'model', to: 'session' }, { from: 'session', to: 'tools' }, { from: 'tools', to: 'approvals' },
+      { from: 'approvals', to: 'sandbox' }, { from: 'sandbox', to: 'tools' }, { from: 'session', to: 'persistence' },
+      { from: 'session', to: 'acp' },
+    ],
+  }
 }
 
 type RegistryDistribution = z.infer<typeof acpRegistrySchema>['agents'][number]['distribution']

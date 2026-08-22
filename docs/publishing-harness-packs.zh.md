@@ -13,7 +13,7 @@
 ## 导出与测试
 
 1. 在 Mac 打开 **Settings → Harnesses**。
-2. 在 Harness Studio 创建或编辑 Pack。Harness 不公开内部结构时使用 `opaque`；结构真实但只读时使用 `observable`；只有 Pack 确实允许 OpenFish 编辑的节点才使用 `composable`。如需声明可移植的 ACP 默认配置，可在可编辑节点中加入 `acpSessionOptions` 对象，例如 `{"acpSessionOptions":{"model":"model-id","mode":"plan"}}`。OpenFish 会在第一轮之前根据目标 Harness 的实时能力校验这些 id 与值；除非 Pack 的 Driver 另有定义，其他配置键只用于描述。
+2. 在 Harness Studio 创建或编辑 Pack。Harness 不公开内部结构时使用 `opaque`，并且只能展示一个 Runtime 边界。`observable` 与 `composable` Manifest 必须写明 Harness 进程边界、包含至少三个相连的 Runtime 职责，并为整张图及每个组件附上 declared、source-derived 或 runtime-observed 证据。不要为了让图看起来完整，就把 OpenFish、操作系统或模型提供方画成节点。只有 Pack 确实允许 OpenFish 编辑的节点才使用 `composable`。如需声明可移植的 ACP 默认配置，可在可编辑节点中加入 `acpSessionOptions` 对象，例如 `{"acpSessionOptions":{"model":"model-id","mode":"plan"}}`。OpenFish 会在第一轮之前根据目标 Harness 的实时能力校验这些 id 与值；除非 Pack 的 Driver 另有定义，其他配置键只用于描述。
 3. 分别使用该 Pack 启动一个 No Project 任务和一个项目任务，确认安装、认证、模型／配置发现、取消与恢复。
 4. 选择 **Prepare Publication**。如果分发环境疑似含有凭证值，OpenFish 会拒绝导出；否则生成 `{id}.openfish-harness.json`。
 
