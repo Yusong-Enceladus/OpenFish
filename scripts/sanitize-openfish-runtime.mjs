@@ -30,10 +30,17 @@ const forbidden = [
   new RegExp(escapeRegExp(resolve('.')), 'u'),
   ...(process.env.HOME === undefined ? [] : [new RegExp(escapeRegExp(resolve(process.env.HOME)), 'u')]),
 ]
+const forbiddenPathNameFragments = [resolve('.'), process.env.HOME]
+  .filter(value => typeof value === 'string' && value !== '')
+  .flatMap(value => [value.replaceAll('/', '+'), encodeURIComponent(value)])
 
 async function walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
+    const packagedName = relative(root, path)
+    if (forbiddenPathNameFragments.some(fragment => packagedName.includes(fragment))) {
+      throw new Error(`runtime path name contains build-machine identity: ${packagedName}`)
+    }
     const stat = await lstat(path)
     if (stat.isSymbolicLink()) {
       const target = await realpath(path)

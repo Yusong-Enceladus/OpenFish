@@ -676,6 +676,61 @@ describe('task admission and package contracts', () => {
 })
 
 describe('CodexAppServerWire', () => {
+  it('projects account billing identity while discarding email and credentials', async () => {
+    const child = fakeChild()
+    const wire = defaultWire(child)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli current' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const reading = wire.readAccount(new AbortController().signal)
+    const request = await child.peer.nextMethod('account/read')
+    expect(request.params).toEqual({ refreshToken: false })
+    child.peer.respond(request, {
+      account: {
+        type: 'chatgpt',
+        email: 'private@example.invalid',
+        planType: 'pro',
+        accessToken: 'must-not-cross-wire-boundary',
+      },
+      requiresOpenaiAuth: true,
+    })
+    const account = await reading
+    expect(account).toEqual({ type: 'chatgpt', planType: 'pro', requiresOpenaiAuth: true })
+    expect(JSON.stringify(account)).not.toContain('private@example.invalid')
+    expect(JSON.stringify(account)).not.toContain('must-not-cross-wire-boundary')
+    wire.close()
+  })
+
+  it('forks and cleans up an official durable thread without retargeting the source wire', async () => {
+    const { child, wire } = await initializeWire()
+    const forking = wire.forkThread('/workspace', 'turn-parent', new AbortController().signal)
+    const request = await child.peer.nextMethod('thread/fork')
+    expect(request.params).toEqual({
+      threadId: 'thread-1', lastTurnId: 'turn-parent', cwd: '/workspace',
+      approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write',
+    })
+    child.peer.respond(request, { thread: { id: 'thread-child', forkedFromId: 'thread-1' } })
+    await expect(forking).resolves.toBe('thread-child')
+
+    const deleting = wire.deleteThread('thread-child', new AbortController().signal)
+    const deletion = await child.peer.nextMethod('thread/delete')
+    expect(deletion.params).toEqual({ threadId: 'thread-child' })
+    child.peer.respond(deletion, {})
+    await deleting
+
+    const result = wire.runTurn(['source continues'], new AbortController().signal)
+    const turn = await child.peer.nextMethod('turn/start')
+    expect(turn.params).toMatchObject({ threadId: 'thread-1' })
+    child.peer.respond(turn, { turn: { id: 'turn-next' } })
+    child.peer.send(agentMessage('source answer', 'final_answer', 'turn-next'), turnCompleted('completed', 'turn-next'))
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'source answer' }] })
+    wire.close()
+  })
+
   it('sends the fixed handshake, thread, and turn payloads and keeps final_answer', async () => {
     const child = fakeChild()
     const wire = defaultWire(child)

@@ -3,15 +3,14 @@
  * `root` slot, which is the only ctx-level slot render in the application.
  */
 import type { ReactNode } from 'react'
-import type { Context } from '@deepseek-ai/cordis'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { bindSnapshotSelector } from './bind.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
 
 /** Inputs available after the UI renderer's inject set activates. */
 export interface AssemblyDeps {
   /** Client context carrying the slots and sessions services. */
-  ctx: Context
+  ctx: ClientContext
 }
 
 /**
@@ -21,9 +20,7 @@ export interface AssemblyDeps {
  */
 export function buildRenderApp(deps: AssemblyDeps): () => ReactNode {
   const { ctx } = deps
-  const sessions = ctx.get('sessions')
-  if (sessions === undefined) throw new Error('ui renderer: sessions service unavailable')
-  const useSessions = bindSnapshotSelector(sessions.list)
+  const useSessions = bindSnapshotSelector(ctx.sessions.list)
   const SessionDocumentTitle = (): ReactNode => {
     const title = useSessions((state) => {
       const id = state.current

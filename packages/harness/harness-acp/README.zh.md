@@ -22,7 +22,9 @@
 
 ## Known Limitations and Deferred Work
 
-- Driver 会声明支持 terminal 认证，但不声明 ACP 工具 terminal 或文件系统客户端操作；Harness 自行执行工具，并通过 ACP 请求权限。
-- 提示附件和工具 terminal 回调不属于 v0 Driver。Pack 声明的认证方式可在壳子中选择。由 Agent 管理的浏览器登录仍归 Harness；API Key 在每次启动时从 Host 的只写 credential 服务解析，并通过 ACP 认证请求传递，不进入 Pack 状态。
-- Codex 当前通过 ACP Registry 适配器运行，而该适配器底层调用官方开源 Codex 包。直接的 Codex App Server Driver 能暴露更多提供方原生事件，属于保真度升级，不是选择或运行 Codex 的前置条件。
-- 包代码会以 Host 进程配置的操作系统权限运行；发布者元数据和 ACP Registry 传输不能替代包管理器完整性、操作系统沙箱或用户审批。
+- 通用 ACP 会桥接权限请求、图片提示、限制在工作区内的文本文件操作，以及有输出上限的客户端终端。所选 Harness 仍拥有自己的 Agent Loop，并决定使用哪些标准回调。
+- Pack 声明的认证方式可在 OpenFish 中选择。由 Agent 管理的浏览器登录仍归 Harness；API Key 在每次启动时从 Host 的只写 credential 服务解析，绝不进入 Pack 状态。
+- Codex 使用独立的内置 Driver 对接官方 `codex app-server` 协议，包括实时账号、模型／思考强度、thread 恢复／删除和真实的 `thread/fork`；它不经过通用 ACP 适配器。
+- 通用 ACP 尚无标准的提供方侧会话删除或 Fork 原语。OpenFish 会在本地停止被放弃的 ACP 草稿，并禁用 Fork，而不会伪造这些远端语义。
+- 受管理的 Harness 进程会在所选 OpenFish 工作区和进程沙箱策略中启动，并使用私有 HOME／缓存／配置／临时目录。发布者元数据和 ACP Registry 传输仍不能替代包完整性、沙箱执行或明确的用户审批。
+- 带校验和的平台归档由 OpenFish 在进程内解包，不委托给宿主机归档工具。系统仅接受 ZIP、TAR、TAR.GZ 与 TGZ，拒绝链接和非普通归档条目，并把归档限制为最多 20,000 个条目、1,024 字节路径、512 MiB 压缩体积和 2 GiB 解包体积；所有内容只能写入全新的受管版本目录。Bzip2 TAR 有意保持不支持。直接下载的可执行文件在声明的 SHA-256 匹配时仍然受支持。

@@ -4,12 +4,18 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rm, stat } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
+import {
+  effectiveSessionModelSelection,
+  installModelSelection,
+  recordSessionModelSelection,
+  sameModelSelection,
+} from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -39,9 +45,11 @@ import type {
   ApiProxy, ConfigurableProviderView, CredentialView, GoalRef, HistoryEntry, HostFrame,
   ModelCatalogFailure, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
-  QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
+  QueuedInboxItem, SessionSummary, SessionModels, HarnessConfigOption, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
   WorkspaceId, WorkspaceView,
 } from './api/index.ts'
+
+const { version: HOST_API_VERSION } = createRequire(import.meta.url)('../package.json') as { version: string }
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   flushLiveSessionLog,
@@ -75,7 +83,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 // rebuild the api-remotes cycle this direction exists to avoid.
 import type {} from '@deepseek-ai/dsh-cordis-host-runner/types'
 import type {} from '@deepseek-ai/dsh-skill'
-import type { HarnessId } from '@deepseek-ai/dsh-harness'
+import { BUILTIN_DSH_VERSION, type HarnessId } from '@deepseek-ai/dsh-harness'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 // The settings/credentials seams: brand guards run at this wire boundary; the
 // service reads stay optional (`ctx.get`) so a composition without either
@@ -111,6 +119,11 @@ import {
   inspectApiRemoteSession,
 } from '@deepseek-ai/dsh-api-remotes'
 import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-path-opener.ts'
+import {
+  OPENFISH_GITHUB_TOKEN_REF,
+  submitOpenFishCommunityPack,
+  submitOpenFishCommunityRevocation,
+} from './harness-community-github.ts'
 
 /** Page size when history is called without maxMessages. */
 const DEFAULT_MAX_MESSAGES = 50
@@ -130,17 +143,24 @@ interface HarnessModelController {
   harnessModelCatalog(): {
     current: string
     currentReasoningEffort?: string
+    account?: {
+      label: string
+      billing: 'subscription' | 'usage' | 'local' | 'harness-managed' | 'unknown'
+      detail: string
+    }
     models: Array<{
       id: string
       name: string
       description?: string
+      providerId?: string
+      providerName?: string
       reasoning?: {
         efforts: Array<{ id: string; name: string; description?: string }>
         defaultEffort?: string
       }
     }>
   } | undefined
-  selectHarnessModel(model: string, reasoningEffort?: string): Promise<{ model: string; reasoningEffort?: string }>
+  selectHarnessModel(model: string, reasoningEffort?: string, signal?: AbortSignal): Promise<{ model: string; reasoningEffort?: string }>
   harnessConfigCatalog(): Array<{
     id: string
     name: string
@@ -150,7 +170,7 @@ interface HarnessModelController {
     currentValue: string | boolean
     values: Array<{ id: string; name: string; description?: string; group?: string; groupName?: string }>
   }>
-  selectHarnessConfig(configId: string, value: string | boolean): Promise<ReturnType<HarnessModelController['harnessConfigCatalog']>>
+  selectHarnessConfig(configId: string, value: string | boolean, signal?: AbortSignal): Promise<ReturnType<HarnessModelController['harnessConfigCatalog']>>
 }
 
 function harnessModelController(agent: Agent): HarnessModelController | undefined {
@@ -355,7 +375,7 @@ async function buildModelCatalog(ctx: Context): Promise<{
       const failure: ModelCatalogFailure = {
         id: provider.id,
         name: provider.name,
-        message: error instanceof Error ? error.message : String(error),
+        message: clientSafeErrorMessage(error, 'Model catalog unavailable'),
       }
       return { kind: 'failure' as const, failure }
     }
@@ -397,16 +417,55 @@ function err<T>(request: RpcRequest<unknown>, error: RpcError): RpcResponse<T> {
   return { rpcId: request.rpcId, result: { ok: false, error } }
 }
 
+const CLIENT_DIAGNOSTIC_MAX_CODE_POINTS = 800
+
+function replaceDiagnosticLiteral(message: string, literal: string, replacement: string): string {
+  return literal.length === 0 || literal === '/' ? message : message.split(literal).join(replacement)
+}
+
+/**
+ * Preserve a useful Host diagnostic without reflecting credentials or this
+ * machine's private runtime root onto a paired client. Domain errors still
+ * keep their stable code/details; this is only the human-readable fallback.
+ */
+function clientSafeErrorMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  let message = raw.trim().length > 0 ? raw : fallback
+
+  // Exact locally configured secret values are the strongest signal. Only
+  // inspect names that conventionally carry secrets and never return the name
+  // or value through this helper.
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!/(?:api[_-]?key|token|secret|password|authorization|cookie)/iu.test(name)) continue
+    if (value === undefined || value.length < 6) continue
+    message = replaceDiagnosticLiteral(message, value, '[redacted]')
+  }
+
+  message = message
+    .replace(/\bBearer\s+[a-z0-9._~+/=-]{6,}\b/giu, 'Bearer [redacted]')
+    .replace(/\b(?:sk|gh[opushr]|github_pat|xox[aboprs])[-_][a-z0-9_-]{8,}\b/giu, '[redacted]')
+    .replace(/\bAIza[A-Za-z0-9_-]{20,}\b/gu, '[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, '[redacted]')
+    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1[redacted]@')
+    .replace(/((?:api[-_ ]?key|token|secret|password|authorization|cookie)\s*(?:[:=]\s*|["']\s+))(?:Bearer\s+)?[^\s,;)}\]]+/giu, '$1[redacted]')
+
+  message = replaceDiagnosticLiteral(message, dshHomePath(), '$DSH_HOME')
+  message = replaceDiagnosticLiteral(message, homedir(), '~')
+  message = message.replace(/[\r\n\t]+/gu, ' ').replace(/\s{2,}/gu, ' ').trim()
+  if (message.length === 0) message = fallback
+  return truncateUnicodeCodePoints(message, CLIENT_DIAGNOSTIC_MAX_CODE_POINTS)
+}
+
 function harnessRpcError(error: unknown, fallback: string): RpcError {
-  const message = error instanceof Error ? error.message : String(error)
-  const lower = message.toLocaleLowerCase()
+  const raw = error instanceof Error ? error.message : String(error)
+  const lower = raw.toLocaleLowerCase()
   const code = lower.includes('checksum') ? 'harness-integrity-failed'
     : lower.includes('credential') || lower.includes('auth') || lower.includes('login') ? 'harness-auth-required'
       : lower.includes('install') || lower.includes('download') || lower.includes('extract') ? 'harness-install-failed'
         : lower.includes('resume') ? 'harness-resume-failed'
           : lower.includes('launch') || lower.includes('start') || lower.includes('connection closed') ? 'harness-start-failed'
             : 'harness-failed'
-  return { code, message: message.length > 0 ? message : fallback, details: {} }
+  return { code, message: clientSafeErrorMessage(error, fallback), details: {} }
 }
 
 /**
@@ -566,18 +625,29 @@ function sessionListFields(header: SessionHeader, events: readonly SessionEvent[
   cwd?: string
   agentPreset?: string
   harnessId: string
+  harnessVersion?: string
+  harnessAuthMethod?: string
+  workspaceMode?: 'project' | 'no-project' | 'custom-cwd'
+  harnessCapabilities?: string[]
 } {
   // The preset comes from the log, not the header: a session that switched
   // while blank ran its turns under the newer composition, and a picker
   // showing the creation-time value would contradict what the model saw.
   const agentPreset = resolveSessionPreset({ header, events })
-  const harnessId = events.findLast(event => event.type === 'harness/selected')?.data.harnessId ?? 'dsh'
+  const selectedHarness = events.findLast(event => event.type === 'harness/selected')?.data
+  const harnessId = selectedHarness?.harnessId ?? 'dsh'
   return {
     ...header.parentSession === undefined ? {} : { parentSessionId: header.parentSession },
     ...header.origin === undefined ? {} : { origin: header.origin },
     ...header.cwd === undefined ? {} : { cwd: header.cwd },
     ...agentPreset === undefined ? {} : { agentPreset },
     harnessId,
+    ...selectedHarness?.version === undefined ? {} : { harnessVersion: selectedHarness.version },
+    ...selectedHarness?.authMethod === undefined ? {} : { harnessAuthMethod: selectedHarness.authMethod },
+    ...selectedHarness?.workspaceMode === undefined ? {} : { workspaceMode: selectedHarness.workspaceMode },
+    ...selectedHarness?.capabilities === undefined
+      ? {}
+      : { harnessCapabilities: selectedHarness.capabilities.filter(item => item.status !== 'unsupported').map(item => item.id) },
   }
 }
 
@@ -626,7 +696,7 @@ async function probeColdSessionMetadata(
     return sessionListMetadata(events)
   } catch (error) {
     signal?.throwIfAborted()
-    ctx.logger.warn(`session.list: blank probe for "${meta.id}" failed (serving it as visible): ${String(error)}`)
+    ctx.logger.warn(`session.list: blank probe for "${meta.id}" failed (serving it as visible): ${clientSafeErrorMessage(error, 'blankness probe failed')}`)
     return undefined
   }
 }
@@ -648,7 +718,7 @@ async function summarizeCold(
     events = (await persistence.readFrom(meta.id, 0, signal)).events
   } catch (error) {
     signal?.throwIfAborted()
-    ctx.logger.warn(`session.list: harness probe for "${meta.id}" failed (serving the compatibility default): ${String(error)}`)
+    ctx.logger.warn(`session.list: harness probe for "${meta.id}" failed (serving the compatibility default): ${clientSafeErrorMessage(error, 'Harness identity probe failed')}`)
   }
   return {
     sessionId: meta.id,
@@ -668,7 +738,7 @@ function directoryError(error: unknown): RpcError {
   if (error instanceof DirectoryPickerError) {
     return { code: error.code, message: error.message, details: { path: error.path } }
   }
-  return { code: 'internal', message: error instanceof Error ? error.message : String(error), details: {} }
+  return { code: 'internal', message: clientSafeErrorMessage(error, 'Directory operation failed'), details: {} }
 }
 
 /** Resolved Agent model and project-directory defaults consumed by the API implementation. */
@@ -813,7 +883,7 @@ function viewFor(
   } catch (error: unknown) {
     // A throwing presenter (or unparseable arguments) must not break delivery;
     // the event still ships, just without a view.
-    console.error(`api-proxy: presenter failed for ${event.type}, falling back to generic: ${String(error)}`)
+    console.error(`api-proxy: presenter failed for ${event.type}, falling back to generic: ${clientSafeErrorMessage(error, 'presentation failed')}`)
   }
   return undefined
 }
@@ -900,7 +970,7 @@ function listProjectionsFor(ctx: Context, meta: SessionHeader, session: Session 
       : ctx.get('sessionProjectionCache')?.cachedSnapshot(meta)
     return block !== undefined && Object.keys(block.values).length > 0 ? block : undefined
   } catch (error) {
-    ctx.logger.warn(`session.list: projection column for "${meta.id}" failed (serving the row without it): ${String(error)}`)
+    ctx.logger.warn(`session.list: projection column for "${meta.id}" failed (serving the row without it): ${clientSafeErrorMessage(error, 'projection failed')}`)
     return undefined
   }
 }
@@ -932,7 +1002,7 @@ function subagentHistoryProjections(
   try {
     return compute()
   } catch (error) {
-    ctx.logger.warn(`subagent.history: projections for "${childSessionId}" failed (serving the page without them): ${String(error)}`)
+    ctx.logger.warn(`subagent.history: projections for "${childSessionId}" failed (serving the page without them): ${clientSafeErrorMessage(error, 'projection failed')}`)
     return undefined
   }
 }
@@ -1061,7 +1131,11 @@ function presetError(agentPreset: string, error: unknown): RpcError {
   if (error instanceof InvalidPresetIdError || error instanceof PresetExistsError) {
     return { code: 'agent-preset-invalid', message: error.message, details: { agentPreset, reason: error.message } }
   }
-  return { code: 'internal', message: `agent preset "${agentPreset}": ${String(error)}`, details: {} }
+  return {
+    code: 'internal',
+    message: `agent preset "${agentPreset}": ${clientSafeErrorMessage(error, 'preset operation failed')}`,
+    details: {},
+  }
 }
 
 class AgentPresetConflict extends Error {
@@ -1164,6 +1238,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const presetSwitches = new Map<SessionId, Promise<unknown>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
+  /** Agent handles this gateway owns and can close when a blank draft is abandoned. */
+  const ownedAgentHandles = new Map<SessionId, AgentHandle>()
   /** Cold external-Harness resumes, deduplicated across concurrent model/capability reads. */
   const externalSessionResumes = new Map<SessionId, Promise<Agent>>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
@@ -1181,16 +1257,22 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   /**
+   * Read runtime options without assuming every adopted Agent predates the
+   * current static contract. Older integrations and test doubles can omit
+   * this field; in that case the persisted session log remains authoritative.
+   */
+  function runtimeAgentOptions(agent: Agent): Agent['options'] | undefined {
+    return (agent as Omit<Agent, 'options'> & { readonly options?: Agent['options'] }).options
+  }
+
+  /**
    * Install or return the session-local model selection that prompt assembly snapshots.
    *
    * Precedence, resolved on EVERY read rather than seeded once: a selection
-   * made in this process, else the session's own latest logged request/header,
-   * else the live Agent default. Re-reading keeps the two tiers exact in both
-   * directions: a session with a recorded request derives its selection from
-   * its log, while a blank session (New Session reuses one rather than minting
-   * another) reads any default saved after it was created. There is no create-time
-   * per-session override tier on this wire — if one returns (a create-options
-   * contribution), it must fold in between the selection and the log.
+   * made in this process, then the session's explicit model-selection event,
+   * then its latest request/header, and finally the live Agent default. The
+   * explicit event is what keeps a blank New Task pinned across Host restarts;
+   * request/header remains the compatibility source for older logs.
    */
   function selectionFor(agent: Agent): WebModelSelectionRef {
     const installed = selections.get(agent)
@@ -1199,13 +1281,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const selection: WebModelSelectionRef = {
       get current(): ModelSelection {
         if (picked !== undefined) return picked
+        const selected = effectiveSessionModelSelection(agent.session.events)
+        if (selected !== undefined) return selected
         // ACP Harnesses own their model transport and persist their selected
         // model through the Harness protocol. Older OpenFish builds recorded
         // the host's DSH default in request/header even for ACP turns; that
         // compatibility residue must never make a resumed external Harness
         // look like it is using (or can select) a DSH provider.
-        if (agent.options.provider === 'harness') {
-          return { provider: agent.options.provider, model: agent.options.model ?? 'external' }
+        const runtimeOptions = runtimeAgentOptions(agent)
+        if (runtimeOptions?.provider === 'harness') {
+          return { provider: runtimeOptions.provider, model: runtimeOptions.model ?? 'external' }
         }
         // Incrementally folded by the session, so a per-step read costs
         // O(new events) rather than a rescan.
@@ -1315,8 +1400,54 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // composition, and the header is written once at creation. Reading the
   // header here would silently undo the switch on the next restart and
   // restore that history under the old tool set.
+  const ownAgentHandle = (handle: AgentHandle): void => {
+    const existing = ownedAgentHandles.get(handle.agent.id)
+    if (existing !== undefined && existing !== handle) {
+      throw new Error(`gateway already owns another handle for agent "${handle.agent.id}"`)
+    }
+    ownedAgentHandles.set(handle.agent.id, handle)
+  }
+
+  /** Dispose and erase one never-started draft created by this Host surface. */
+  async function discardOwnedDraft(sessionId: SessionId): Promise<void> {
+    const agent = ctx.agents.get(sessionId)
+    if (agent === undefined) throw new Error(`draft session "${sessionId}" is not live`)
+    if (hasSubagentOwner(agent.session, agent)) throw new SubagentSessionOwnership(sessionId)
+    if (agent.status !== 'idle' || agent.session.events.some(event => event.type === 'turn/start')) {
+      throw new Error(`session "${sessionId}" has started and cannot be discarded as a draft`)
+    }
+    const selected = agent.session.events.findLast(event => event.type === 'harness/selected')
+    const harnessId = selected?.data.harnessId ?? 'dsh'
+    if (harnessId === 'dsh') {
+      const handle = ownedAgentHandles.get(sessionId)
+      if (handle === undefined) throw new Error('this Host surface does not own the draft Agent handle')
+      await handle.dispose()
+      ownedAgentHandles.delete(sessionId)
+    } else {
+      const harnesses = ctx.get('harnesses')
+      if (harnesses === undefined) throw new Error('Harness service is not mounted')
+      await harnesses.discardSession(harnessId, sessionId, selected?.data.version)
+    }
+    for (const workspace of ctx.workspaceRegistry.list()) {
+      if (workspace.sessionIds.includes(sessionId)) await workspace.detachSession(sessionId)
+    }
+    const persistence = ctx.get('sessionPersistence')
+    if (persistence === undefined) throw new Error('session persistence is not configured')
+    await persistence.delete(sessionId)
+    const managedNoProject = dshHomePath('openfish', 'no-project', sessionId)
+    if (agent.session.header.cwd === managedNoProject) {
+      await rm(managedNoProject, { recursive: true, force: true })
+    }
+  }
+  ctx.effect(() => async () => {
+    const handles = [...ownedAgentHandles.values()]
+    ownedAgentHandles.clear()
+    await Promise.allSettled(handles.map(handle => handle.dispose()))
+  }, 'apiProxy.ownedAgentHandles()')
+
   const dshAgentFor = createApiRemoteAgentResolver(ctx, {
     agentOptions,
+    onHandle: ownAgentHandle,
     setup: async ({ meta, events }) =>
       (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
   })
@@ -1330,16 +1461,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // The canonical resolver below owns not-found and ownership error mapping.
       return await dshAgentFor(sessionId)
     }
-    const selected = inspected.events.findLast(event => event.type === 'harness/selected')?.data.harnessId
-    if (selected !== undefined && selected !== 'dsh') {
+    const selectedEvent = inspected.events.findLast(event => event.type === 'harness/selected')
+    const selected = selectedEvent?.data.harnessId
+    if (selectedEvent !== undefined && selected !== undefined && selected !== 'dsh') {
       const harnesses = ctx.get('harnesses')
       if (harnesses === undefined) {
         return { error: { code: 'internal', message: 'Harness service is not mounted', details: {} } }
       }
       let resume = externalSessionResumes.get(sessionId)
       if (resume === undefined) {
-        const selectedVersion = inspected.events.findLast(event => event.type === 'harness/selected')?.data.version
-        resume = harnesses.resume(selected, sessionId, inspected.meta.cwd as string, selectedVersion)
+        resume = harnesses.resume(
+          selected,
+          sessionId,
+          inspected.meta.cwd as string,
+          selectedEvent.data.version,
+          selectedEvent.data.authMethod,
+          selectedEvent.data.workspaceMode,
+        )
           .finally(() => { externalSessionResumes.delete(sessionId) })
         externalSessionResumes.set(sessionId, resume)
       }
@@ -1349,8 +1487,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return {
           error: {
             code: 'internal',
-            message: `Harness "${selected}" could not resume: ${error instanceof Error ? error.message : String(error)}`,
-            details: { harnessId: selected, sessionId },
+            message: `Harness "${selected}" could not resume: ${clientSafeErrorMessage(error, 'resume failed')}`,
+            details: {},
           },
         }
       }
@@ -1709,7 +1847,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     checkPersistedIdentity: boolean,
     presetId?: string,
     harnessId?: string,
+    workspaceMode?: 'project' | 'no-project' | 'custom-cwd',
+    signal?: AbortSignal,
   ): Promise<Agent> {
+    signal?.throwIfAborted()
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
       creation = (async () => {
@@ -1744,7 +1885,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // Resolved from the log, not the header: a session that switched
           // while blank ran every turn under the newer composition.
           const storedPreset = resolveSessionPreset({ header: inspected.meta, events: inspected.events })
-          const storedHarness = inspected.events.findLast(event => event.type === 'harness/selected')?.data.harnessId ?? 'dsh'
+          const storedSelection = inspected.events.findLast(event => event.type === 'harness/selected')
+          const storedHarness = storedSelection?.data.harnessId ?? 'dsh'
           if (harnessId !== undefined && storedHarness !== harnessId) {
             throw new Error(`session "${sessionId}" already uses Harness "${storedHarness}", not "${harnessId}"`)
           }
@@ -1752,19 +1894,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             if (presetId !== undefined) throw new Error('Agent Presets apply only to the DSH Harness')
             const harnesses = ctx.get('harnesses')
             if (harnesses === undefined) throw new Error('Harness service is not mounted')
-            const storedVersion = inspected.events.findLast(event => event.type === 'harness/selected')?.data.version
-            return await harnesses.resume(storedHarness, sessionId, cwd, storedVersion)
+            return await harnesses.resume(
+              storedHarness,
+              sessionId,
+              cwd,
+              storedSelection?.data.version,
+              storedSelection?.data.authMethod,
+              storedSelection?.data.workspaceMode,
+              signal,
+            )
           }
           assertPresetUnchanged(sessionId, presetId, storedPreset)
           // The stored preset wins over anything the request names: a resumed
           // session's history was produced under that composition, and
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
-          return (await ctx.agents.resume({
+          const handle = await ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: agentOptions(),
             setup: (await composeAgent(storedPreset)).setup,
-          })).agent
+          })
+          ownAgentHandle(handle)
+          return handle.agent
         }
 
         try {
@@ -1773,13 +1924,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
         }
         if (harnessId !== undefined && harnessId !== 'dsh') {
+          signal?.throwIfAborted()
           if (presetId !== undefined) throw new Error('Agent Presets apply only to the DSH Harness')
           const harnesses = ctx.get('harnesses')
           if (harnesses === undefined) throw new Error('Harness service is not mounted')
-          return await harnesses.create(harnessId as HarnessId, sessionId, cwd)
+          return await harnesses.create(harnessId as HarnessId, sessionId, cwd, workspaceMode, signal)
         }
+        signal?.throwIfAborted()
         const composition = await composeAgent(presetId)
-        return (await ctx.agents.create({
+        const handle = await ctx.agents.create({
           sessionId,
           agentOptions: agentOptions(),
           meta: {
@@ -1787,7 +1940,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
           },
           setup: composition.setup,
-        })).agent
+        })
+        ownAgentHandle(handle)
+        return handle.agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while
         // this operation crossed an asynchronous persistence/filesystem step.
@@ -1917,7 +2072,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   /** Map one goal-domain rejection to the wire error (stable GoalError codes ride in details). */
   function goalError(request: RpcRequest<unknown>, error: unknown): RpcResponse<never> {
     const details = error instanceof GoalError ? { goalCode: error.code } : {}
-    return err(request, { code: 'internal', message: String(error), details })
+    return err(request, { code: 'internal', message: clientSafeErrorMessage(error, 'Goal operation failed'), details })
   }
 
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
@@ -1950,6 +2105,20 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return llm === undefined || llm.listProviders().some(entry => entry.id === provider)
   }
 
+  /** Whether the exact Harness Pack refuses to run without a live model directory. */
+  async function harnessRequiresAdvertisedModel(agent: Agent): Promise<boolean> {
+    const selected = agent.session.events.findLast(event => event.type === 'harness/selected')
+    if (selected === undefined) return false
+    const harnesses = ctx.get('harnesses')
+    if (harnesses === undefined) return false
+    const described = await harnesses.describe(
+      selected.data.harnessId,
+      selected.data.version,
+      selected.data.authMethod,
+    )
+    return described.modelConfiguration?.required === true
+  }
+
   /**
    * Resolve the addressed agent for a turn-starting method and refuse when no
    * adapter serves its current selection: a provider nothing serves cannot start a
@@ -1967,8 +2136,31 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const agent = found.agent
     const selection = selectionFor(agent).current
     // An external Harness owns its model transport. Its synthetic `harness`
-    // provider is presentation metadata, not an LlmRuntime adapter id.
-    if (selection.provider !== 'harness' && !routeServed(selection.provider)) {
+    // provider is presentation metadata, not an LlmRuntime adapter id. Packs
+    // that require a live model directory still fail closed when discovery is
+    // empty; a raw RPC caller cannot bypass the disabled native composer.
+    if (selection.provider === 'harness') {
+      const catalog = harnessModelController(agent)?.harnessModelCatalog()
+      try {
+        if ((catalog === undefined || catalog.models.length === 0) && await harnessRequiresAdvertisedModel(agent)) {
+          return {
+            refused: err(request, {
+              code: 'model-unavailable',
+              message: 'This Harness requires a model, but its live runtime did not advertise any model choices.',
+              details: { provider: selection.provider, model: selection.model },
+            }),
+          }
+        }
+      } catch (error: unknown) {
+        return {
+          refused: err(request, {
+            code: 'model-unavailable',
+            message: `The selected Harness model contract could not be resolved: ${clientSafeErrorMessage(error, 'model contract unavailable')}`,
+            details: { provider: selection.provider, model: selection.model },
+          }),
+        }
+      }
+    } else if (!routeServed(selection.provider)) {
       return {
         refused: err(request, {
           code: 'model-unavailable',
@@ -2012,7 +2204,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
       return err(request, {
         code: 'internal',
-        message: `path open failed: ${error instanceof Error ? error.message : String(error)}`,
+        message: `path open failed: ${clientSafeErrorMessage(error, 'native path operation failed')}`,
         details: {},
       })
     }
@@ -2089,7 +2281,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
       return err(request, {
         code: 'settings-rejected',
-        message: error instanceof Error ? error.message : String(error),
+        message: clientSafeErrorMessage(error, 'Settings update was rejected'),
         details: { ns },
       })
     }
@@ -2248,17 +2440,21 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             isAborted(signal)
             || (error instanceof SessionQueryError && error.code === 'SESSION_QUERY_ABORTED')
           ) return cancelled()
-          // XXX: Redact provider details before exposing this gateway beyond
-          // its current single-user local deployment.
           return err(request, {
             code: 'internal',
-            message: `session search failed: ${String(error)}`,
+            message: `session search failed: ${clientSafeErrorMessage(error, 'search provider failed')}`,
             details: {},
           })
         }
       },
 
-      async create(request) {
+      async create(request, signal = new AbortController().signal) {
+        const cancelled = () => err<{ sessionId: SessionId; harnessId?: string; agentPreset?: string }>(request, {
+          code: 'cancelled',
+          message: 'session creation was aborted',
+          details: {},
+        })
+        if (isAborted(signal)) return cancelled()
         const sessionId = request.payload.sessionId ?? `session-${randomUUID()}` as SessionId
         let workspace: Workspace | undefined
         if (request.payload.workspaceId !== undefined) {
@@ -2271,11 +2467,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        // A task without a Project must never inherit the Host launch directory
-        // (often Desktop). Give it a private, stable per-session working area.
-        const detached = request.payload.noProject === true
-        const cwd = detached ? dshHomePath('openfish', 'no-project', sessionId) : workspace?.path ?? request.payload.cwd ?? defaults.cwd
-        if (detached) await mkdir(cwd, { recursive: true, mode: 0o700 })
         const requestedPreset = request.payload.agentPreset
         let requestedHarness = request.payload.harnessId
         if (requestedHarness === undefined) {
@@ -2289,11 +2480,65 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
+        // A task without a Project must never inherit the Host launch directory
+        // (often Desktop). Resolve every rejectable identity first, then create
+        // one private, stable per-session working area as part of preparation.
+        const detached = request.payload.noProject === true
+          || (workspace === undefined && request.payload.cwd === undefined)
+        const workspaceMode = detached ? 'no-project' as const
+          : workspace !== undefined ? 'project' as const
+            : 'custom-cwd' as const
+        const cwd = detached ? dshHomePath('openfish', 'no-project', sessionId) : workspace?.path ?? request.payload.cwd ?? defaults.cwd
+        if (detached) await mkdir(cwd, { recursive: true, mode: 0o700 })
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, requestedHarness)
+          const prepared = await ensureSession(
+            sessionId,
+            cwd,
+            request.payload.sessionId !== undefined,
+            requestedPreset,
+            requestedHarness,
+            workspaceMode,
+            signal,
+          )
+          // New native DSH tasks record the same durable identity fields as
+          // external Harness tasks. Legacy DSH logs remain readable through
+          // the documented implicit fallback and are never rewritten after a
+          // turn has started.
+          if (requestedHarness === 'dsh'
+            && prepared.session.events.findLast(event => event.type === 'harness/selected') === undefined
+            && !prepared.session.events.some(event => event.type === 'turn/start')) {
+            const harnessService = ctx.get('harnesses')
+            const capabilitySnapshot = harnessService === undefined
+              ? undefined
+              : (await harnessService.describe('dsh' as HarnessId)).capabilities
+            prepared.session.append('harness/selected', {
+              harnessId: 'dsh' as HarnessId,
+              version: BUILTIN_DSH_VERSION,
+              protocol: 'dsh',
+              workspaceMode,
+              ...(capabilitySnapshot === undefined ? {} : { capabilities: capabilitySnapshot }),
+            })
+          }
+          // Creation is the identity commit for a blank task. Capture the DSH
+          // default now instead of waiting for request/header so changing the
+          // deployment default cannot silently retarget an already-created
+          // New Task before its first prompt. External Drivers record the
+          // live Harness-owned choice after their remote session is ready.
+          if (runtimeAgentOptions(prepared)?.provider !== 'harness'
+            && effectiveSessionModelSelection(prepared.session.events) === undefined) {
+            recordSessionModelSelection(prepared.session, selectionFor(prepared).current)
+          }
         } catch (error: unknown) {
           ctx.logger.error(`session.create: failed to prepare "${sessionId}"`)
-          ctx.logger.error(error)
+          ctx.logger.error(clientSafeErrorMessage(error, 'session preparation failed'))
+          if (detached && ctx.agents.get(sessionId) === undefined) {
+            const persistence = ctx.get('sessionPersistence')
+            const stored = persistence === undefined
+              ? undefined
+              : (await persistence.list().catch(() => [])).find(header => header.id === sessionId)
+            if (stored === undefined) await rm(cwd, { recursive: true, force: true }).catch(() => undefined)
+          }
+          if (isAborted(signal)) return cancelled()
           if (error instanceof AgentPresetConflict) {
             return err(request, {
               code: 'agent-preset-conflict',
@@ -2329,10 +2574,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           try {
             await workspace.attachSession(sessionId)
           } catch (error: unknown) {
+            let rollback: string | undefined
+            try {
+              await discardOwnedDraft(sessionId)
+            } catch (rollbackError: unknown) {
+              rollback = clientSafeErrorMessage(rollbackError, 'draft cleanup failed')
+            }
             return err(request, {
               code: 'workspace-attach-failed',
-              message: `session "${sessionId}" was created but could not attach to workspace "${workspace.id}": ${String(error)}`,
-              details: { sessionId, workspaceId: workspace.id },
+              message: rollback === undefined
+                ? `session "${sessionId}" could not attach to workspace "${workspace.id}" and the blank draft was removed: ${clientSafeErrorMessage(error, 'workspace attach failed')}`
+                : `session "${sessionId}" could not attach to workspace "${workspace.id}"; draft cleanup also failed: ${rollback}`,
+              details: { sessionId, workspaceId: workspace.id, ...(rollback === undefined ? {} : { rollback }) },
             })
           }
         }
@@ -2348,6 +2601,62 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const createdPreset = created === undefined ? undefined : resolveSessionPreset(created.session)
         const createdHarness = created?.session.events.findLast(event => event.type === 'harness/selected')?.data.harnessId ?? requestedHarness
         return ok(request, { sessionId, harnessId: createdHarness, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
+      },
+
+      async discard(request) {
+        const { sessionId } = request.payload
+        let agent = ctx.agents.get(sessionId)
+        if (agent === undefined) {
+          // Native clients preallocate and privately cache the exact draft id.
+          // If either app or Host restarts between prepare and first prompt,
+          // the blank draft is cold but still owned by this Host. Inspect
+          // before resuming so a started conversation is never revived just
+          // to be rejected, then reconstruct the exact pinned Harness/preset
+          // long enough to run its normal disposal path.
+          let cold: Awaited<ReturnType<typeof inspectServable>>
+          try {
+            cold = await inspectServable(sessionId)
+          } catch {
+            return err(request, {
+              code: 'session-not-found',
+              message: `draft session "${sessionId}" was not found`,
+              details: { sessionId },
+            })
+          }
+          if (hasSubagentOwner({ header: cold.meta }, undefined)) {
+            return err(request, subagentOwnershipError(sessionId))
+          }
+          if (cold.events.some(event => event.type === 'turn/start')) {
+            return err(request, {
+              code: 'agent-busy',
+              message: `session "${sessionId}" has started and cannot be discarded as a draft`,
+              details: { reason: 'only a conversation-not-started draft can be discarded' },
+            })
+          }
+          const resumed = await agentFor(sessionId)
+          if ('error' in resumed) return err(request, resumed.error)
+          agent = resumed.agent
+        }
+        if (hasSubagentOwner(agent.session, agent)) {
+          return err(request, subagentOwnershipError(sessionId))
+        }
+        if (agent.status !== 'idle' || agent.session.events.some(event => event.type === 'turn/start')) {
+          return err(request, {
+            code: 'agent-busy',
+            message: `session "${sessionId}" has started and cannot be discarded as a draft`,
+            details: { reason: 'only an idle conversation-not-started draft can be discarded' },
+          })
+        }
+        try {
+          await discardOwnedDraft(sessionId)
+          return ok(request, { discarded: true as const })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `could not discard draft session "${sessionId}": ${clientSafeErrorMessage(error, 'draft cleanup failed')}`,
+            details: {},
+          })
+        }
       },
 
       async history(request) {
@@ -2374,15 +2683,20 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `history unavailable for session "${sessionId}": ${String(error)}`,
+            message: `history unavailable for session "${sessionId}": ${clientSafeErrorMessage(error, 'history read failed')}`,
             details: {},
           })
         }
       },
 
-      async models(request) {
+      async models(request, signal = new AbortController().signal) {
         const { sessionId } = request.payload
+        const cancelled = () => err<SessionModels>(request, {
+          code: 'cancelled', message: 'Harness model discovery was cancelled', details: {},
+        })
+        if (isAborted(signal)) return cancelled()
         const found = await agentFor(sessionId)
+        if (isAborted(signal)) return cancelled()
         if ('error' in found) return err(request, found.error)
         const current = selectionFor(found.agent).current
         if (current.provider === 'harness') {
@@ -2397,25 +2711,46 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               routable: true,
               groups: [{ id: 'harness', name: 'Harness models', models: catalog.models }],
               failures: [],
+              ...(catalog.account === undefined ? {} : { account: catalog.account }),
               harnessOptions: controller?.harnessConfigCatalog() ?? [],
             })
           }
+          let required = false
+          let failure: string | undefined
+          try {
+            required = await harnessRequiresAdvertisedModel(found.agent)
+          } catch (error: unknown) {
+            required = true
+            failure = `The selected Harness model contract could not be resolved: ${clientSafeErrorMessage(error, 'model contract unavailable')}`
+          }
           return ok(request, {
-            current: { ...current }, routable: true, groups: [], failures: [],
+            current: { ...current }, routable: !required, groups: [],
+            failures: required ? [{
+              id: 'harness', name: 'Harness models',
+              message: failure ?? 'This Harness requires a model, but its live runtime did not advertise any model choices.',
+            }] : [],
+            ...(catalog?.account === undefined ? {} : { account: catalog.account }),
             harnessOptions: controller?.harnessConfigCatalog() ?? [],
           })
         }
         const { groups, failures } = await buildModelCatalog(ctx)
+        if (isAborted(signal)) return cancelled()
         const routable = routeServed(current.provider) && await providerConfigured(ctx, current.provider)
+        if (isAborted(signal)) return cancelled()
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
 
-      async selectModel(request) {
+      async selectModel(request, signal = new AbortController().signal) {
         const { sessionId, provider, model, reasoningEffort } = request.payload
+        const cancelled = () => err<{ selected: ModelSelection }>(request, {
+          code: 'cancelled', message: 'Model selection was cancelled', details: {},
+        })
+        if (isAborted(signal)) return cancelled()
         const found = await agentFor(sessionId)
+        if (isAborted(signal)) return cancelled()
         if ('error' in found) return err(request, found.error)
         const harnessController = harnessModelController(found.agent)
-        if (found.agent.options.provider === 'harness' && harnessController !== undefined) {
+        if (runtimeAgentOptions(found.agent)?.provider === 'harness' && harnessController !== undefined) {
           if (provider !== 'harness') {
             return err(request, {
               code: 'model-unavailable',
@@ -2423,17 +2758,52 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               details: { provider, model },
             })
           }
-          try {
-            const selected = await harnessController.selectHarnessModel(model, reasoningEffort)
-            return ok(request, { selected: { provider: 'harness', ...selected } })
-          } catch (error: unknown) {
-            return err(request, {
-              code: 'model-unavailable',
-              message: error instanceof Error ? error.message : String(error),
-              details: { provider, model },
-            })
-          }
+          return serializeImageAdmission(found.agent, async () => {
+            if (isAborted(signal)) return cancelled()
+            try {
+              const selected = await harnessController.selectHarnessModel(model, reasoningEffort, signal)
+              const accepted: ModelSelection = {
+                provider: 'harness',
+                model: selected.model,
+                ...(selected.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: ReasoningEffortId(selected.reasoningEffort) }),
+              }
+              recordSessionModelSelection(found.agent.session, accepted)
+              selectionFor(found.agent).current = accepted
+              if (isAborted(signal)) return cancelled()
+              return ok(request, { selected: { ...accepted } })
+            } catch (error: unknown) {
+              // Some Harness protocols can reveal a model's thought-level
+              // directory only after switching the model. If the follow-up
+              // effort mutation is rejected, the remote model may already be
+              // active. Reconcile that authoritative live state before
+              // returning the failure so the durable task and every client do
+              // not continue to display the pre-mutation route.
+              const currentCatalog = harnessController.harnessModelCatalog()
+              if (currentCatalog !== undefined) {
+                const currentSelection: ModelSelection = {
+                  provider: 'harness', model: currentCatalog.current,
+                  ...(currentCatalog.currentReasoningEffort === undefined
+                    ? {}
+                    : { reasoningEffort: ReasoningEffortId(currentCatalog.currentReasoningEffort) }),
+                }
+                const previousSelection = selectionFor(found.agent).current
+                if (!sameModelSelection(previousSelection, currentSelection)) {
+                  recordSessionModelSelection(found.agent.session, currentSelection)
+                }
+                selectionFor(found.agent).current = currentSelection
+              }
+              if (isAborted(signal)) return cancelled()
+              return err(request, {
+                code: 'model-unavailable',
+                message: clientSafeErrorMessage(error, 'Harness model selection failed'),
+                details: { provider, model },
+              })
+            }
+          })
         }
+        if (isAborted(signal)) return cancelled()
         if (!await providerConfigured(ctx, provider)) {
           return err(request, {
             code: 'model-unavailable',
@@ -2441,7 +2811,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { provider, model },
           })
         }
+        if (isAborted(signal)) return cancelled()
         return serializeImageAdmission(found.agent, async () => {
+          if (isAborted(signal)) return cancelled()
           try {
             const resolved = await ctx.llm.resolveCallConfig({
               provider,
@@ -2454,6 +2826,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               .some(message => contentHasImage(message.content))
             if (pendingImage || messagesHaveImage(found.agent.session.deriveMessages())) {
               const info = await ctx.llm.resolveModelInfo(resolved.provider, resolved.model)
+              if (isAborted(signal)) return cancelled()
               if (info.inputModalities !== undefined && !info.inputModalities.includes('image')) {
                 return err(request, {
                   code: 'model-unavailable',
@@ -2469,6 +2842,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 ? {}
                 : { reasoningEffort: resolved.reasoningEffort },
             }
+            if (isAborted(signal)) return cancelled()
+            recordSessionModelSelection(found.agent.session, selected)
             selectionFor(found.agent).current = selected
             try {
               await defaults.saveDefaultModelSelection?.(selected)
@@ -2479,39 +2854,51 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             }
             return ok(request, { selected: { ...selected } })
           } catch (error: unknown) {
+            if (isAborted(signal)) return cancelled()
             return err(request, {
               code: 'model-unavailable',
-              message: error instanceof Error ? error.message : String(error),
+              message: clientSafeErrorMessage(error, 'Model selection failed'),
               details: { provider, model },
             })
           }
         })
       },
 
-      async setHarnessConfig(request) {
+      async setHarnessConfig(request, signal = new AbortController().signal) {
         const { sessionId, configId, value } = request.payload
+        const cancelled = () => err<{ options: HarnessConfigOption[] }>(request, {
+          code: 'cancelled', message: 'Harness configuration was cancelled', details: {},
+        })
+        if (isAborted(signal)) return cancelled()
         const found = await agentFor(sessionId)
+        if (isAborted(signal)) return cancelled()
         if ('error' in found) return err(request, found.error)
         const controller = harnessModelController(found.agent)
-        if (found.agent.options.provider !== 'harness' || controller === undefined) {
+        const runtimeOptions = runtimeAgentOptions(found.agent)
+        if (runtimeOptions?.provider !== 'harness' || controller === undefined) {
           return err(request, {
             code: 'model-unavailable',
             message: 'This session does not expose Harness configuration.',
             details: {
-              provider: found.agent.options.provider ?? 'unknown',
-              model: found.agent.options.model ?? 'unknown',
+              provider: runtimeOptions?.provider ?? 'unknown',
+              model: runtimeOptions?.model ?? 'unknown',
             },
           })
         }
-        try {
-          return ok(request, { options: await controller.selectHarnessConfig(configId, value) })
-        } catch (error: unknown) {
-          return err(request, {
-            code: 'model-unavailable',
-            message: error instanceof Error ? error.message : String(error),
-            details: { provider: 'harness', model: configId },
-          })
-        }
+        return serializeImageAdmission(found.agent, async () => {
+          try {
+            const options = await controller.selectHarnessConfig(configId, value, signal)
+            if (isAborted(signal)) return cancelled()
+            return ok(request, { options })
+          } catch (error: unknown) {
+            if (isAborted(signal)) return cancelled()
+            return err(request, {
+              code: 'model-unavailable',
+              message: clientSafeErrorMessage(error, 'Harness configuration failed'),
+              details: { provider: 'harness', model: configId },
+            })
+          }
+        })
       },
 
       async rename(request) {
@@ -2538,7 +2925,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `failed to rename session "${sessionId}": ${String(error)}`,
+            message: `failed to rename session "${sessionId}": ${clientSafeErrorMessage(error, 'rename failed')}`,
             details: {},
           })
         }
@@ -2555,11 +2942,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `fork source unavailable for session "${sessionId}": ${String(error)}`,
+            message: `fork source unavailable for session "${sessionId}": ${clientSafeErrorMessage(error, 'source read failed')}`,
             details: {},
           })
         }
         const events = source.events
+        const selectedHarness = events.findLast(event => event.type === 'harness/selected')
+        const sourceHarness = selectedHarness?.data.harnessId ?? 'dsh'
         // An in-log anchor belongs to the turn containing it and must never
         // clip backward to an earlier completed turn. Omitted and past-end
         // anchors retain the last-completed-turn shortcut.
@@ -2592,11 +2981,56 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         } catch (error: unknown) {
           return err(request, {
             code: 'internal',
-            message: `failed to resolve fork workspace for session "${sessionId}": ${String(error)}`,
+            message: `failed to resolve fork workspace for session "${sessionId}": ${clientSafeErrorMessage(error, 'workspace lookup failed')}`,
             details: {},
           })
         }
         const childId = `session-${randomUUID()}` as SessionId
+        if (sourceHarness !== 'dsh') {
+          const live = await agentFor(sessionId)
+          if ('error' in live) return err(request, live.error)
+          const harnesses = ctx.get('harnesses')
+          if (harnesses === undefined) {
+            return err(request, { code: 'internal', message: 'Harness service is not mounted', details: {} })
+          }
+          if (source.header.cwd === undefined) {
+            return err(request, {
+              code: 'fork-unavailable',
+              message: `Harness "${sourceHarness}" source task has no durable working directory`,
+              details: { sessionId },
+            })
+          }
+          try {
+            await harnesses.fork(
+              sourceHarness,
+              sessionId,
+              childId,
+              source.header.cwd,
+              events.slice(0, cut),
+              selectedHarness?.data.version,
+              selectedHarness?.data.authMethod,
+              selectedHarness?.data.workspaceMode,
+            )
+          } catch (error: unknown) {
+            return err(request, {
+              code: 'fork-unavailable',
+              message: clientSafeErrorMessage(error, 'Harness fork failed'),
+              details: { sessionId },
+            })
+          }
+          if (workspace !== undefined) {
+            try {
+              await workspace.attachSession(childId)
+            } catch (error: unknown) {
+              return err(request, {
+                code: 'workspace-attach-failed',
+                message: `session "${childId}" was forked but could not attach to workspace "${workspace.id}": ${clientSafeErrorMessage(error, 'workspace attach failed')}`,
+                details: { sessionId: childId, workspaceId: workspace.id },
+              })
+            }
+          }
+          return ok(request, { sessionId: childId })
+        }
         // The child inherits the parent's composition for the same reason a
         // resumed session keeps its own: the seeded history was produced under
         // those tools, and composing anything else would strand the tool calls
@@ -2621,7 +3055,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         } catch (error: unknown) {
           return err(request, {
             code: 'internal',
-            message: `failed to fork session "${sessionId}": ${String(error)}`,
+            message: `failed to fork session "${sessionId}": ${clientSafeErrorMessage(error, 'fork failed')}`,
             details: {},
           })
         }
@@ -2634,7 +3068,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           } catch (error: unknown) {
             return err(request, {
               code: 'workspace-attach-failed',
-              message: `session "${childId}" was forked but could not attach to workspace "${workspace.id}": ${String(error)}`,
+              message: `session "${childId}" was forked but could not attach to workspace "${workspace.id}": ${clientSafeErrorMessage(error, 'workspace attach failed')}`,
               details: { sessionId: childId, workspaceId: workspace.id },
             })
           }
@@ -2692,7 +3126,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             return err(request, {
               code: 'agent-busy',
               message: 'prompt rejected',
-              details: { reason: String(error) },
+              details: { reason: clientSafeErrorMessage(error, 'prompt admission failed') },
             })
           }
           return ok(request, { accepted: true as const })
@@ -2715,7 +3149,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `attachment authorization unavailable for session "${sessionId}": ${String(error)}`,
+            message: `attachment authorization unavailable for session "${sessionId}": ${clientSafeErrorMessage(error, 'attachment authorization failed')}`,
             details: {},
           })
         }
@@ -3002,7 +3436,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // error of the typed-path flow, surfaced as a validation failure.
           return err(request, {
             code: 'workspace-invalid-path',
-            message: `cannot create a workspace at "${path}": ${error instanceof Error ? error.message : String(error)}`,
+            message: `cannot create a workspace at "${path}": ${clientSafeErrorMessage(error, 'directory creation failed')}`,
             details: { path },
           })
         }
@@ -3102,14 +3536,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
       },
+
+      async unarchiveSession(request) {
+        await ctx.workspaceRegistry.unarchiveSession(request.payload.sessionId)
+        return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
+      },
     },
 
     host: {
       describe(request) {
-        // TODO: version should read apps/cli's package.json; placeholder for now.
         const selection = defaults.defaultModelSelection()
         return Promise.resolve(ok(request, {
-          version: '0.0.1',
+          version: HOST_API_VERSION,
           // Same source as session.create's fallback: the UI's default project
           // must match where an unspecified-cwd session actually lands.
           cwd: defaults.cwd,
@@ -3145,7 +3583,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `directory picker failed: ${error instanceof Error ? error.message : String(error)}`,
+            message: `directory picker failed: ${clientSafeErrorMessage(error, 'picker operation failed')}`,
             details: {},
           })
         }
@@ -3302,7 +3740,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             if (refused !== undefined) return refused
             return err(request, {
               code: 'internal',
-              message: `failed to select agent preset "${agentPreset}": ${String(error)}`,
+              message: `failed to select agent preset "${agentPreset}": ${clientSafeErrorMessage(error, 'preset selection failed')}`,
               details: {},
             })
           }
@@ -3437,7 +3875,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })),
           })
         } catch (error: unknown) {
-          return err(request, { code: 'internal', message: `skill listing failed: ${String(error)}`, details: {} })
+          return err(request, {
+            code: 'internal', message: `skill listing failed: ${clientSafeErrorMessage(error, 'catalog unavailable')}`, details: {},
+          })
         }
       },
     },
@@ -3456,7 +3896,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             || item.description?.toLocaleLowerCase().includes(query) === true)
           return ok(request, { items })
         } catch (error: unknown) {
-          return err(request, { code: 'internal', message: `Harness listing failed: ${String(error)}`, details: {} })
+          return err(request, {
+            code: 'internal', message: `Harness listing failed: ${clientSafeErrorMessage(error, 'catalog unavailable')}`, details: {},
+          })
+        }
+      },
+
+      async resolve(request) {
+        const harnesses = ctx.get('harnesses')
+        if (harnesses === undefined) {
+          return err(request, { code: 'internal', message: 'Harness service is not mounted', details: {} })
+        }
+        try {
+          const { id, version, authMethod } = request.payload
+          return ok(request, {
+            item: await harnesses.describe(
+              id as HarnessId,
+              version,
+              authMethod,
+            ),
+          })
+        } catch (error: unknown) {
+          return err(request, harnessRpcError(error, 'Harness task identity could not be resolved'))
         }
       },
 
@@ -3469,7 +3930,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           await harnesses.refresh()
           return ok(request, { items: await harnesses.list() })
         } catch (error: unknown) {
-          return err(request, { code: 'internal', message: `Harness refresh failed: ${String(error)}`, details: {} })
+          return err(request, {
+            code: 'internal', message: `Harness refresh failed: ${clientSafeErrorMessage(error, 'catalog refresh failed')}`, details: {},
+          })
         }
       },
 
@@ -3477,26 +3940,130 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const harnesses = ctx.get('harnesses')
         if (harnesses === undefined) return err(request, { code: 'internal', message: 'Harness service is not mounted', details: {} })
         try {
-          const { action, id, authMethod, pack } = request.payload
-          if (action === 'upsert') {
-            if (pack === undefined) throw new Error('A Harness Pack document is required')
-            await harnesses.upsert(pack)
-          } else if (action === 'clear-default') {
+          const { action, id, authMethod, acceptUnverified } = request.payload
+          if (action === 'clear-default') {
             await harnesses.clearDefault()
           } else {
             if (id === undefined) throw new Error('A Harness id is required')
             const harnessId = id as HarnessId
+            if (action === 'install' || action === 'update' || action === 'probe') {
+              const candidate = await harnesses.describe(harnessId)
+              const introducesCode = candidate.installation.status !== 'installed'
+                || candidate.installation.installedVersion !== candidate.installation.availableVersion
+              if (introducesCode && !candidate.verified && candidate.source !== 'user') {
+                throw new Error(
+                  `Harness "${candidate.id}" is unverified; admit this exact third-party code from OpenFish on the Host Mac before installing or probing it`,
+                )
+              }
+              if (acceptUnverified === true) {
+                throw new Error('Unverified Harness code consent is accepted only by the Host-local Harness management endpoint')
+              }
+            }
             if (action === 'install' || action === 'update') await harnesses.install(harnessId, signal)
             else if (action === 'uninstall') await harnesses.uninstall(harnessId)
             else if (action === 'rollback') await harnesses.rollback(harnessId)
-            else if (action === 'probe') await harnesses.probe(harnessId, signal)
-            else if (action === 'remove') await harnesses.removeUserPack(harnessId)
-            else if (action === 'default') await harnesses.selectDefault(harnessId)
-            else if (action === 'login') {
-              if (authMethod === undefined) throw new Error('A terminal authentication method is required')
-              await harnesses.authenticateInteractive(harnessId, authMethod)
+            else if (action === 'probe') {
+              const candidate = await harnesses.describe(harnessId)
+              if (candidate.installation.status !== 'builtin' && candidate.installation.status !== 'installed') {
+                await harnesses.install(harnessId, signal)
+              }
+              await harnesses.probe(harnessId, signal)
             }
+            else if (action === 'default') await harnesses.selectDefault(harnessId)
             else await harnesses.selectAuth(harnessId, authMethod)
+          }
+          return ok(request, { items: await harnesses.list() })
+        } catch (error: unknown) {
+          return err(request, harnessRpcError(error, `Harness ${request.payload.action} failed`))
+        }
+      },
+
+      async manage(request, signal) {
+        const harnesses = ctx.get('harnesses')
+        if (harnesses === undefined) return err(request, { code: 'internal', message: 'Harness service is not mounted', details: {} })
+        try {
+          const { action, id, version, driverPackage, driverSpec, authMethod, pack, reason, acceptUnverified } = request.payload
+          if (action === 'install' || action === 'update' || action === 'probe') {
+            if (id === undefined) throw new Error('A Harness id is required')
+            const harnessId = id as HarnessId
+            const candidate = await harnesses.describe(harnessId)
+            const introducesCode = candidate.installation.status !== 'installed'
+              || candidate.installation.installedVersion !== candidate.installation.availableVersion
+            if (introducesCode && !candidate.verified && candidate.source !== 'user' && acceptUnverified !== true) {
+              throw new Error(`Harness "${candidate.id}" requires explicit Host-local confirmation for this exact third-party code`)
+            }
+            if (action === 'install' || action === 'update') await harnesses.install(harnessId, signal)
+            else {
+              if (candidate.installation.status !== 'builtin' && candidate.installation.status !== 'installed') {
+                await harnesses.install(harnessId, signal)
+              }
+              await harnesses.probe(harnessId, signal)
+            }
+          } else if (action === 'authorize-driver') {
+            if (id === undefined || version === undefined || driverPackage === undefined || driverSpec === undefined) {
+              throw new Error('Exact Harness and Driver Bundle identities are required')
+            }
+            await harnesses.authorizeDriverBundle(id as HarnessId, version, driverPackage, driverSpec)
+          } else if (action === 'upsert') {
+            if (pack === undefined) throw new Error('A Harness Pack document is required')
+            await harnesses.upsert(pack)
+          } else if (action === 'validate-publication') {
+            if (pack === undefined) throw new Error('A Harness Pack document is required')
+            await harnesses.validatePublication(pack)
+          } else if (action === 'submit-publication') {
+            if (id === undefined) throw new Error('A Harness id is required')
+            const localPack = harnesses.require(id as HarnessId)
+            const publicPack = await harnesses.validatePublication(localPack)
+            const credentials = ctx.get('credentials')
+            if (credentials === undefined) throw new Error('The Host does not provide a credential service for GitHub authorization')
+            const authorization = await credentials.resolve(credentialRef(OPENFISH_GITHUB_TOKEN_REF))
+            if (authorization === undefined) {
+              throw new Error('GitHub authorization is not configured; store it in Keychain before submitting this Pack')
+            }
+            const submission = await submitOpenFishCommunityPack(publicPack, authorization.value, signal)
+            await harnesses.recordCommunitySubmission({
+              id: publicPack.id,
+              version: publicPack.version,
+              reviewUrl: submission.reviewUrl,
+              branch: submission.branch,
+              submittedAt: submission.submittedAt,
+              review: 'pending',
+            })
+          } else if (action === 'submit-revocation') {
+            if (id === undefined) throw new Error('A Harness id is required')
+            if (reason === undefined) throw new Error('A public revocation reason is required')
+            const harnessId = id as HarnessId
+            const current = await harnesses.describe(harnessId)
+            if (current.publication?.status !== 'published') {
+              throw new Error('Only an exact Pack version already present in the reviewed community catalog can be revoked')
+            }
+            const credentials = ctx.get('credentials')
+            if (credentials === undefined) throw new Error('The Host does not provide a credential service for GitHub authorization')
+            const authorization = await credentials.resolve(credentialRef(OPENFISH_GITHUB_TOKEN_REF))
+            if (authorization === undefined) {
+              throw new Error('GitHub authorization is not configured; store it in Keychain before requesting revocation')
+            }
+            const submission = await submitOpenFishCommunityRevocation({
+              id: current.id,
+              version: current.version,
+              reason,
+            }, authorization.value, signal)
+            await harnesses.recordCommunityRevocationSubmission({
+              id: current.id,
+              version: current.version,
+              reviewUrl: submission.reviewUrl,
+              branch: submission.branch,
+              submittedAt: submission.submittedAt,
+              review: 'pending',
+            })
+          } else {
+            if (id === undefined) throw new Error('A Harness id is required')
+            const harnessId = id as HarnessId
+            if (action === 'remove') await harnesses.removeUserPack(harnessId)
+            else {
+              if (authMethod === undefined) throw new Error('A terminal authentication method is required')
+              await harnesses.authenticateInteractive(harnessId, authMethod, signal)
+            }
           }
           return ok(request, { items: await harnesses.list() })
         } catch (error: unknown) {
@@ -3538,7 +4105,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           return err(request, {
             code: 'internal',
-            message: `settings document preparation failed: ${error instanceof Error ? error.message : String(error)}`,
+            message: `settings document preparation failed: ${clientSafeErrorMessage(error, 'settings document unavailable')}`,
             details: {},
           })
         }
@@ -3588,7 +4155,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         } catch (error: unknown) {
           return err(request, {
             code: 'credential-rejected',
-            message: error instanceof Error ? error.message : String(error),
+            message: clientSafeErrorMessage(error, 'Credential update was rejected'),
             details: { ref },
           })
         }
@@ -3604,7 +4171,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         } catch (error: unknown) {
           return err(request, {
             code: 'credential-rejected',
-            message: error instanceof Error ? error.message : String(error),
+            message: clientSafeErrorMessage(error, 'Credential removal was rejected'),
             details: { ref },
           })
         }
@@ -3664,7 +4231,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // repeat only what the caller already sent, never the credential.
           return err(request, {
             code: 'model-discovery-failed',
-            message: error instanceof Error ? error.message : String(error),
+            message: clientSafeErrorMessage(error, 'Model discovery failed'),
             details: { settingsNs, ...baseURL === undefined ? {} : { baseURL } },
           })
         }

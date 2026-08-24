@@ -8,14 +8,16 @@ Source: [`packages/sandbox/sandbox/src/index.ts`](../../packages/sandbox/sandbox
 
 ## Modes and enforcement
 
-`SandboxMode` governs filesystem effects only. `read-only` asks the backend to deny writes — the POSIX runners additionally grant the `/dev/null` sink their shells require, while the Windows ACL runner grants no explicit writable root and reports partial enforcement for its ambient ACL gaps; `workspace-write` permits writes under the workspace root and the backend's promised temp area; `danger-full-access` bypasses confinement. Network and process visibility are outside this vocabulary.
+`SandboxMode` governs filesystem effects only. `read-only` asks the backend to deny writes — the POSIX runners additionally grant the `/dev/null` sink their shells require, while the Windows ACL runner grants no explicit writable root and reports partial enforcement for its ambient ACL gaps; `workspace-write` permits writes under the workspace root and the backend's promised temp area; `danger-full-access` bypasses confinement. Long-lived third-party runtimes can additionally request an explicit `SandboxPolicy.isolation` boundary for protected host reads, inbound listeners, unrelated process control, and ambient IPC; ordinary one-shot callers retain the file-effect-only policy.
 
 ```ts type-equiv
 /**
  * File-effect policy for confined processes. `read-only` permits only required
  * sinks such as `/dev/null`; `workspace-write` also permits the workspace and a
  * backend-defined temp area; `danger-full-access` bypasses confinement. Network
- * and process visibility are outside this vocabulary.
+ * Additional resident-runtime isolation is expressed explicitly through
+ * {@link SandboxPolicy.isolation}; ordinary one-shot callers retain the
+ * historical file-effect-only policy.
  */
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 ```
@@ -90,6 +92,27 @@ Only a confined execution reaches `ctx.sandbox`; its provider policy narrows the
 interface SandboxPolicy extends SandboxExecutionPolicy {
   /** The file-effect mode this execution runs under. */
   mode: ConfinedSandboxMode
+  /**
+   * Additional private state roots the consumer owns and may write even when
+   * the workspace itself is read-only. This is for runtime state such as an
+   * isolated Harness home, never an ambient user directory.
+   */
+  runtimeWritableRoots?: readonly string[]
+  /**
+   * Whether `workspace-write` also grants the platform temporary roots.
+   * Ordinary shell calls retain the historical default (`true`). Long-lived
+   * third-party runtimes set this to `false` and receive a private temp root
+   * through {@link runtimeWritableRoots} instead.
+   */
+  platformTemporaryWrites?: boolean
+  /**
+   * Optional host-privacy boundary for an untrusted long-lived runtime. The
+   * provider must deny reads beneath every protected root except the exact
+   * readable roots, reject inbound listeners, and prevent control or
+   * inspection of unrelated host processes. A provider that cannot enforce
+   * every requested boundary fails closed.
+   */
+  isolation?: SandboxIsolationPolicy
 }
 ```
 
@@ -184,7 +207,7 @@ Abstract process-sandbox service. confine must return enforcing argv or fail clo
 abstract confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv
 ```
 
-Source: [`packages/sandbox/sandbox/src/index.ts:158`](../../packages/sandbox/sandbox/src/index.ts)
+Source: [`packages/sandbox/sandbox/src/index.ts:195`](../../packages/sandbox/sandbox/src/index.ts)
 
 <a id="ctxsandboxpolicy--sandboxpolicyservice"></a>
 
@@ -214,5 +237,5 @@ overrideOf(session: Session): SandboxMode | undefined
 
 Types: [Session](session.md)
 
-Source: [`packages/sandbox/sandbox-policy/src/index.ts:91`](../../packages/sandbox/sandbox-policy/src/index.ts)
+Source: [`packages/sandbox/sandbox-policy/src/index.ts:112`](../../packages/sandbox/sandbox-policy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

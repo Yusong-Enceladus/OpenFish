@@ -218,10 +218,10 @@ export class PermissionPresetService extends Service {
     })
 
     ctx.on('session/created', (session) => {
-      this.pinInitialPermission(session)
+      this.initialize(session)
     })
     for (const session of ctx.sessions.list()) {
-      this.pinInitialPermission(session)
+      this.initialize(session)
     }
 
     // The permissions projection unit: fold the three whole-value knob
@@ -262,13 +262,20 @@ export class PermissionPresetService extends Service {
         // No settlement text labels its value with this command's own name: a
         // surface that renders `name · text` (the web command row) would
         // otherwise read `permission · Permission preset: workspace-write.`
-        handler: ({ agent, rawInput }) => {
+        handler: async ({ agent, rawInput }) => {
           const name = rawInput.trim()
           if (name === '') {
             return { kind: 'success', text: `current preset ${this.current(agent.session.events)} (available: ${this.names.join(', ')})` }
           }
           if (!this.names.includes(name)) {
             return { kind: 'error', text: `unknown preset "${name}" (available: ${this.names.join(', ')})` }
+          }
+          const spec = this.resolve(name)
+          const effective = agent.sandboxAuthority?.mode
+            ?? effectiveSandboxMode(agent.session.events)
+            ?? this.ctx.shell.sandboxMode
+          if (spec.sandbox !== effective && agent.sandboxAuthority !== undefined) {
+            await agent.sandboxAuthority.reconfigure(spec.sandbox)
           }
           this.apply(agent.session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
           return { kind: 'success', text: `preset ${name}` }
@@ -371,9 +378,9 @@ export class PermissionPresetService extends Service {
    * setter. Selecting the effective preset again appends nothing.
    * @param session - the session the switch belongs to.
    * @param name - the preset to switch to; unknown names throw.
-   */
+  */
   set(session: Session, name: string): void {
-    this.apply(session, name, (policy) =>{  setApprovalPolicy(session, policy) })
+    this.apply(session, name, (policy) => { setApprovalPolicy(session, policy) })
   }
 
   /** Apply one preset with the caller-selected live or initialization policy writer. */
@@ -396,15 +403,17 @@ export class PermissionPresetService extends Service {
    * genuinely fresh session uses the current user default; seeded or partially
    * initialized sessions preserve their effective knob values and only gain
    * the missing durable facts.
+   * @param session - session receiving any missing durable permission facts.
+   * @param preset - current user default used only for a genuinely fresh session.
    */
-  private pinInitialPermission(session: Session): void {
+  initialize(session: Session, preset: string = this.defaultPreset): void {
     const events = session.events
     const selected = effectivePermissionPreset(events)
     const sandbox = effectiveSandboxMode(events)
     const approval = effectiveApprovalPolicy(events)
     const seeded = events.some(event => event.type === 'session/end-seed')
     if (selected === undefined && sandbox === undefined && approval === undefined && !seeded) {
-      const name = this.defaultPreset
+      const name = preset
       const spec = this.resolve(name)
       session.append('permission/preset', { preset: name })
       setSandboxMode(session, spec.sandbox)

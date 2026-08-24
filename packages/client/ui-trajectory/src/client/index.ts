@@ -2,8 +2,7 @@
  * Browser trajectory plugin contributing one entry to the conversation view
  * slot without defining a service.
  */
-import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the 'conversation.view' SlotMap row (declared by the slot's
@@ -27,7 +26,7 @@ export const inject = ['slots', 'conversationEvents', 'conversationViews', 'sess
  * rides the slot service's effect wrapper, so plugin unload removes the tab.
  * @param ctx - client root context.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-trajectory: dictionaries')
   // Registration-time text (the view tab label) reads through the bound
   // translate as a thunk, so it follows the active locale without

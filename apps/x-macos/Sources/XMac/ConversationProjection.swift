@@ -13,6 +13,16 @@ enum ActivityState: Equatable, Sendable {
     case failed
 }
 
+struct ConversationAttachment: Identifiable, Equatable, Sendable {
+    let attachmentId: String
+    let mediaType: String
+    let width: Int
+    let height: Int
+    let name: String?
+
+    var id: String { attachmentId }
+}
+
 struct ConversationItem: Identifiable, Equatable, Sendable {
     let id: String
     let seq: Int
@@ -24,6 +34,33 @@ struct ConversationItem: Identifiable, Equatable, Sendable {
     let activityState: ActivityState?
     let card: String?
     let isStreaming: Bool
+    let attachments: [ConversationAttachment]
+
+    init(
+        id: String,
+        seq: Int,
+        time: Double,
+        kind: ConversationItemKind,
+        title: String?,
+        text: String,
+        detail: String?,
+        activityState: ActivityState?,
+        card: String?,
+        isStreaming: Bool,
+        attachments: [ConversationAttachment] = []
+    ) {
+        self.id = id
+        self.seq = seq
+        self.time = time
+        self.kind = kind
+        self.title = title
+        self.text = text
+        self.detail = detail
+        self.activityState = activityState
+        self.card = card
+        self.isStreaming = isStreaming
+        self.attachments = attachments
+    }
 }
 
 /// Pure, ephemeral rendering projection over DSH's authoritative event records.
@@ -49,11 +86,35 @@ enum ConversationProjector {
         let failed: Bool
     }
 
+    private struct NativeToolState {
+        let id: String
+        let seq: Int
+        let time: Double
+        var title: String
+        var kind: String?
+        var status: String?
+        var rawInput: JSONValue?
+        var rawOutput: JSONValue?
+        var content: JSONValue?
+        var locations: JSONValue?
+    }
+
+    private struct NativePlanState {
+        let id: String
+        let seq: Int
+        let time: Double
+        var text: String
+        var detail: String?
+        var completed: Bool
+    }
+
     static func project(_ records: [SessionEventRecord]) -> [ConversationItem] {
         let ordered = records.sorted { $0.event.seq < $1.event.seq }
         var results: [String: ToolResult] = [:]
         var finalizedSteps: Set<StepKey> = []
         var partials: [StepKey: Partial] = [:]
+        var nativeTools: [String: NativeToolState] = [:]
+        var nativePlans: [String: NativePlanState] = [:]
 
         for record in ordered {
             let event = record.event
@@ -72,6 +133,14 @@ enum ConversationProjector {
                 partial.seq = event.seq
                 partial.time = event.time
                 partials[key] = partial
+            }
+            if event.type == "harness/native-event", let native = event.data["event"] {
+                foldNativeEvent(
+                    native,
+                    event: event,
+                    tools: &nativeTools,
+                    plans: &nativePlans
+                )
             }
         }
 
@@ -114,6 +183,25 @@ enum ConversationProjector {
             ))
         }
 
+
+        for tool in nativeTools.values {
+            items.append(nativeToolItem(tool))
+        }
+        for plan in nativePlans.values {
+            items.append(ConversationItem(
+                id: "harness-plan:\(plan.id)",
+                seq: plan.seq,
+                time: plan.time,
+                kind: .activity,
+                title: "Plan",
+                text: plan.text,
+                detail: plan.detail,
+                activityState: plan.completed ? .completed : .running,
+                card: "plan",
+                isStreaming: !plan.completed
+            ))
+        }
+
         return items.sorted {
             if $0.seq != $1.seq { return $0.seq < $1.seq }
             return $0.id < $1.id
@@ -124,9 +212,10 @@ enum ConversationProjector {
         let source = event.data["source"]
         let sourceKind = source?["kind"]?.stringValue
         let text = textFromContent(event.data["content"])
+        let attachments = imageAttachments(event.data["content"])
 
         if sourceKind == "user" || sourceKind == nil {
-            guard !text.isEmpty else { return nil }
+            guard !text.isEmpty || !attachments.isEmpty else { return nil }
             return ConversationItem(
                 id: "event:\(event.seq)",
                 seq: event.seq,
@@ -137,7 +226,8 @@ enum ConversationProjector {
                 detail: nil,
                 activityState: nil,
                 card: nil,
-                isStreaming: false
+                isStreaming: false,
+                attachments: attachments
             )
         }
 
@@ -163,7 +253,8 @@ enum ConversationProjector {
         let message = event.data["message"] ?? event.data
         let text = textFromContent(message["content"])
         let reasoning = reasoningFromContent(message["content"])
-        guard !text.isEmpty || !reasoning.isEmpty else { return nil }
+        let attachments = imageAttachments(message["content"])
+        guard !text.isEmpty || !reasoning.isEmpty || !attachments.isEmpty else { return nil }
         return ConversationItem(
             id: "event:\(event.seq)",
             seq: event.seq,
@@ -174,7 +265,8 @@ enum ConversationProjector {
             detail: reasoning.isEmpty ? nil : reasoning,
             activityState: nil,
             card: nil,
-            isStreaming: false
+            isStreaming: false,
+            attachments: attachments
         )
     }
 
@@ -312,6 +404,235 @@ enum ConversationProjector {
         return blocks.compactMap { block in
             block["type"]?.stringValue == "reasoning" ? block["text"]?.stringValue : nil
         }.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    private static func imageAttachments(_ value: JSONValue?) -> [ConversationAttachment] {
+        value?.arrayValue?.compactMap { block in
+            guard block["type"]?.stringValue == "image",
+                  let attachment = block["attachment"],
+                  let attachmentId = attachment["attachmentId"]?.stringValue,
+                  let mediaType = attachment["mediaType"]?.stringValue,
+                  let width = attachment["width"]?.intValue,
+                  let height = attachment["height"]?.intValue,
+                  mediaType.lowercased().hasPrefix("image/") else { return nil }
+            return ConversationAttachment(
+                attachmentId: attachmentId,
+                mediaType: mediaType,
+                width: max(1, width),
+                height: max(1, height),
+                name: attachment["name"]?.stringValue
+            )
+        } ?? []
+    }
+
+    private static func foldNativeEvent(
+        _ native: JSONValue,
+        event: SessionEvent,
+        tools: inout [String: NativeToolState],
+        plans: inout [String: NativePlanState]
+    ) {
+        if let updateType = native["sessionUpdate"]?.stringValue {
+            switch updateType {
+            case "tool_call", "tool_call_update":
+                guard let id = native["toolCallId"]?.stringValue else { return }
+                var state = tools[id] ?? NativeToolState(
+                    id: id,
+                    seq: event.seq,
+                    time: event.time,
+                    title: native["title"]?.stringValue ?? "Harness tool",
+                    kind: nil,
+                    status: nil,
+                    rawInput: nil,
+                    rawOutput: nil,
+                    content: nil,
+                    locations: nil
+                )
+                if let title = native["title"]?.stringValue { state.title = title }
+                if let kind = native["kind"]?.stringValue { state.kind = kind }
+                if let status = native["status"]?.stringValue { state.status = status }
+                if let rawInput = native["rawInput"], rawInput != .null { state.rawInput = rawInput }
+                if let rawOutput = native["rawOutput"], rawOutput != .null { state.rawOutput = rawOutput }
+                if let content = native["content"], content != .null { state.content = content }
+                if let locations = native["locations"], locations != .null { state.locations = locations }
+                tools[id] = state
+            case "plan":
+                let entries = native["entries"]?.arrayValue ?? []
+                plans["default"] = nativePlan(
+                    id: "default",
+                    seq: event.seq,
+                    time: event.time,
+                    entries: entries
+                )
+            case "plan_update":
+                guard let plan = native["plan"], let id = plan["id"]?.stringValue else { return }
+                switch plan["type"]?.stringValue {
+                case "items":
+                    plans[id] = nativePlan(
+                        id: id,
+                        seq: plans[id]?.seq ?? event.seq,
+                        time: plans[id]?.time ?? event.time,
+                        entries: plan["entries"]?.arrayValue ?? []
+                    )
+                case "markdown":
+                    let value = plan["content"]?.stringValue ?? ""
+                    plans[id] = NativePlanState(
+                        id: id,
+                        seq: plans[id]?.seq ?? event.seq,
+                        time: plans[id]?.time ?? event.time,
+                        text: value,
+                        detail: "Harness plan",
+                        completed: false
+                    )
+                case "file":
+                    let uri = plan["uri"]?.stringValue ?? "Plan file"
+                    plans[id] = NativePlanState(
+                        id: id,
+                        seq: plans[id]?.seq ?? event.seq,
+                        time: plans[id]?.time ?? event.time,
+                        text: uri,
+                        detail: "Plan stored by the Harness",
+                        completed: false
+                    )
+                default:
+                    break
+                }
+            case "plan_removed":
+                if let id = native["id"]?.stringValue { plans.removeValue(forKey: id) }
+            default:
+                break
+            }
+            return
+        }
+
+        guard let method = native["method"]?.stringValue,
+              method.hasPrefix("item/"),
+              let item = native["params"]?["item"],
+              let itemType = item["type"]?.stringValue,
+              itemType != "agentMessage", itemType != "reasoning" else { return }
+        let id = item["id"]?.stringValue
+            ?? native["params"]?["itemId"]?.stringValue
+            ?? "codex-\(event.seq)"
+        var state = tools[id] ?? NativeToolState(
+            id: id,
+            seq: event.seq,
+            time: event.time,
+            title: codexItemTitle(itemType: itemType, item: item),
+            kind: itemType,
+            status: nil,
+            rawInput: nil,
+            rawOutput: nil,
+            content: nil,
+            locations: nil
+        )
+        state.title = codexItemTitle(itemType: itemType, item: item)
+        state.status = method == "item/completed" ? codexItemTerminalStatus(item) : "in_progress"
+        state.rawInput = item["command"] ?? item["query"] ?? item["input"] ?? state.rawInput
+        state.rawOutput = item["aggregatedOutput"] ?? item["output"] ?? item["result"] ?? state.rawOutput
+        state.content = item["changes"] ?? item["content"] ?? state.content
+        tools[id] = state
+    }
+
+    private static func nativePlan(id: String, seq: Int, time: Double, entries: [JSONValue]) -> NativePlanState {
+        let completedCount = entries.filter { $0["status"]?.stringValue == "completed" }.count
+        let text = entries.map { entry -> String in
+            let status = entry["status"]?.stringValue ?? "pending"
+            let marker = status == "completed" ? "x" : " "
+            return "- [\(marker)] \(entry["content"]?.stringValue ?? "Untitled step")"
+        }.joined(separator: "\n")
+        return NativePlanState(
+            id: id,
+            seq: seq,
+            time: time,
+            text: text,
+            detail: entries.isEmpty ? "Empty plan" : "\(completedCount) of \(entries.count) complete",
+            completed: !entries.isEmpty && completedCount == entries.count
+        )
+    }
+
+    private static func nativeToolItem(_ tool: NativeToolState) -> ConversationItem {
+        let output = nativeToolOutput(tool)
+        let detail = nativeToolDetail(tool)
+        let state: ActivityState
+        switch tool.status {
+        case "completed": state = .completed
+        case "failed": state = .failed
+        default: state = .running
+        }
+        return ConversationItem(
+            id: "harness-tool:\(tool.id)",
+            seq: tool.seq,
+            time: tool.time,
+            kind: .activity,
+            title: tool.title,
+            text: output,
+            detail: detail,
+            activityState: state,
+            card: tool.kind ?? "generic",
+            isStreaming: state == .running
+        )
+    }
+
+    private static func nativeToolDetail(_ tool: NativeToolState) -> String? {
+        if let locations = tool.locations?.arrayValue, !locations.isEmpty {
+            let paths = locations.compactMap { $0["path"]?.stringValue }
+            if !paths.isEmpty { return paths.joined(separator: ", ") }
+        }
+        guard let input = tool.rawInput else { return nil }
+        return concise(displayJSON(input))
+    }
+
+    private static func nativeToolOutput(_ tool: NativeToolState) -> String {
+        var parts: [String] = []
+        if let content = tool.content?.arrayValue {
+            for block in content {
+                switch block["type"]?.stringValue {
+                case "content":
+                    let payload = block["content"] ?? block
+                    if payload["type"]?.stringValue == "text", let text = payload["text"]?.stringValue {
+                        parts.append(text)
+                    } else if payload["type"]?.stringValue == "resource_link", let uri = payload["uri"]?.stringValue {
+                        parts.append(uri)
+                    }
+                case "diff":
+                    let path = block["path"]?.stringValue ?? "File change"
+                    let oldText = block["oldText"]?.stringValue ?? ""
+                    let newText = block["newText"]?.stringValue ?? ""
+                    parts.append("\(path)\n--- before\n\(oldText)\n+++ after\n\(newText)")
+                case "terminal":
+                    if let id = block["terminalId"]?.stringValue { parts.append("Terminal \(id)") }
+                default:
+                    break
+                }
+            }
+        }
+        if let raw = tool.rawOutput {
+            let value = displayJSON(raw)
+            if !value.isEmpty && !parts.contains(value) { parts.append(value) }
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
+    private static func codexItemTitle(itemType: String, item: JSONValue) -> String {
+        if let title = item["title"]?.stringValue, !title.isEmpty { return title }
+        if itemType == "commandExecution", let command = item["command"]?.stringValue {
+            return command.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "Command"
+        }
+        if itemType == "webSearch", let query = item["query"]?.stringValue { return "Search: \(query)" }
+        return humanizedToolName(itemType)
+    }
+
+    private static func codexItemTerminalStatus(_ item: JSONValue) -> String {
+        let status = item["status"]?.stringValue ?? "completed"
+        return ["failed", "declined", "error"].contains(status) ? "failed" : "completed"
+    }
+
+    private static func displayJSON(_ value: JSONValue) -> String {
+        if let string = value.stringValue { return string }
+        guard let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: pretty, encoding: .utf8) else { return "" }
+        return text
     }
 
     private static func concise(_ value: String) -> String? {

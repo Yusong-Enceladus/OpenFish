@@ -585,6 +585,7 @@ const PROTOCOL_JSON_SCHEMA = {
       properties: {
         ok: { const: true }, product: { const: 'opencodex' }, protocolVersion: { const: 'v2' },
         minimumClientProtocol: { type: 'string' }, host: { const: 'dsh' }, surface: { const: 'native' },
+        plainHost: { enum: ['127.0.0.1', '0.0.0.0'] }, secureRemotePort: { type: 'integer', minimum: 1, maximum: 65535 },
       },
     },
     capabilities: {
@@ -601,7 +602,7 @@ const PROTOCOL_JSON_SCHEMA = {
             providers: { type: 'array', items: { type: 'object' } },
           },
         },
-        pairing: { type: 'object', properties: { kind: { const: 'one-time-code' }, durable: { const: true } } },
+        pairing: { type: 'object', properties: { kind: { const: 'authenticated-tls-code' }, durable: { const: true } } },
         transports: { type: 'object' }, surfaces: { type: 'array', items: { enum: ['macos', 'iphone', 'cli', 'web'] } },
       },
     },
@@ -616,6 +617,8 @@ export interface OpenCodexNativeHandshake {
   minimumClientProtocol: string
   host: 'dsh'
   surface: 'native'
+  plainHost?: '127.0.0.1' | '0.0.0.0'
+  secureRemotePort?: number
 }
 export interface OpenCodexNativeCapabilities {
   product: 'opencodex'
@@ -626,7 +629,7 @@ export interface OpenCodexNativeCapabilities {
   features: { apiProxy: boolean; typert: boolean; remotePlugin: boolean; voicePlugin: boolean; localVoice: boolean; imageGenerationExtension: boolean }
   contracts: { sessions: boolean; workspaces: boolean; interactions: boolean; settings: boolean; providers: boolean; migration: boolean; sandbox: boolean }
   voice?: { contract: 'dsh.voice.v1'; transcriptAuthority: 'session.prompt'; providers: Array<{ id: string; name: string; platforms: Array<'macos' | 'iphone' | 'web'>; operations: Array<'speech-to-text' | 'text-to-speech'>; locality: 'device'; streaming: boolean; interruptible: boolean; quality: 'standard' | 'enhanced' | 'premium' }> }
-  pairing: { supported: boolean; kind: 'one-time-code'; durable: boolean }
+  pairing: { supported: boolean; kind: 'authenticated-tls-code'; durable: boolean }
   transports: { lan: boolean; tailscale: boolean; relay: boolean }
   surfaces: Array<'macos' | 'iphone' | 'cli' | 'web'>
 }
@@ -664,8 +667,8 @@ function runDshCaptured(args: string[]): { code: number; stdout: string; stderr:
   if (result.error !== undefined) throw result.error
   return {
     code: result.status ?? 1,
-    stdout: redactCommandOutput(typeof result.stdout === 'string' ? result.stdout : String(result.stdout ?? '')),
-    stderr: redactCommandOutput(typeof result.stderr === 'string' ? result.stderr : String(result.stderr ?? '')),
+    stdout: redactCommandOutput(result.stdout),
+    stderr: redactCommandOutput(result.stderr),
   }
 }
 
@@ -1180,17 +1183,17 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
       ], 'is not part of the DSH Host carrier; OpenCodex remote access uses one-time pairing and durable bearer identities')
     }
 
-    if (path === 'exec') return createTask(await acquirePrompt(args), opts)
+    if (path === 'exec') return await createTask(await acquirePrompt(args), opts)
     if (path === 'exec/resume' || path === 'resume') {
-      return resumeTask(args[0], await acquirePrompt(args.slice(1)), opts, false)
+      return await resumeTask(args[0], await acquirePrompt(args.slice(1)), opts, false)
     }
     if (path === 'exec/fork' || path === 'fork') {
-      return resumeTask(args[0], await acquirePrompt(args.slice(1)), opts, true)
+      return await resumeTask(args[0], await acquirePrompt(args.slice(1)), opts, true)
     }
     if (path === 'exec/review' || path === 'review') {
       const targets = [opts.uncommitted === true, stringOption(opts, 'base') !== undefined, stringOption(opts, 'commit') !== undefined]
       if (targets.filter(Boolean).length > 1) throw new Error('choose only one of --uncommitted, --base, or --commit')
-      return createTask(reviewPrompt(opts, await acquirePrompt(args)), opts)
+      return await createTask(reviewPrompt(opts, await acquirePrompt(args)), opts)
     }
 
     if (path === 'app') {
@@ -1212,7 +1215,7 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
     }
     if (path === 'delete') return unavailable(path, 'a permanent session-deletion persistence provider; use archive instead')
 
-    if (path === 'migrate-rollouts') return migrateRollouts(opts)
+    if (path === 'migrate-rollouts') return await migrateRollouts(opts)
 
     if (path === 'login') {
       if (opts.withApiKey === true || opts.withAccessToken === true) {
@@ -1436,11 +1439,11 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
     if (path === 'app-server/proxy') {
       const sock = stringOption(opts, 'sock')
       if (sock === undefined) throw new Error('missing --sock <SOCKET_PATH>')
-      return new Promise((resolveCode) => {
+      return await new Promise((resolveCode) => {
         const socket = createConnection(sock)
         socket.once('error', (error) => { process.stderr.write(`opencodex app-server proxy: ${errorText(error)}\n`); resolveCode(1) })
         socket.once('connect', () => { process.stdin.pipe(socket); socket.pipe(process.stdout) })
-        socket.once('close', () => resolveCode(0))
+        socket.once('close', () =>{  resolveCode(0) })
       })
     }
     if (path === 'app-server/version' || path === 'app-server/daemon/version') {
@@ -1499,10 +1502,10 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
       emitJson({ content: promptParts(await acquirePrompt(args), opts) })
       return 0
     }
-    if (path === 'debug/app-server/send-message-v2') return createTask(args.join(' '), opts)
+    if (path === 'debug/app-server/send-message-v2') return await createTask(args.join(' '), opts)
 
     if (path === 'completion') { process.stdout.write(completion(args[0])); return 0 }
-    if (path === 'sandbox') return runSandboxCommand(args, opts)
+    if (path === 'sandbox') return await runSandboxCommand(args, opts)
 
     if (path === 'cloud' || path.startsWith('cloud/') || path === 'apply') {
       return unavailable(path, 'a cloud task provider; local, LAN, Tailscale, and relay transports use DSH sessions')

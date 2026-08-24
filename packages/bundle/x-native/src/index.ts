@@ -10,12 +10,13 @@
  *   GET  /x-native/v2/methods       live `/api` method manifest for native codegen
  *   POST /x-native/v2/pair          register one native client
  *   GET  /x-native/v2/devices       list registered devices (Host-local)
+ *   POST /x-native/v2/self/revoke   revoke only the calling device
  *
  * The module uses the loader's `apply` shape (like `dsh-host-frontend-static`)
  * so routes register at load time instead of waiting for a service consumer.
  */
 
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -87,14 +88,17 @@ export const Config: z<XNativeConfig> = z.object({
 })
 
 const PairRequestSchema: z<PairRequest> = z.object({
-  surface: z.union([z.const('macos'), z.const('iphone'), z.const('cli')]),
-  deviceName: z.string().min(1).max(128),
+  surface: z.union([z.const('macos'), z.const('iphone'), z.const('cli')]).required(),
+  deviceName: z.string().min(1).max(128).required(),
   appVersion: z.string().max(64).default(''),
   code: z.string().max(32),
+  codeId: z.string().max(64),
+  clientNonce: z.string().max(86),
+  proof: z.string().max(64),
 })
 
 const RevokeDeviceRequestSchema: z<RevokeDeviceRequest> = z.object({
-  deviceId: z.string().min(1).max(128),
+  deviceId: z.string().min(1).max(128).required(),
 })
 
 /** Minimal Loader facade used for composition-level capability detection. */
@@ -210,6 +214,18 @@ export class XNative extends Service {
     })
     const trusted = (req: IncomingMessage): boolean => ctx.connection.security.isTrusted(req)
     const loopback = (req: IncomingMessage): boolean => ctx.connection.security.isLoopback(req)
+    const secure = (req: IncomingMessage): boolean => ctx.connection.security.isSecure(req)
+    const authenticated = (req: IncomingMessage): Promise<boolean> => ctx.connection.security.authenticate(req)
+    const rejectInsecureRemote = (req: IncomingMessage, res: ServerResponse): boolean => {
+      if (loopback(req) || secure(req)) return false
+      sendJson(res, 426, {
+        error: {
+          code: 'secure-transport-required',
+          message: 'remote OpenFish clients must use the Host TLS endpoint',
+        },
+      })
+      return true
+    }
     const routes: WebRoute[] = [
       {
         kind: 'exact',
@@ -223,19 +239,40 @@ export class XNative extends Service {
             sendJson(res, 403, { error: { code: 'untrusted-host', message: 'request authority is not trusted' } })
             return
           }
-          sendJson(res, 200, { ok: true, ...this.handshake() })
+          if (rejectInsecureRemote(req, res)) return
+          const handshake = this.handshake()
+          if (loopback(req)) {
+            sendJson(res, 200, { ok: true, ...handshake })
+          } else {
+            // Remote clients need protocol negotiation, never the Mac's PID or
+            // embedded bundle identity. Those process-management facts are
+            // deliberately loopback-only.
+            sendJson(res, 200, {
+              ok: true,
+              product: handshake.product,
+              protocolVersion: handshake.protocolVersion,
+              minimumClientProtocol: handshake.minimumClientProtocol,
+              host: handshake.host,
+              surface: handshake.surface,
+            })
+          }
         },
       },
       {
         kind: 'exact',
         path: `${NATIVE_ROUTE_PREFIX}/capabilities`,
-        handler: (req, res) => {
+        handler: async (req, res) => {
           if (req.method !== 'GET') {
             methodNotAllowed(res, 'GET')
             return
           }
           if (!trusted(req)) {
             sendJson(res, 403, { error: { code: 'untrusted-host', message: 'request authority is not trusted' } })
+            return
+          }
+          if (rejectInsecureRemote(req, res)) return
+          if (!loopback(req) && !await authenticated(req)) {
+            sendJson(res, 401, { error: { code: 'pairing-required', message: 'pair this device before reading Host capabilities' } })
             return
           }
           sendJson(res, 200, this.capabilities())
@@ -244,13 +281,18 @@ export class XNative extends Service {
       {
         kind: 'exact',
         path: `${NATIVE_ROUTE_PREFIX}/methods`,
-        handler: (req, res) => {
+        handler: async (req, res) => {
           if (req.method !== 'GET') {
             methodNotAllowed(res, 'GET')
             return
           }
           if (!trusted(req)) {
             sendJson(res, 403, { error: { code: 'untrusted-host', message: 'request authority is not trusted' } })
+            return
+          }
+          if (rejectInsecureRemote(req, res)) return
+          if (!loopback(req) && !await authenticated(req)) {
+            sendJson(res, 401, { error: { code: 'pairing-required', message: 'pair this device before reading Host methods' } })
             return
           }
           sendJson(res, 200, this.methods())
@@ -283,6 +325,7 @@ export class XNative extends Service {
             sendJson(res, 403, { error: { code: 'untrusted-host', message: 'request authority is not trusted' } })
             return
           }
+          if (rejectInsecureRemote(req, res)) return
           try {
             const body = await readJsonBody(req, MAX_PAIR_BODY_BYTES)
             const request = PairRequestSchema(body as never)
@@ -291,12 +334,24 @@ export class XNative extends Service {
               deviceName: request.deviceName,
               ...(request.appVersion === '' ? {} : { appVersion: request.appVersion }),
               ...(request.code === undefined ? {} : { code: request.code }),
+              ...(request.codeId === undefined ? {} : { codeId: request.codeId }),
+              ...(request.clientNonce === undefined ? {} : { clientNonce: request.clientNonce }),
+              ...(request.proof === undefined ? {} : { proof: request.proof }),
             }
             const result = loopback(req) && pairRequest.code === undefined
               ? await this.pair(pairRequest)
-              : pairRequest.code === undefined
-                ? (() => { throw new PairingError('invalid-code', 'a pairing code is required') })()
-                : await this.redeem(pairRequest as PairRequest & { code: string })
+              : loopback(req) && pairRequest.code !== undefined
+                ? await this.redeem(pairRequest as PairRequest & { code: string })
+                : pairRequest.codeId === undefined
+                    || pairRequest.clientNonce === undefined
+                    || pairRequest.proof === undefined
+                  ? (() => { throw new PairingError('invalid-code', 'an authenticated TLS pairing proof is required') })()
+                  : ctx.webServer.remoteCertificateFingerprint === undefined
+                    ? (() => { throw new PairingError('invalid-request', 'the Host TLS identity is unavailable') })()
+                    : await this.pairing.redeemTlsProof(
+                      pairRequest as PairRequest & { codeId: string; clientNonce: string; proof: string },
+                      ctx.webServer.remoteCertificateFingerprint,
+                    )
             sendJson(res, 201, result)
           } catch (error) {
             if (error instanceof PairingError) {
@@ -359,6 +414,36 @@ export class XNative extends Service {
           }
         },
       },
+      {
+        kind: 'exact',
+        path: `${NATIVE_ROUTE_PREFIX}/self/revoke`,
+        handler: async (req, res) => {
+          if (req.method !== 'POST') {
+            methodNotAllowed(res, 'POST')
+            return
+          }
+          if (!trusted(req)) {
+            sendJson(res, 403, { error: { code: 'untrusted-host', message: 'request authority is not trusted' } })
+            return
+          }
+          if (rejectInsecureRemote(req, res)) return
+          const token = bearerToken(req)
+          const device = token === undefined ? undefined : await this.pairing.verify(token)
+          if (device === undefined) {
+            sendJson(res, 401, { error: { code: 'pairing-required', message: 'this device credential is no longer valid' } })
+            return
+          }
+          try {
+            // A remote device may revoke exactly the registration proven by
+            // its own bearer token. The Host-local `/revoke` route remains the
+            // only endpoint that can name or remove a different device.
+            sendJson(res, 200, { revoked: await this.revoke(device.deviceId) })
+          } catch (error) {
+            this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+            sendJson(res, 500, { error: { code: 'internal', message: 'device revocation failed' } })
+          }
+        },
+      },
     ]
     ctx.effect(() => {
       const disposers = routes.map(route => ctx.webServer.register(route))
@@ -383,6 +468,10 @@ export class XNative extends Service {
       minimumClientProtocol: 'v2',
       host: 'dsh',
       surface: 'native',
+      plainHost: this.ctx.webServer.host,
+      ...(this.ctx.webServer.remotePort === undefined
+        ? {}
+        : { secureRemotePort: this.ctx.webServer.remotePort }),
       ...embeddedRuntimeId === undefined || embeddedRuntimeId === ''
         ? {}
         : { embeddedRuntimeId, embeddedProcessId: process.pid },
@@ -448,12 +537,12 @@ export class XNative extends Service {
       ...(voiceCapabilities === undefined ? {} : { voice: voiceCapabilities }),
       pairing: {
         supported: true,
-        kind: 'one-time-code',
+        kind: 'authenticated-tls-code',
         durable: true,
       },
       transports: {
-        lan: this.ctx.webServer.host === '0.0.0.0',
-        tailscale: this.ctx.webServer.host === '0.0.0.0',
+        lan: this.ctx.webServer.exposesSecureRemote,
+        tailscale: this.ctx.webServer.exposesSecureRemote,
         relay: mounted.has('dsh-remote-plugin'),
       },
       surfaces: ['macos', 'iphone', 'cli', 'web'],
@@ -487,7 +576,12 @@ export class XNative extends Service {
    * @returns A single-use code and its expiry time.
    */
   createPairingCode(): PairingCodeResponse {
-    return this.pairing.createPairingCode()
+    const code = this.pairing.createPairingCode()
+    const port = this.ctx.webServer.remotePort
+    if (port === undefined) return code
+    const localName = hostname().trim().replace(/\.local$/iu, '')
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(localName)) return code
+    return { ...code, hostURL: `https://${localName}.local:${String(port)}` }
   }
 
   /**

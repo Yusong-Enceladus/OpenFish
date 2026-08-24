@@ -1,5 +1,8 @@
 # Security policy
 
+For the complete trust-boundary, threat, control, and residual-risk analysis,
+see the [OpenFish threat model](docs/openfish-threat-model.md).
+
 OpenFish runs local coding agents that can read files and execute commands with
 the permissions approved by the user. Treat every Harness Pack, ACP Registry
 entry, plugin, MCP server, and project instruction file as executable or

@@ -19,6 +19,7 @@ import {
   sessionCancelRequestSchema,
   sessionAttachmentRequestSchema,
   sessionCreateRequestSchema,
+  sessionDiscardRequestSchema,
   sessionForkRequestSchema,
   sessionHistoryRequestSchema,
   sessionListRequestSchema,
@@ -37,6 +38,7 @@ import {
 } from '../api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema,
+  workspaceUnarchiveSessionRequestSchema,
   workspaceCreateRequestSchema,
   workspaceDeleteRequestSchema,
   workspaceInsertBeforeRequestSchema,
@@ -45,7 +47,10 @@ import {
   workspaceRenameRequestSchema,
 } from '../api/workspace.schema.ts'
 import { skillListRequestSchema } from '../api/skills.schema.ts'
-import { harnessListRequestSchema, harnessMutateRequestSchema, harnessRefreshRequestSchema } from '../api/harnesses.schema.ts'
+import {
+  harnessListRequestSchema, harnessManageRequestSchema, harnessMutateRequestSchema,
+  harnessRefreshRequestSchema, harnessResolveRequestSchema,
+} from '../api/harnesses.schema.ts'
 import {
   agentPresetCopyRequestSchema, agentPresetListRequestSchema, agentPresetOpenDocumentRequestSchema,
   agentPresetReadRequestSchema, agentPresetRemoveRequestSchema, agentPresetSelectRequestSchema,
@@ -92,11 +97,12 @@ type UnaryRoutes = {
 const UNARY_ROUTES: UnaryRoutes = {
   'session.list': { schema: sessionListRequestSchema, invoke: (api, r) => api.sessions.list(r) },
   'session.search': { schema: sessionSearchRequestSchema, invoke: (api, r, signal) => api.sessions.search(r, signal) },
-  'session.create': { schema: sessionCreateRequestSchema, invoke: (api, r) => api.sessions.create(r) },
+  'session.create': { schema: sessionCreateRequestSchema, invoke: (api, r, signal) => api.sessions.create(r, signal) },
+  'session.discard': { schema: sessionDiscardRequestSchema, invoke: (api, r) => api.sessions.discard(r) },
   'session.history': { schema: sessionHistoryRequestSchema, invoke: (api, r) => api.sessions.history(r) },
-  'session.models': { schema: sessionModelsRequestSchema, invoke: (api, r) => api.sessions.models(r) },
-  'session.selectModel': { schema: sessionSelectModelRequestSchema, invoke: (api, r) => api.sessions.selectModel(r) },
-  'session.setHarnessConfig': { schema: sessionSetHarnessConfigRequestSchema, invoke: (api, r) => api.sessions.setHarnessConfig(r) },
+  'session.models': { schema: sessionModelsRequestSchema, invoke: (api, r, signal) => api.sessions.models(r, signal) },
+  'session.selectModel': { schema: sessionSelectModelRequestSchema, invoke: (api, r, signal) => api.sessions.selectModel(r, signal) },
+  'session.setHarnessConfig': { schema: sessionSetHarnessConfigRequestSchema, invoke: (api, r, signal) => api.sessions.setHarnessConfig(r, signal) },
   'session.rename': { schema: sessionRenameRequestSchema, invoke: (api, r) => api.sessions.rename(r) },
   'session.fork': { schema: sessionForkRequestSchema, invoke: (api, r) => api.sessions.fork(r) },
   'session.prompt': { schema: sessionPromptRequestSchema, invoke: (api, r) => api.sessions.prompt(r) },
@@ -119,10 +125,13 @@ const UNARY_ROUTES: UnaryRoutes = {
   'workspace.insertBefore': { schema: workspaceInsertBeforeRequestSchema, invoke: (api, r) => api.workspace.insertBefore(r) },
   'workspace.insertSessionBefore': { schema: workspaceInsertSessionBeforeRequestSchema, invoke: (api, r) => api.workspace.insertSessionBefore(r) },
   'workspace.archiveSession': { schema: workspaceArchiveSessionRequestSchema, invoke: (api, r) => api.workspace.archiveSession(r) },
+  'workspace.unarchiveSession': { schema: workspaceUnarchiveSessionRequestSchema, invoke: (api, r) => api.workspace.unarchiveSession(r) },
   'skill.list': { schema: skillListRequestSchema, invoke: (api, r) => api.skills.list(r) },
   'harness.list': { schema: harnessListRequestSchema, invoke: (api, r) => api.harnesses.list(r) },
+  'harness.resolve': { schema: harnessResolveRequestSchema, invoke: (api, r) => api.harnesses.resolve(r) },
   'harness.refresh': { schema: harnessRefreshRequestSchema, invoke: (api, r) => api.harnesses.refresh(r) },
   'harness.mutate': { schema: harnessMutateRequestSchema, invoke: (api, r, signal) => api.harnesses.mutate(r, signal) },
+  'harness.manage': { schema: harnessManageRequestSchema, invoke: (api, r, signal) => api.harnesses.manage(r, signal) },
   'agentPreset.list': { schema: agentPresetListRequestSchema, invoke: (api, r) => api.agentPresets.list(r) },
   'agentPreset.select': { schema: agentPresetSelectRequestSchema, invoke: (api, r) => api.agentPresets.select(r) },
   'agentPreset.read': { schema: agentPresetReadRequestSchema, invoke: (api, r) => api.agentPresets.read(r) },
@@ -178,12 +187,9 @@ function fullResponse(narrow: RpcResponse<unknown>): Response {
  * Wire<> widening back to the exact payload (undefined-valued properties and
  * absent ones are indistinguishable after JSON transport).
  */
-// K appears once in the signature but ties the UNARY_ROUTES[K] row lookup to its own
-// schema/invoke pairing; a union parameter degrades the row to an uninvokable intersection.
 async function handleUnary<K extends keyof RpcMethodMap>(
-  api: ApiProxy, method: K, message: ClientRequest, signal: AbortSignal,
+  api: ApiProxy, method: K, route: UnaryRoutes[K], message: ClientRequest, signal: AbortSignal,
 ): Promise<Response> {
-  const route = UNARY_ROUTES[method]
   const payload = route.schema.safeParse(message.payload)
   if (!payload.success) {
     return errorResponse(message.rpcId, { code: 'bad-request', message: `invalid payload for ${method}`, details: { issues: payload.error.issues } })
@@ -319,7 +325,7 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
       if (message.method !== method) {
         return errorResponse(message.rpcId, { code: 'bad-request', message: `method "${message.method}" does not match path "${method}"`, details: { issues: [] } })
       }
-      return handleUnary(api, method, message, req.signal)
+      return handleUnary(api, method, UNARY_ROUTES[method], message, req.signal)
     },
   }
 }

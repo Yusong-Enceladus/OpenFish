@@ -11,7 +11,9 @@
  * and `dsh --profile web -h` prints the web app's help, not this one's.
  *
  * `web` is a hardcoded alias for `--profile web`; `plugin` manages a profile's
- * plugin dependencies by forwarding to pnpm.
+ * plugin dependencies by forwarding to pnpm. `driver` is the narrower,
+ * OpenFish-owned path for installing an exact Harness Driver Bundle without
+ * requiring a package manager on the user's PATH.
  * @module @deepseek-ai/dsh/args
  */
 
@@ -44,8 +46,21 @@ interface PluginInvocation {
   args: string[]
 }
 
+/** Manage exact, profile-local Harness Driver Bundles through bundled npm. */
+export interface DriverInvocation {
+  mode: 'driver'
+  profile: string
+  action: 'list' | 'install' | 'remove'
+  /** Exact registry/GitHub spec for install, or exact package name for remove. */
+  target?: string
+  /** Required expected package identity for a GitHub commit spec. */
+  packageName?: string
+  /** Explicit opt-in to lifecycle scripts from the selected third-party package. */
+  allowScripts: boolean
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | DriverInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -69,6 +84,8 @@ Examples:
   dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
   dsh --profile web --help                   the web app's own flags and help
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
+  dsh driver --profile x list                list custom OpenFish Driver Bundles
+  dsh driver --profile x install <exact>     stage, validate, and install one exact Driver Bundle
 `
 
 /**
@@ -178,6 +195,44 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       if (options.profile === '') program.error('error: --profile needs a name')
       if (args.length === 0) program.error('error: plugin needs pnpm arguments to forward (e.g. add <package>)')
       resolved = { mode: 'plugin', profile: options.profile, args }
+    })
+
+  const driver = program.command('driver').description('manage exact OpenFish Harness Driver Bundles with the bundled runtime')
+  driver
+    .requiredOption('--profile <name>', 'the profile whose Driver Bundles to manage (OpenFish uses x)')
+    .option('--package <name>', 'expected package name for an exact github:<owner>/<repo>#<commit> install')
+    .option('--allow-scripts', 'allow the selected third-party package to run npm lifecycle scripts', false)
+    .argument('<action>', 'list, install, or remove')
+    .argument('[target]', 'exact package spec for install, or package name for remove')
+    .action((action: string, target: string | undefined, options: {
+      profile: string
+      package?: string
+      allowScripts?: boolean
+    }) => {
+      rejectParentOptions('driver')
+      if (options.profile === '') driver.error('error: --profile needs a name')
+      if (action !== 'list' && action !== 'install' && action !== 'remove') {
+        driver.error('error: driver action must be list, install, or remove')
+      }
+      const driverAction = action as 'list' | 'install' | 'remove'
+      if (driverAction === 'list' && target !== undefined) driver.error('error: driver list takes no target')
+      if (driverAction !== 'list' && (target === undefined || target === '')) {
+        driver.error(`error: driver ${driverAction} needs a target`)
+      }
+      if (driverAction !== 'install' && options.package !== undefined) {
+        driver.error('error: --package is valid only for driver install')
+      }
+      if (driverAction !== 'install' && options.allowScripts === true) {
+        driver.error('error: --allow-scripts is valid only for driver install')
+      }
+      resolved = {
+        mode: 'driver',
+        profile: options.profile,
+        action: driverAction,
+        ...(target === undefined ? {} : { target }),
+        ...(options.package === undefined ? {} : { packageName: options.package }),
+        allowScripts: options.allowScripts === true,
+      }
     })
 
   try {

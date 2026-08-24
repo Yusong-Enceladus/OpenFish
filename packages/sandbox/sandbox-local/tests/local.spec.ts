@@ -23,6 +23,19 @@ import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from '../s
 
 const RO: SandboxPolicy = { mode: 'read-only', workspaceRoot: '/ws' }
 const WW: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/ws' }
+const ISOLATED: SandboxPolicy = {
+  mode: 'workspace-write',
+  workspaceRoot: '/ws',
+  runtimeWritableRoots: ['/runtime'],
+  platformTemporaryWrites: false,
+  isolation: {
+    protectedReadRoots: ['/Users', '/private/tmp'],
+    readableRoots: ['/ws', '/runtime', '/trusted'],
+    denyNetworkInbound: true,
+    denyHostProcessControl: true,
+    denyHostInterprocessCommunication: true,
+  },
+}
 
 async function setup(config: Config = {}, internals: LocalSandboxProvider['internals'] = {}) {
   const ctx = new Context()
@@ -104,6 +117,18 @@ describe('profile dialects', () => {
     expect(profile).toContain(grant)
     expect(profile.split(grant)).toHaveLength(2)
   })
+
+  it('seatbelt resident isolation restores only explicit reads and private writes', () => {
+    const profile = seatbeltProfileArgs(ISOLATED)[1] as string
+    expect(profile).toContain('(deny file-read* (subpath "/Users") (subpath "/private/tmp"))')
+    expect(profile).toContain('(allow file-read* (subpath "/ws") (subpath "/runtime") (subpath "/trusted"))')
+    expect(profile).toContain('(allow file-write* (subpath "/runtime") (subpath "/ws"))')
+    expect(profile).not.toContain('(subpath "/tmp")')
+    expect(profile).toContain('(deny network-inbound)')
+    expect(profile).toContain('(deny process-info*)')
+    expect(profile).toContain('(deny appleevent-send)')
+    expect(profile).toContain('(deny mach-lookup)')
+  })
 })
 
 describe('runnerCommand config', () => {
@@ -127,6 +152,14 @@ describe('runnerCommand config', () => {
     expect(probeBwrap).not.toHaveBeenCalled()
     expect(probeLandlock).not.toHaveBeenCalled()
     expect(probeSeatbelt).not.toHaveBeenCalled()
+  })
+
+  it('refuses resident isolation through an untyped custom runner', async () => {
+    const { sandbox } = await setup({
+      runnerCommand: ['fake-runner'],
+      runnerFailureSignatures: ['profile rejected'],
+    })
+    expect(() => sandbox.confine(['true'], ISOLATED)).toThrow('does not declare the resident-process isolation contract')
   })
 
   it('an EMPTY runnerCommand means unconfigured: the platform chain still gates the wrap', async () => {

@@ -7,6 +7,9 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OPENFISH_REPO_ROOT="$ROOT_DIR"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/script/openfish_build_paths.sh"
 APP_BUNDLE="$1"
 case "$APP_BUNDLE" in
   /*/OpenFish.app) ;;
@@ -23,8 +26,8 @@ case "$TARGET_ARCH" in
   *) echo "package_openfish_host: unsupported target architecture $TARGET_ARCH" >&2; exit 1 ;;
 esac
 
-CACHE_DIR="$ROOT_DIR/.build/openfish-runtime-cache"
-STAGE_DIR="$ROOT_DIR/.build/openfish-host-runtime"
+CACHE_DIR="$OPENFISH_CACHE_ROOT/openfish-runtime"
+STAGE_DIR="$OPENFISH_BUILD_ROOT/openfish-host-runtime"
 RUNTIME_DIR="$APP_BUNDLE/Contents/Resources/OpenFishHostRuntime"
 ARCHIVE="node-v${NODE_VERSION}-${NODE_PLATFORM}.tar.xz"
 ARCHIVE_PATH="$CACHE_DIR/$ARCHIVE"

@@ -10,26 +10,31 @@ This release is for developers and early adopters who can inspect an agent's act
 - Per-install default Harness selection and per-task Harness selection.
 - No Project tasks stored in a dedicated OpenFish location rather than Desktop.
 - Protocol-driven ACP model, reasoning, mode, and configuration controls.
-- Progressive Lens Harness views on Mac and iPhone: a plain-language Simple view, an evidence-backed Architecture Manifest, a runtime-observation view, and a macOS Manifest Editor for custom Pack creation, graph editing, non-billed preflight, import, and credential-free export.
+- Progressive Lens Harness views on Mac and iPhone: a plain-language Simple view, an evidence-backed Architecture Manifest, a runtime-observation view, and a macOS Manifest Editor for custom Pack creation, graph editing, prompt-free live preflight, import, and credential-free export. A preflight may still create provider-owned state or incur provider-specific setup cost.
 - A generated community Pack catalog whose pull-request publishing path does not require an OpenFish app release.
+- Exact self-installing Driver Bundle descriptors for public non-ACP Packs. After explicit local code consent, the Mac app uses its packaged Node/npm runtime to stage and structurally admit the exact Bundle, restart only its verified embedded Host, negotiate Driver API v1, and continue setup; the iPhone hands this operation to the paired Mac.
 - Session pinning to the Harness Pack version that created the task.
-- Native iPhone pairing, task projection, approvals, queueing, and voice input.
-- Release gates for DSH, Codex ACP, Pi-compatible ACP behavior, packaged Host lifecycle, privacy, macOS builds, and an iOS simulator build.
+- Native iPhone pairing, authenticated live reconnection, task projection, approvals, queueing, and voice input.
+- Release-gate implementations for DSH, the official Codex app-server protocol, OMP's ACP behavior, a fresh synthetic ACP Pack, packaged Host lifecycle, privacy, macOS builds, and an iOS Simulator build. A real iPhone checklist is separate manual release evidence; this source tree does not pretend a Simulator proves the device path.
 
 ## Known limits
 
 - macOS 14 or newer and iOS 17 or newer are the supported baselines.
 - Source builds are unsigned. Tagged Mac artifacts are signed and notarized only when the repository owner configures Apple release credentials.
 - Installing the iPhone app on a physical device requires the user's own Apple signing setup until a public TestFlight or App Store channel exists.
+- A tag is not accepted merely because the source checks compile. Pairing, reconnect, approval, question, continuity, microphone allow/deny, repeated voice start/stop, foreground/background recovery, and remote revoke must be recorded against the final Mac build and a physical iPhone.
 - The independent OpenFish bundle identifiers are `app.openfish.mac` and `app.openfish.ios` by default and can be overridden by release owners. The Mac app migrates pre-alpha preferences and remote credentials from the former DSH development id; an iPhone installed under the former id must be paired again.
 - Pairing is direct over a trusted LAN or Tailscale. OpenFish does not operate a relay service and the Host port must not be exposed to the public internet.
 - A task cannot change Harnesses after it starts. It keeps the exact Pack version and auth reference chosen at creation time.
 - OpenFish discovers ACP configuration from the live Harness. A Harness that does not publish a model or reasoning option cannot be made configurable by guessing provider-specific flags.
 - Authentication and usage charges belong to the selected Harness/provider. OpenFish must show the auth method before launch, but it never grants model quota and never silently converts one provider's subscription into another.
-- ACP Registry inclusion is discovery metadata, not an OpenFish security audit or quality endorsement. Non-ACP Harnesses still require a Driver plugin.
+- Built-in Codex and OMP Packs use exact versions tested with this OpenFish release. A public registry moving its `latest` tag never rewrites that trusted contract in place; a later OpenFish release exposes an explicit Pack update while retaining the installed version for rollback and pinned tasks.
+- For Codex, OpenFish asks the live official app-server for the current authentication route and plan type and discards email and credential material. A task fork is offered only when the selected Driver exposes a real remote branch; Codex maps it to official `thread/fork`, while generic ACP currently leaves it disabled.
+- ACP Registry or OpenFish community inclusion is discovery metadata, not a security audit or quality endorsement. A non-ACP Harness must publish a pinned Driver Bundle and still passes live Driver conformance before it becomes runnable; OpenFish never derives executable code from only a protocol or Harness name.
 - Community publishing currently uses a reviewed GitHub pull request; OpenFish does not yet operate an in-app account, ranking system, or one-click marketplace backend.
-- Only `acpSessionOptions` on editable composable nodes has generic execution semantics. Other node config is descriptive unless that Pack's Driver implements it.
-- Unknown Harness internals remain one opaque boundary. Rich Architecture views require a declared process boundary, at least three connected runtime responsibilities, and evidence for every component; the UI does not infer private internals.
+- ACP Packs use live `acpSessionOptions` discovered from the running Harness. Other typed node configuration has execution semantics only when that Pack's Driver validates and consumes it; the editor labels unsupported fields instead of pretending they run.
+- ACP currently defines no permanent remote-session deletion. Abandoning a prepared generic ACP task stops the managed process and removes OpenFish's local blank draft, but the upstream Harness may retain its own blank-session record. The Codex Driver uses official `thread/delete` for the equivalent blank thread.
+- Unknown Harness internals remain one opaque boundary. Rich Architecture views require a declared process boundary, a connected account of every responsibility actually shown, evidence for every component, and meaningful edge labels. There is no cosmetic node minimum, and the UI does not infer private internals.
 - Older tasks can expose upstream compatibility breaks when their pinned runtime is no longer installable on a newer OS. Export important work.
 
 ## Five-minute acceptance check

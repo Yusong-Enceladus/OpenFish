@@ -14,20 +14,35 @@
 		4B0F91BF5B8EB6B9E76FF80A /* MobileLiveConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495A3350F8C35F26EA8E339E /* MobileLiveConnection.swift */; };
 		76A2169C9D7099B13741E441 /* MobileNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8D1B106DF76E115D674007 /* MobileNotificationService.swift */; };
 		890C1BED0E9960002E8FAFF5 /* MobileOpenCodexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9962A3D22CAC237FE5EA823C /* MobileOpenCodexStore.swift */; };
+		8AFCE3564D019D7A27E87075 /* openfish-demo-harnesses.json in Resources */ = {isa = PBXBuildFile; fileRef = 82EFEB8990F2EC02077203F4 /* openfish-demo-harnesses.json */; };
 		8D004238131AAEF2C0A97DC9 /* MobileLocalVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62BAD540575465D6AF195A5F /* MobileLocalVoice.swift */; };
+		CD580B53239CA4358DA9D13C /* OpenFishVoiceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F2AB66E49AA6AC617DB793 /* OpenFishVoiceUITests.swift */; };
 		D19EB6BE676AE15460FBCF3D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D30A92CE338D316C1DAD03B5 /* Assets.xcassets */; };
 		E2E630DA26FCF22CA3C8619F /* XIOSContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A8403E7ECF239CDCAE0968F /* XIOSContentView.swift */; };
 		E97CA62A649DC8F60B5D37B4 /* MobileConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78CBD24F6FFCDA3AC6BFAE0C /* MobileConnectionProfile.swift */; };
 		FDE7777498C51171439B2EBB /* OpenCodexIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967FEB2BE2DE34D0AB4FD583 /* OpenCodexIOSApp.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		F74BC9EF5C8E846F4E97F8B0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBC58BCF34F16C2EACC89EEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AEE5B10365FD9DA740356987;
+			remoteInfo = OpenFishIOS;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		09A4071488B34214FCFB7C6E /* OpenFishIOSUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = OpenFishIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E8D1B106DF76E115D674007 /* MobileNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileNotificationService.swift; sourceTree = "<group>"; };
 		495A3350F8C35F26EA8E339E /* MobileLiveConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLiveConnection.swift; sourceTree = "<group>"; };
 		53807439E7F38DE872CE9B33 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		62BAD540575465D6AF195A5F /* MobileLocalVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLocalVoice.swift; sourceTree = "<group>"; };
 		6A8403E7ECF239CDCAE0968F /* XIOSContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XIOSContentView.swift; sourceTree = "<group>"; };
 		78CBD24F6FFCDA3AC6BFAE0C /* MobileConnectionProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConnectionProfile.swift; sourceTree = "<group>"; };
+		82EFEB8990F2EC02077203F4 /* openfish-demo-harnesses.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "openfish-demo-harnesses.json"; sourceTree = "<group>"; };
+		83F2AB66E49AA6AC617DB793 /* OpenFishVoiceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenFishVoiceUITests.swift; sourceTree = "<group>"; };
 		8DC585ECE567F8D665383A8D /* MobileProjectionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileProjectionCache.swift; sourceTree = "<group>"; };
 		91D5A3870621AE19AC5D18F0 /* MobileConversationProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConversationProjection.swift; sourceTree = "<group>"; };
 		937E9DC3BA0736177BB3F676 /* OpenFishIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenFishIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -71,24 +86,43 @@
 				8DC585ECE567F8D665383A8D /* MobileProjectionCache.swift */,
 				E92E4829C6CEE398972DBBE0 /* XIOSClient.swift */,
 				6A8403E7ECF239CDCAE0968F /* XIOSContentView.swift */,
+				CB75073EC1FB6FBD45D25DEB /* Resources */,
 			);
 			name = XiOS;
 			path = Sources/XiOS;
+			sourceTree = "<group>";
+		};
+		B56E7C96B77B3058289FDBF9 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				83F2AB66E49AA6AC617DB793 /* OpenFishVoiceUITests.swift */,
+			);
+			path = UITests;
 			sourceTree = "<group>";
 		};
 		BA8CE992E6F857697A0F8412 = {
 			isa = PBXGroup;
 			children = (
 				5251F993850E92BF766C5500 /* App */,
+				B56E7C96B77B3058289FDBF9 /* UITests */,
 				8D1AAB06E6BF4DF0B2FE54FD /* XiOS */,
 				D6C443A2613D819C0E05A594 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		CB75073EC1FB6FBD45D25DEB /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				82EFEB8990F2EC02077203F4 /* openfish-demo-harnesses.json */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		D6C443A2613D819C0E05A594 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				937E9DC3BA0736177BB3F676 /* OpenFishIOS.app */,
+				09A4071488B34214FCFB7C6E /* OpenFishIOSUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -116,6 +150,24 @@
 			productReference = 937E9DC3BA0736177BB3F676 /* OpenFishIOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EAE8D017CCC51C48F92F8A03 /* OpenFishIOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CF6758525527BFFED1F8D3FB /* Build configuration list for PBXNativeTarget "OpenFishIOSUITests" */;
+			buildPhases = (
+				88A7C0B36EAC41117B600B73 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EB1BE7B4CD452076DF496935 /* PBXTargetDependency */,
+			);
+			name = OpenFishIOSUITests;
+			packageProductDependencies = (
+			);
+			productName = OpenFishIOSUITests;
+			productReference = 09A4071488B34214FCFB7C6E /* OpenFishIOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -125,6 +177,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					EAE8D017CCC51C48F92F8A03 = {
+						TestTargetID = AEE5B10365FD9DA740356987;
+					};
 				};
 			};
 			buildConfigurationList = 733651BEBD7480697DF69CC7 /* Build configuration list for PBXProject "OpenCodexIOS" */;
@@ -145,6 +200,7 @@
 			projectRoot = "";
 			targets = (
 				AEE5B10365FD9DA740356987 /* OpenFishIOS */,
+				EAE8D017CCC51C48F92F8A03 /* OpenFishIOSUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -155,12 +211,21 @@
 			buildActionMask = 2147483647;
 			files = (
 				D19EB6BE676AE15460FBCF3D /* Assets.xcassets in Resources */,
+				8AFCE3564D019D7A27E87075 /* openfish-demo-harnesses.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		88A7C0B36EAC41117B600B73 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD580B53239CA4358DA9D13C /* OpenFishVoiceUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F8A8E3B2F96FECD5496003CD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -179,6 +244,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EB1BE7B4CD452076DF496935 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AEE5B10365FD9DA740356987 /* OpenFishIOS */;
+			targetProxy = F74BC9EF5C8E846F4E97F8B0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		654C362665D4FAB8C0DF6662 /* Release */ = {
@@ -200,6 +273,22 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
+		};
+		80B669C6F99D5100ED7924DE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OpenFishIOS;
+			};
+			name = Debug;
 		};
 		897A48EAA75199E74BF8B8A7 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -284,6 +373,22 @@
 			};
 			name = Debug;
 		};
+		AD58572580C1D648F53549AB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OpenFishIOS;
+			};
+			name = Release;
+		};
 		C9539A7CAB826DF7DF2E5F1B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -357,6 +462,15 @@
 			buildConfigurations = (
 				897A48EAA75199E74BF8B8A7 /* Debug */,
 				654C362665D4FAB8C0DF6662 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CF6758525527BFFED1F8D3FB /* Build configuration list for PBXNativeTarget "OpenFishIOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				80B669C6F99D5100ED7924DE /* Debug */,
+				AD58572580C1D648F53549AB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

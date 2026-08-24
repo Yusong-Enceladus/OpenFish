@@ -12,7 +12,7 @@ import {
   type ServerResponse as RpcServerResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { bridge, type FetchHandler } from './http-bridge.ts'
-import { isTrustedApiRequest } from './api-request-trust.ts'
+import { isLoopbackApiRequest, isSecureApiRequest, isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type {
   ConnectionRpcEndpointMatcher,
@@ -72,7 +72,8 @@ export class HostConnectionService extends Service implements HostConnectionHand
     const hasAuthenticator = (): boolean => this.authenticator !== undefined
     return {
       isTrusted: request => isTrustedApiRequest(request, this.trustedHosts),
-      isLoopback: request => isTrustedApiRequest(request, []),
+      isLoopback: request => isLoopbackApiRequest(request),
+      isSecure: request => isSecureApiRequest(request),
       authenticate: request => this.authenticate(request),
       registerAuthenticator: authenticator => owner.effect(() => {
         if (this.authenticator !== undefined) {
@@ -109,16 +110,19 @@ export class HostConnectionService extends Service implements HostConnectionHand
     fallback: FetchHandler,
   ): FetchHandler {
     return {
-      fetch: (request) => {
+      fetch: (request, transport) => {
         const endpoint = endpointFromPath(channel, new URL(request.url).pathname)
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
-          return fallback.fetch(request)
+          return fallback.fetch(request, transport)
         }
-        if (interceptor.options.authority === 'loopback' && !isTrustedApiRequest(request, [])) {
+        if (interceptor.options.authority === 'loopback' && !isLoopbackApiRequest({
+          headers: request.headers,
+          ...(transport?.remoteAddress === undefined ? {} : { remoteAddress: transport.remoteAddress }),
+        })) {
           return Promise.resolve(new Response('forbidden', { status: 403 }))
         }
-        return interceptor.fetchHandler.fetch(request)
+        return interceptor.fetchHandler.fetch(request, transport)
       },
     }
   }

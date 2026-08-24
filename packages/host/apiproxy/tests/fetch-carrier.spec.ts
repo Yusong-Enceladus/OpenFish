@@ -44,6 +44,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async create(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { sessionId: 's-new' as never, harnessId: 'dsh' } } }
       },
+      async discard(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { discarded: true as const } } }
+      },
       async history(request) {
         if (request.payload.sessionId === ('with-projections' as never)) {
           return {
@@ -194,6 +197,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async archiveSession(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [request.payload.sessionId] } } }
       },
+      async unarchiveSession(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [] } } }
+      },
     },
     agentPresets: {
       list(request: RpcRequest<{}>) {
@@ -230,10 +236,16 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async list(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
       },
+      async resolve(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal' as const, message: 'fixture', details: {} } } }
+      },
       async refresh(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
       },
       async mutate(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async manage(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
       },
     },

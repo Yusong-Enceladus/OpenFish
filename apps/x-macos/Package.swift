@@ -10,7 +10,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "XMac",
-            path: "Sources/XMac"
+            path: "Sources/XMac",
+            resources: [.process("Resources")]
         ),
     ]
 )

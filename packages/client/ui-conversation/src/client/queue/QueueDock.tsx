@@ -3,10 +3,9 @@
 //
 // The 'conversation.input.dock' SlotMap declaration lives in
 // ../contract/slots.ts beside the other input-region slots.
-import type { Context } from '@deepseek-ai/cordis'
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronUpOutline14, IconCloseOutline16,
   IconEditOutline16, IconQueueOutline14, IconSendOutline14, IconTrashOutline16, Tooltip,
@@ -223,7 +222,7 @@ export const queueDockEntry = {
    * Register the queue strip as the terminal input-dock entry (order 20).
    * @param ctx - registrant context (disposal rides ctx.effect inside slots.register).
    */
-  apply(ctx: Context): void {
+  apply(ctx: ClientContext): void {
     ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
       name: 'conversation.input.dock',
       id: 'queue',

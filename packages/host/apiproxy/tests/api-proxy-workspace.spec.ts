@@ -75,21 +75,27 @@ async function harness(
   const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', storageDomain)
   ctx.provide('storageDomain', storageDomain)
-  ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+  ctx.provide('sessionPersistence', {
+    list: () => Promise.resolve([]),
+    delete: () => Promise.resolve(),
+  } as never)
   await ctx.plugin(WorkspaceRegistry)
 
   const factory: AgentFactory = {
     async createAgent(_ownerCtx, options) {
-      const session = ctx.sessions.create(
+      const session = ctx.sessions.prepare(
         options.sessionId,
         options.meta === undefined ? {} : { meta: options.meta },
       )
+      const detachSession = ctx.sessions.enter(session)
+      ctx.sessions.announce(session)
       const agent = stubAgent(session)
       const unregister = ctx.agents.register(agent)
       return {
         agent,
         dispose: () => {
           unregister()
+          detachSession()
           return Promise.resolve()
         },
       }
@@ -382,6 +388,65 @@ describe('session creation and Workspace membership', () => {
     }
   })
 
+  it('does not create a No Project directory before the required Harness identity resolves', async () => {
+    const managedHome = realpathSync.native(mkdtempSync(join(tmpdir(), 'openfish-no-project-reject-')))
+    vi.stubEnv('DSH_HOME', managedHome)
+    try {
+      const { api, ctx } = await harness()
+      ctx.provide('harnesses', { defaultId: () => Promise.resolve(undefined) } as never)
+      const sessionId = SessionId('session-no-project-rejected')
+      expect((await api.sessions.create(request({ noProject: true, sessionId }))).result).toMatchObject({
+        ok: false, error: { code: 'harness-selection-required' },
+      })
+      expect(existsSync(join(managedHome, 'openfish', 'no-project', sessionId))).toBe(false)
+      expect(ctx.agents.get(sessionId)).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('discards an untouched No Project draft and its private directory', async () => {
+    const managedHome = realpathSync.native(mkdtempSync(join(tmpdir(), 'openfish-no-project-discard-')))
+    vi.stubEnv('DSH_HOME', managedHome)
+    try {
+      const { api, ctx } = await harness()
+      const sessionId = SessionId('session-no-project-discarded')
+      expectOk(await api.sessions.create(request({ noProject: true, sessionId })))
+      const cwd = join(managedHome, 'openfish', 'no-project', sessionId)
+      expect(existsSync(cwd)).toBe(true)
+      expectOk(await api.sessions.discard(request({ sessionId })))
+      expect(existsSync(cwd)).toBe(false)
+      expect(ctx.agents.get(sessionId)).toBeUndefined()
+      expect(ctx.sessions.get(sessionId)).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('never treats a started No Project conversation as a disposable draft', async () => {
+    const managedHome = realpathSync.native(mkdtempSync(join(tmpdir(), 'openfish-no-project-started-')))
+    vi.stubEnv('DSH_HOME', managedHome)
+    try {
+      const { api, ctx } = await harness()
+      const sessionId = SessionId('session-no-project-started')
+      expectOk(await api.sessions.create(request({ noProject: true, sessionId })))
+      const cwd = join(managedHome, 'openfish', 'no-project', sessionId)
+      const session = ctx.sessions.get(sessionId)
+      if (session === undefined) throw new Error('prepared session missing')
+      session.append('turn/start', { turn: 0 })
+
+      expect((await api.sessions.discard(request({ sessionId }))).result).toMatchObject({
+        ok: false,
+        error: { code: 'agent-busy', details: { reason: 'only an idle conversation-not-started draft can be discarded' } },
+      })
+      expect(existsSync(cwd)).toBe(true)
+      expect(ctx.agents.get(sessionId)).toBeDefined()
+      expect(ctx.sessions.get(sessionId)).toBeDefined()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace
@@ -409,7 +474,7 @@ describe('session creation and Workspace membership', () => {
     expect(missing.result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
   })
 
-  it('retains a published session when attachment fails and repairs it on retry', async () => {
+  it('removes a blank session when workspace attachment fails and recreates it on retry', async () => {
     const { api, ctx, root } = await harness()
     const created = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace
     const workspace = ctx.workspaceRegistry.list()[0]
@@ -422,7 +487,8 @@ describe('session creation and Workspace membership', () => {
       ok: false,
       error: { code: 'workspace-attach-failed', details: { sessionId, workspaceId: created.workspaceId } },
     })
-    expect(ctx.agents.get(sessionId)).toBeDefined()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(ctx.sessions.get(sessionId)).toBeUndefined()
 
     expectOk(await api.sessions.create(request({ workspaceId: created.workspaceId, sessionId })))
     expect(expectOk(await api.workspace.list(request({}))).items[0]?.sessionIds).toEqual([sessionId])

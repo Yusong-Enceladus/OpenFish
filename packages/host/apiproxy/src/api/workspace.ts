@@ -106,4 +106,7 @@ export interface WorkspaceApi {
    */
   archiveSession(request: RpcRequest<{ sessionId: SessionId }>):
   Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
+
+  /** Removes one session from the global archive set and restores its grouping. */
+  unarchiveSession(request: RpcRequest<{ sessionId: SessionId }>): Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
 }

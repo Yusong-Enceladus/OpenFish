@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-20-openfish-harness-pack-runtime.md
-2026-08-20-openfish-harness-pack-runtime.md: d3d39d01acf8d9081e16a2ee4a240cd7e3b1618e
-2026-08-20-openfish-harness-pack-runtime.zh.md: 11f280f7e0195e59f8d62ec743db0f07d2902f28
+2026-08-20-openfish-harness-pack-runtime.md: 6be010462026d91a344f2222ed50be607132b0be
+2026-08-20-openfish-harness-pack-runtime.zh.md: 5f1444ec7202d2efdb4fad8ad538ee10572ec9ac

@@ -188,6 +188,10 @@ struct SessionProjectionsBlock: Codable, Equatable, Sendable {
 struct SessionSummary: Codable, Identifiable, Equatable, Sendable {
     let sessionId: String
     let harnessId: String?
+    var harnessVersion: String? = nil
+    var harnessAuthMethod: String? = nil
+    var workspaceMode: String? = nil
+    var harnessCapabilities: [String]? = nil
     var updatedAt: Double
     var running: Bool
     var blank: Bool
@@ -297,6 +301,8 @@ struct CatalogModel: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let description: String?
+    let providerId: String?
+    let providerName: String?
     let reasoning: ModelReasoning?
 }
 
@@ -335,6 +341,7 @@ struct SessionModels: Decodable, Equatable, Sendable {
     let routable: Bool
     let groups: [ModelProviderGroup]
     let failures: [ModelCatalogFailure]
+    let account: HarnessCatalogEntry.AccountDescriptor?
     let harnessOptions: [HarnessConfigOption]?
 
     init(
@@ -342,12 +349,14 @@ struct SessionModels: Decodable, Equatable, Sendable {
         routable: Bool,
         groups: [ModelProviderGroup],
         failures: [ModelCatalogFailure],
+        account: HarnessCatalogEntry.AccountDescriptor? = nil,
         harnessOptions: [HarnessConfigOption]? = nil
     ) {
         self.current = current
         self.routable = routable
         self.groups = groups
         self.failures = failures
+        self.account = account
         self.harnessOptions = harnessOptions
     }
 }
@@ -477,10 +486,25 @@ struct HarnessRuntimeProjection: Codable, Equatable, Sendable {
     struct Node: Codable, Equatable, Sendable {
         let status: String
         let activity: String
+        var signal: String? = nil
         let seq: Int
         let time: Double
     }
+    struct Edge: Codable, Equatable, Sendable {
+        let from: String
+        let to: String
+        var fromPort: String? = nil
+        var toPort: String? = nil
+        let status: String
+        let activity: String
+        let signal: String
+        let seq: Int
+        let time: Double
+    }
+    var harnessId: String? = nil
+    var version: String? = nil
     let nodes: [String: Node]
+    var edges: [String: Edge]? = nil
 }
 
 struct SkillEntry: Decodable, Identifiable, Equatable, Sendable {
@@ -513,6 +537,45 @@ struct HarnessGraphEvidence: Codable, Identifiable, Equatable, Sendable {
     var id: String { "\(kind):\(source):\(version ?? "")" }
 }
 
+struct HarnessGraphPort: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let direction: String
+    let dataType: String
+    var required: Bool? = nil
+}
+
+struct HarnessConfigChoice: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    var description: String? = nil
+}
+
+struct HarnessConfigBinding: Codable, Equatable, Sendable {
+    let kind: String
+    let target: String
+}
+
+struct HarnessConfigField: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    var description: String? = nil
+    let type: String
+    let required: Bool
+    var choices: [HarnessConfigChoice]? = nil
+    let binding: HarnessConfigBinding
+}
+
+struct HarnessNodeConfigSchema: Codable, Equatable, Sendable {
+    let version: Int
+    let fields: [HarnessConfigField]
+}
+
+struct HarnessGraphPosition: Codable, Equatable, Sendable {
+    let x: Double
+    let y: Double
+}
+
 struct HarnessGraphNode: Codable, Identifiable, Equatable, Sendable {
     let id: String
     let kind: String
@@ -521,13 +584,21 @@ struct HarnessGraphNode: Codable, Identifiable, Equatable, Sendable {
     var responsibility: String? = nil
     var inputs: [String]? = nil
     var outputs: [String]? = nil
+    var ports: [HarnessGraphPort]? = nil
     var evidence: [HarnessGraphEvidence]? = nil
+    var observes: [String]? = nil
+    var position: HarnessGraphPosition? = nil
+    var configSchema: HarnessNodeConfigSchema? = nil
     let config: [String: JSONValue]?
 }
 
 struct HarnessGraphEdge: Codable, Equatable, Sendable {
     let from: String
     let to: String
+    var fromPort: String? = nil
+    var toPort: String? = nil
+    var label: String? = nil
+    var observes: [String]? = nil
 }
 
 struct HarnessGraph: Codable, Equatable, Sendable {
@@ -550,6 +621,22 @@ struct HarnessDistribution: Codable, Equatable, Sendable {
 }
 
 struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
+    struct DriverBundle: Decodable, Equatable, Sendable {
+        let apiVersion: Int
+        let package: String
+        let spec: String
+        let requiresInstallScripts: Bool
+    }
+    struct AccountDescriptor: Decodable, Equatable, Sendable {
+        let label: String
+        let billing: String
+        let detail: String
+    }
+    struct ModelConfiguration: Decodable, Equatable, Sendable {
+        let owner: String
+        let required: Bool
+        let detail: String
+    }
     struct Capability: Decodable, Identifiable, Equatable, Sendable {
         let id: String
         let status: String
@@ -560,12 +647,20 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
         let apiVersion: Int
         let `protocol`: String
         let loaded: Bool
+        let authorization: String
     }
     struct Installation: Decodable, Equatable, Sendable {
+        struct Integrity: Decodable, Equatable, Sendable {
+            let status: String
+            let source: String
+            let digest: String?
+            let detail: String
+        }
         let status: String
         let installedVersion: String?
         let availableVersion: String
         let previousVersions: [String]
+        let integrity: Integrity
         let error: String?
     }
     struct Authentication: Decodable, Equatable, Sendable {
@@ -579,18 +674,39 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
             var id: String { ref }
         }
         struct Method: Decodable, Identifiable, Equatable, Sendable {
+            struct Account: Decodable, Equatable, Sendable {
+                let label: String
+                let billing: String
+                let detail: String
+            }
             struct Terminal: Decodable, Equatable, Sendable {
                 let args: [String]
                 let env: [String: String]
+            }
+            struct Agent: Decodable, Equatable, Sendable {
+                let metaKey: String
+                let fieldMap: [String: String]
             }
             let id: String
             let name: String
             let kind: String
             let fields: [Field]
+            let account: Account?
+            let agent: Agent?
             let terminal: Terminal?
 
             private enum CodingKeys: String, CodingKey {
-                case id, name, kind, fields, terminal
+                case id, name, kind, fields, account, agent, terminal
+            }
+
+            init(id: String, name: String, kind: String, fields: [Field], account: Account? = nil, agent: Agent? = nil, terminal: Terminal? = nil) {
+                self.id = id
+                self.name = name
+                self.kind = kind
+                self.fields = fields
+                self.account = account
+                self.agent = agent
+                self.terminal = terminal
             }
 
             init(from decoder: Decoder) throws {
@@ -599,6 +715,8 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
                 name = try values.decode(String.self, forKey: .name)
                 kind = try values.decode(String.self, forKey: .kind)
                 fields = try values.decodeIfPresent([Field].self, forKey: .fields) ?? []
+                account = try values.decodeIfPresent(Account.self, forKey: .account)
+                agent = try values.decodeIfPresent(Agent.self, forKey: .agent)
                 terminal = try values.decodeIfPresent(Terminal.self, forKey: .terminal)
             }
         }
@@ -609,8 +727,21 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     }
     struct Compatibility: Decodable, Equatable, Sendable {
         let status: String
+        let classification: String
         let checkedAt: String?
         let message: String?
+    }
+    struct Publication: Decodable, Equatable, Sendable {
+        let status: String
+        let review: String
+        let publishedVersion: String?
+        let knownVersions: [String]
+        let catalogUrl: String?
+        let detail: String
+        let revokedVersion: String?
+        let revokedReason: String?
+        let revokedAt: String?
+        let reviewUrl: String?
     }
     let id: String
     let isDefault: Bool
@@ -624,6 +755,9 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let verified: Bool
     let protocolName: String
     let source: String
+    var account: AccountDescriptor? = nil
+    var modelConfiguration: ModelConfiguration? = nil
+    var driverBundle: DriverBundle? = nil
     let distribution: HarnessDistribution?
     let graph: HarnessGraph
     let available: Bool
@@ -631,11 +765,12 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let publication: Publication?
     let capabilities: [Capability]
     let driver: Driver
 
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, distribution, graph, available, unavailableReason, installation, auth, compatibility, capabilities, driver
+        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, account, modelConfiguration, driverBundle, distribution, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
         case protocolName = "protocol"
     }
 }
@@ -752,17 +887,21 @@ struct PendingApproval: Identifiable, Equatable, Sendable {
 actor DshApiClient {
     nonisolated let baseURL: URL
     private let bearerToken: String?
+    private let trustDelegate: OpenFishTLSDelegate
     private let session: URLSession
 
     init(
         baseURL: URL = URL(string: "http://127.0.0.1:3080")!,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        tlsFingerprint: String? = nil
     ) {
         self.baseURL = baseURL
         self.bearerToken = bearerToken
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
-        session = URLSession(configuration: configuration)
+        let trustDelegate = OpenFishTLSDelegate(expectedFingerprint: tlsFingerprint)
+        self.trustDelegate = trustDelegate
+        session = URLSession(configuration: configuration, delegate: trustDelegate, delegateQueue: nil)
     }
 
     func rpc<Payload: Encodable & Sendable, Value: Decodable & Sendable>(
@@ -879,20 +1018,43 @@ actor DshApiClient {
         return try await rpc("session.search", Payload(query: query))
     }
 
-    func createSession(workspaceId: String? = nil, cwd: String? = nil, agentPreset: String? = nil, harnessId: String? = nil) async throws -> String {
+    func createSession(
+        workspaceId: String? = nil,
+        cwd: String? = nil,
+        agentPreset: String? = nil,
+        harnessId: String? = nil,
+        sessionId: String? = nil
+    ) async throws -> String {
         struct Payload: Encodable, Sendable {
             let workspaceId: String?
             let cwd: String?
             let noProject: Bool?
             let agentPreset: String?
             let harnessId: String?
+            let sessionId: String?
         }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String; let agentPreset: String? }
         let value: Value = try await rpc(
             "session.create",
-            Payload(workspaceId: workspaceId, cwd: cwd, noProject: workspaceId == nil && cwd == nil ? true : nil, agentPreset: agentPreset, harnessId: harnessId)
+            Payload(
+                workspaceId: workspaceId,
+                cwd: cwd,
+                noProject: workspaceId == nil && cwd == nil ? true : nil,
+                agentPreset: agentPreset,
+                harnessId: harnessId,
+                sessionId: sessionId
+            )
         )
         return value.sessionId
+    }
+
+    func discardSession(_ sessionId: String) async throws {
+        struct Payload: Encodable, Sendable { let sessionId: String }
+        struct Value: Decodable, Sendable { let discarded: Bool }
+        let value: Value = try await rpc("session.discard", Payload(sessionId: sessionId))
+        guard value.discarded else {
+            throw DshApiError.host("draft-discard-rejected", "The Host did not discard the draft task")
+        }
     }
 
     func importSessions(
@@ -932,6 +1094,19 @@ actor DshApiClient {
             "session.history",
             Payload(sessionId: sessionId, beforeSeq: beforeSeq, maxMessages: maxMessages)
         )
+    }
+
+    func attachmentData(sessionId: String, attachmentId: String) async throws -> Data {
+        struct Payload: Encodable, Sendable { let sessionId: String; let attachmentId: String }
+        struct Value: Decodable, Sendable { let data: String }
+        let value: Value = try await rpc(
+            "session.attachment",
+            Payload(sessionId: sessionId, attachmentId: attachmentId)
+        )
+        guard let data = Data(base64Encoded: value.data), data.count <= 25 * 1_024 * 1_024 else {
+            throw DshApiError.host("attachment-error", "The attachment is invalid or larger than 25 MiB")
+        }
+        return data
     }
 
     func renameSession(_ sessionId: String, title: String) async throws -> (title: String, seq: Int) {
@@ -1103,21 +1278,70 @@ actor DshApiClient {
         return value.items
     }
 
+    func resolveHarness(id: String, version: String?, authMethod: String?) async throws -> HarnessCatalogEntry {
+        struct Payload: Encodable, Sendable {
+            let id: String
+            let version: String?
+            let authMethod: String?
+        }
+        struct Value: Decodable, Sendable { let item: HarnessCatalogEntry }
+        let value: Value = try await rpc(
+            "harness.resolve",
+            Payload(id: id, version: version, authMethod: authMethod)
+        )
+        return value.item
+    }
+
     func refreshHarnesses() async throws -> [HarnessCatalogEntry] {
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
         let value: Value = try await rpc("harness.refresh", EmptyPayload())
         return value.items
     }
 
-    func mutateHarness(action: String, id: String? = nil, authMethod: String? = nil, pack: JSONValue? = nil) async throws -> [HarnessCatalogEntry] {
+    func mutateHarness(action: String, id: String? = nil, authMethod: String? = nil, reason: String? = nil, acceptUnverified: Bool? = nil, pack: JSONValue? = nil) async throws -> [HarnessCatalogEntry] {
         struct Payload: Encodable, Sendable {
             let action: String
             let id: String?
             let authMethod: String?
+            let reason: String?
+            let acceptUnverified: Bool?
             let pack: JSONValue?
         }
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
-        let value: Value = try await rpc("harness.mutate", Payload(action: action, id: id, authMethod: authMethod, pack: pack))
+        let hostLocalActions: Set<String> = ["remove", "login", "upsert", "validate-publication", "submit-publication", "submit-revocation"]
+        let hostLocalCodeConsent = acceptUnverified == true && ["install", "update", "probe"].contains(action)
+        let method = hostLocalActions.contains(action) || hostLocalCodeConsent ? "harness.manage" : "harness.mutate"
+        let value: Value = try await rpc(method, Payload(action: action, id: id, authMethod: authMethod, reason: reason, acceptUnverified: acceptUnverified, pack: pack))
+        return value.items
+    }
+
+    /// Commit the exact Driver Bundle observed by the packaged Mac manager to
+    /// the Host's loopback-only authorization plane. Paired devices never get
+    /// this capability.
+    func authorizeHarnessDriver(
+        id: String,
+        version: String,
+        package: String,
+        spec: String
+    ) async throws -> [HarnessCatalogEntry] {
+        struct Payload: Encodable, Sendable {
+            let action: String
+            let id: String
+            let version: String
+            let driverPackage: String
+            let driverSpec: String
+        }
+        struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
+        let value: Value = try await rpc(
+            "harness.manage",
+            Payload(
+                action: "authorize-driver",
+                id: id,
+                version: version,
+                driverPackage: package,
+                driverSpec: spec
+            )
+        )
         return value.items
     }
 
@@ -1349,7 +1573,7 @@ enum DshApiError: Error, CustomStringConvertible, Sendable {
     var description: String {
         switch self {
         case .rpcIdMismatch:
-            return "The DSH host returned a mismatched RPC id."
+            return "The OpenFish Host returned a mismatched RPC id."
         case let .transport(message):
             return message
         case let .host(code, message):

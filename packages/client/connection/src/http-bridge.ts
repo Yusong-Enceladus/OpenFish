@@ -11,6 +11,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
  * each body in memory, so this cap is also the per-request resident bound. */
 export const DEFAULT_MAX_REQUEST_BODY_BYTES = 160 * 1024 * 1024
 
+/** Socket facts the bridge supplies out-of-band so clients cannot forge them. */
+export interface FetchRequestContext {
+  readonly remoteAddress?: string
+  readonly secure?: boolean
+}
+
 /** Transport-independent request handler consumed by the Host HTTP bridge. */
 export interface FetchHandler {
   /**
@@ -18,7 +24,7 @@ export interface FetchHandler {
    * @param request - request produced by the active transport bridge.
    * @returns complete or streaming Fetch response.
    */
-  fetch(request: Request): Promise<Response>
+  fetch(request: Request, context?: FetchRequestContext): Promise<Response>
 }
 
 /**
@@ -72,7 +78,19 @@ export async function bridge(
     ...chunks.length > 0 ? { body: Buffer.concat(chunks) } : {},
     signal: abort.signal,
   })
-  const response = await apiHandler.fetch(request)
+  // node:http always supplies `socket`, but structural carriers and test
+  // doubles may not. Missing transport facts must fail closed at the policy
+  // layer instead of crashing the whole Host request path.
+  const socket = req.socket as IncomingMessage['socket'] | undefined
+  const remoteAddress = socket?.remoteAddress
+  const secure = socket !== undefined && 'encrypted' in socket && socket.encrypted === true
+  const response = await apiHandler.fetch(
+    request,
+    {
+      ...(remoteAddress === undefined ? {} : { remoteAddress }),
+      ...(secure ? { secure: true } : {}),
+    },
+  )
   res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
   if (response.body === null) {
     res.end()

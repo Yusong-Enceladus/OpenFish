@@ -1,0 +1,1530 @@
+{
+  "version": 0,
+  "items": [
+    {
+      "schemaVersion": 0,
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "version": "0.1.0-x.0",
+      "description": "Open Fish native DSH runtime.",
+      "publisher": "DeepSeek",
+      "verified": true,
+      "protocol": "dsh",
+      "account": {
+        "label": "Model account selected for the DSH Harness",
+        "billing": "unknown",
+        "detail": "The selected DSH model route determines the provider account and billing boundary."
+      },
+      "modelConfiguration": {
+        "owner": "host",
+        "required": true,
+        "detail": "Configure at least one model route on the OpenFish Host before starting a DSH task."
+      },
+      "graph": {
+        "level": "observable",
+        "manifestVersion": 1,
+        "boundary": "DeepSeek Harness process",
+        "evidence": [
+          {
+            "kind": "source-derived",
+            "source": "docs/architecture.md",
+            "version": "0.1.0-x.0"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "context",
+            "kind": "context-runtime",
+            "title": "Context assembly",
+            "editable": false,
+            "responsibility": "Builds the model-visible prompt from instructions, workspace context, skills, and session history.",
+            "inputs": [
+              "user intent",
+              "workspace",
+              "session history"
+            ],
+            "outputs": [
+              "model context"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/context",
+                "version": "0.1.0-x.0"
+              }
+            ]
+          },
+          {
+            "id": "loop",
+            "kind": "agent-loop",
+            "title": "Agent loop",
+            "editable": false,
+            "responsibility": "Coordinates inference, tool calls, approvals, and turn termination.",
+            "inputs": [
+              "model context",
+              "session controls"
+            ],
+            "outputs": [
+              "assistant events",
+              "tool requests"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/core/agent-loop",
+                "version": "0.1.0-x.0"
+              }
+            ],
+            "observes": [
+              "turn.started",
+              "turn.completed",
+              "turn.failed"
+            ]
+          },
+          {
+            "id": "models",
+            "kind": "model-router",
+            "title": "Model routing",
+            "editable": false,
+            "responsibility": "Resolves a configured provider, model, and reasoning controls for each inference request.",
+            "inputs": [
+              "model selection",
+              "credentials"
+            ],
+            "outputs": [
+              "streamed inference"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/llm",
+                "version": "0.1.0-x.0"
+              }
+            ],
+            "observes": [
+              "model.completed"
+            ]
+          },
+          {
+            "id": "tools",
+            "kind": "tool-runtime",
+            "title": "Tool runtime",
+            "editable": false,
+            "responsibility": "Publishes active tools, validates arguments, and records structured results.",
+            "inputs": [
+              "tool request",
+              "active catalog"
+            ],
+            "outputs": [
+              "tool result",
+              "render intent"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/core/tools",
+                "version": "0.1.0-x.0"
+              }
+            ],
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "id": "sandbox",
+            "kind": "execution-boundary",
+            "title": "Execution boundary",
+            "editable": false,
+            "responsibility": "Applies the active sandbox provider to operations that request confinement; exact enforcement depends on the selected provider and policy.",
+            "inputs": [
+              "approved operation",
+              "workspace policy"
+            ],
+            "outputs": [
+              "enforced or reported effect"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/sandbox",
+                "version": "0.1.0-x.0"
+              }
+            ]
+          },
+          {
+            "id": "approvals",
+            "kind": "permission-policy",
+            "title": "Approvals",
+            "editable": false,
+            "responsibility": "Stops sensitive operations until the configured policy or user grants permission.",
+            "inputs": [
+              "operation risk",
+              "preset policy"
+            ],
+            "outputs": [
+              "allow or deny decision"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/guard",
+                "version": "0.1.0-x.0"
+              }
+            ],
+            "observes": [
+              "approval.requested",
+              "approval.resolved"
+            ]
+          },
+          {
+            "id": "session",
+            "kind": "session-runtime",
+            "title": "Session persistence",
+            "editable": false,
+            "responsibility": "Persists events, selected Harness identity, and resumable conversation state.",
+            "inputs": [
+              "agent events",
+              "control state"
+            ],
+            "outputs": [
+              "durable session",
+              "replay"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/session",
+                "version": "0.1.0-x.0"
+              }
+            ]
+          },
+          {
+            "id": "extensions",
+            "kind": "plugin-runtime",
+            "title": "Plugin composition",
+            "editable": false,
+            "responsibility": "Composes optional capabilities without changing the core agent loop.",
+            "inputs": [
+              "plugin manifests",
+              "configuration"
+            ],
+            "outputs": [
+              "capability graph"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "packages/core",
+                "version": "0.1.0-x.0"
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "context",
+            "to": "loop",
+            "label": "assembled context",
+            "observes": [
+              "turn.started"
+            ]
+          },
+          {
+            "from": "loop",
+            "to": "models",
+            "label": "inference request",
+            "observes": [
+              "turn.started"
+            ]
+          },
+          {
+            "from": "models",
+            "to": "loop",
+            "label": "model stream",
+            "observes": [
+              "model.completed"
+            ]
+          },
+          {
+            "from": "loop",
+            "to": "tools",
+            "label": "tool request",
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "from": "tools",
+            "to": "approvals",
+            "label": "guarded effect",
+            "observes": [
+              "approval.requested"
+            ]
+          },
+          {
+            "from": "approvals",
+            "to": "sandbox",
+            "label": "approved operation"
+          },
+          {
+            "from": "sandbox",
+            "to": "tools",
+            "label": "enforced execution"
+          },
+          {
+            "from": "loop",
+            "to": "session",
+            "label": "durable events"
+          },
+          {
+            "from": "extensions",
+            "to": "loop",
+            "label": "loop capabilities"
+          },
+          {
+            "from": "extensions",
+            "to": "tools",
+            "label": "tool contributions"
+          }
+        ]
+      },
+      "source": "builtin",
+      "isDefault": false,
+      "available": true,
+      "installation": {
+        "status": "builtin",
+        "installedVersion": "0.1.0-x.0",
+        "availableVersion": "0.1.0-x.0",
+        "previousVersions": [],
+        "integrity": {
+          "status": "trusted-runtime",
+          "source": "OpenFish application bundle",
+          "detail": "Demo fact generated from the live built-in Pack; no external runtime is launched."
+        }
+      },
+      "auth": {
+        "methods": [],
+        "status": "not-required",
+        "missingFields": []
+      },
+      "compatibility": {
+        "status": "compatible",
+        "classification": "supported",
+        "message": "Deterministic Demo data; no Harness process or provider is contacted."
+      },
+      "capabilities": [
+        {
+          "id": "lifecycle.install",
+          "status": "unsupported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.update",
+          "status": "runtime",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.rollback",
+          "status": "unsupported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.uninstall",
+          "status": "unsupported",
+          "source": "driver"
+        },
+        {
+          "id": "session.create",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.resume",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.cancel",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.fork",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The live Driver exposes a real Harness-owned branch operation."
+        },
+        {
+          "id": "session.archive",
+          "status": "supported",
+          "source": "host",
+          "detail": "OpenFish archives the task without deleting its Harness session."
+        },
+        {
+          "id": "workspace.project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "workspace.no-project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "configuration.models",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Discovered from the running Harness."
+        },
+        {
+          "id": "configuration.reasoning",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Shown only when the selected model advertises it."
+        },
+        {
+          "id": "configuration.auth",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "configuration.agent-presets",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.tools",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.approvals",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.questions",
+          "status": "supported",
+          "source": "driver",
+          "detail": "OpenFish user questions are native to DSH."
+        },
+        {
+          "id": "interaction.files",
+          "status": "supported",
+          "source": "driver",
+          "detail": "DSH receives OpenFish attachments through its native session input."
+        },
+        {
+          "id": "interaction.events",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "architecture.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "architecture.runtime-observation",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "architecture.edit",
+          "status": "unsupported",
+          "source": "pack"
+        },
+        {
+          "id": "diagnostics.preflight",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "builder.test",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.publish",
+          "status": "unsupported",
+          "source": "host",
+          "detail": "Bundled catalog Packs are read only. Fork one under a user-owned id to use the real reviewed community submission workflow."
+        }
+      ],
+      "driver": {
+        "apiVersion": 1,
+        "protocol": "dsh",
+        "loaded": true,
+        "authorization": "not-required"
+      }
+    },
+    {
+      "schemaVersion": 0,
+      "id": "codex",
+      "name": "Codex",
+      "version": "0.149.0",
+      "description": "Official Codex Harness through the OpenAI app-server protocol.",
+      "publisher": "OpenAI",
+      "repository": "https://github.com/openai/codex",
+      "verified": true,
+      "protocol": "codex-app-server",
+      "account": {
+        "label": "Codex account",
+        "billing": "harness-managed",
+        "detail": "Codex app-server uses the locally authorized ChatGPT subscription or API credential selected by Codex."
+      },
+      "modelConfiguration": {
+        "owner": "harness",
+        "required": true,
+        "detail": "Models and their exact supported reasoning efforts come from the live official model/list response."
+      },
+      "authMethods": [
+        {
+          "id": "codex-local-login",
+          "name": "Existing Codex login",
+          "kind": "agent",
+          "fields": [],
+          "account": {
+            "label": "Existing Codex account",
+            "billing": "harness-managed",
+            "detail": "After you confirm, OpenFish imports only the existing Codex auth.json into a private account-method profile; Codex task history, config, and logs remain outside the Harness boundary. The credential is never returned to the UI or stored in Pack/session state. At runtime app-server reports the actual account route so OpenFish does not guess billing."
+          }
+        },
+        {
+          "id": "codex-managed-login",
+          "name": "Sign in with ChatGPT",
+          "kind": "terminal",
+          "fields": [],
+          "account": {
+            "label": "ChatGPT · Codex plan",
+            "billing": "subscription",
+            "detail": "OpenFish opens the official Codex sign-in inside an isolated OpenFish-owned profile. The official Codex runtime stores and refreshes that login; OpenFish never copies the token into app state."
+          },
+          "terminal": {
+            "args": [],
+            "env": {}
+          }
+        },
+        {
+          "id": "codex-api-key",
+          "name": "OpenAI API key",
+          "kind": "environment",
+          "fields": [
+            {
+              "ref": "OPENAI_API_KEY",
+              "name": "OpenAI API key",
+              "env": "OPENAI_API_KEY",
+              "required": true,
+              "secret": true
+            }
+          ],
+          "account": {
+            "label": "OpenAI API billing",
+            "billing": "usage",
+            "detail": "Requests are billed to the OpenAI API project owning this key."
+          }
+        }
+      ],
+      "distribution": {
+        "kind": "npx",
+        "package": "@openai/codex@0.149.0",
+        "args": [
+          "app-server",
+          "--stdio"
+        ],
+        "env": {}
+      },
+      "graph": {
+        "level": "observable",
+        "manifestVersion": 1,
+        "boundary": "Codex app-server process",
+        "evidence": [
+          {
+            "kind": "source-derived",
+            "source": "https://github.com/openai/codex/tree/main/codex-rs/app-server",
+            "version": "0.149.0"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "app-server",
+            "kind": "protocol-adapter",
+            "title": "App-server",
+            "editable": false,
+            "responsibility": "Owns the official JSON-RPC boundary used by Codex interfaces.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/app-server",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "protocol.ready"
+            ]
+          },
+          {
+            "id": "thread",
+            "kind": "agent-session",
+            "title": "Thread & turn",
+            "editable": false,
+            "responsibility": "Owns durable Codex threads, turns, items, cancellation, and resume.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/app-server-protocol",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "session.ready",
+              "turn.started",
+              "turn.completed",
+              "turn.failed"
+            ]
+          },
+          {
+            "id": "context",
+            "kind": "context-runtime",
+            "title": "Context",
+            "editable": false,
+            "responsibility": "Builds model input from instructions, history, skills, apps, and the environment.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/core",
+                "version": "0.149.0"
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "kind": "model-client",
+            "title": "Model client",
+            "editable": false,
+            "responsibility": "Streams inference using the selected live model and advertised reasoning effort.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/core",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "model.completed"
+            ]
+          },
+          {
+            "id": "tools",
+            "kind": "tool-runtime",
+            "title": "Tools",
+            "editable": false,
+            "responsibility": "Executes coding, shell, MCP, skills, apps, and other enabled capabilities.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/core",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "id": "sandbox",
+            "kind": "execution-boundary",
+            "title": "Sandbox",
+            "editable": false,
+            "responsibility": "Constrains filesystem and network effects under the selected policy.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/core",
+                "version": "0.149.0"
+              }
+            ]
+          },
+          {
+            "id": "approvals",
+            "kind": "permission-policy",
+            "title": "Approvals",
+            "editable": false,
+            "responsibility": "Requests user review before boundary-crossing operations.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/app-server",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "approval.requested",
+              "approval.resolved"
+            ]
+          },
+          {
+            "id": "output",
+            "kind": "output-stream",
+            "title": "Output stream",
+            "editable": false,
+            "responsibility": "Publishes reasoning summaries, tool progress, and final answers as typed items.",
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "codex-rs/app-server-protocol",
+                "version": "0.149.0"
+              }
+            ],
+            "observes": [
+              "output.activity"
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "app-server",
+            "to": "thread",
+            "label": "JSON-RPC lifecycle",
+            "observes": [
+              "session.ready"
+            ]
+          },
+          {
+            "from": "thread",
+            "to": "context",
+            "label": "turn state",
+            "observes": [
+              "turn.started"
+            ]
+          },
+          {
+            "from": "context",
+            "to": "model",
+            "label": "model input",
+            "observes": [
+              "turn.started"
+            ]
+          },
+          {
+            "from": "model",
+            "to": "tools",
+            "label": "tool call",
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "from": "tools",
+            "to": "approvals",
+            "label": "guarded effect",
+            "observes": [
+              "approval.requested"
+            ]
+          },
+          {
+            "from": "approvals",
+            "to": "sandbox",
+            "label": "approved operation"
+          },
+          {
+            "from": "sandbox",
+            "to": "tools",
+            "label": "constrained execution"
+          },
+          {
+            "from": "model",
+            "to": "output",
+            "label": "reasoning and answer",
+            "observes": [
+              "model.completed",
+              "output.activity"
+            ]
+          },
+          {
+            "from": "tools",
+            "to": "output",
+            "label": "progress and result",
+            "observes": [
+              "tool.activity"
+            ]
+          }
+        ]
+      },
+      "source": "builtin",
+      "isDefault": true,
+      "available": true,
+      "installation": {
+        "status": "installed",
+        "installedVersion": "0.149.0",
+        "availableVersion": "0.149.0",
+        "previousVersions": [],
+        "integrity": {
+          "status": "version-pinned",
+          "source": "@openai/codex@0.149.0",
+          "detail": "Demo package identity is pinned to the exact live Pack version; this is not a checksum claim."
+        }
+      },
+      "auth": {
+        "methods": [
+          {
+            "id": "codex-local-login",
+            "name": "Existing Codex login",
+            "kind": "agent",
+            "fields": [],
+            "account": {
+              "label": "Existing Codex account",
+              "billing": "harness-managed",
+              "detail": "After you confirm, OpenFish imports only the existing Codex auth.json into a private account-method profile; Codex task history, config, and logs remain outside the Harness boundary. The credential is never returned to the UI or stored in Pack/session state. At runtime app-server reports the actual account route so OpenFish does not guess billing."
+            }
+          },
+          {
+            "id": "codex-managed-login",
+            "name": "Sign in with ChatGPT",
+            "kind": "terminal",
+            "fields": [],
+            "account": {
+              "label": "ChatGPT · Codex plan",
+              "billing": "subscription",
+              "detail": "OpenFish opens the official Codex sign-in inside an isolated OpenFish-owned profile. The official Codex runtime stores and refreshes that login; OpenFish never copies the token into app state."
+            },
+            "terminal": {
+              "args": [],
+              "env": {}
+            }
+          },
+          {
+            "id": "codex-api-key",
+            "name": "OpenAI API key",
+            "kind": "environment",
+            "fields": [
+              {
+                "ref": "OPENAI_API_KEY",
+                "name": "OpenAI API key",
+                "env": "OPENAI_API_KEY",
+                "required": true,
+                "secret": true
+              }
+            ],
+            "account": {
+              "label": "OpenAI API billing",
+              "billing": "usage",
+              "detail": "Requests are billed to the OpenAI API project owning this key."
+            }
+          }
+        ],
+        "selectedMethod": "codex-local-login",
+        "status": "configured",
+        "missingFields": []
+      },
+      "compatibility": {
+        "status": "compatible",
+        "classification": "supported",
+        "message": "Deterministic Demo data; no Harness process or provider is contacted."
+      },
+      "capabilities": [
+        {
+          "id": "lifecycle.install",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.update",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.rollback",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.uninstall",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.create",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.resume",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.cancel",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.fork",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The live Driver exposes a real Harness-owned branch operation."
+        },
+        {
+          "id": "session.archive",
+          "status": "supported",
+          "source": "host",
+          "detail": "OpenFish archives the task without deleting its Harness session."
+        },
+        {
+          "id": "workspace.project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "workspace.no-project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "configuration.models",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Discovered from the running Harness."
+        },
+        {
+          "id": "configuration.reasoning",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Shown only when the selected model advertises it."
+        },
+        {
+          "id": "configuration.auth",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "configuration.agent-presets",
+          "status": "unsupported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.tools",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.approvals",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.questions",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The Driver bridges Harness-owned form questions while refusing secret fields."
+        },
+        {
+          "id": "interaction.files",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The Driver bridges image input and workspace-confined file operations."
+        },
+        {
+          "id": "interaction.events",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "architecture.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "architecture.runtime-observation",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "architecture.edit",
+          "status": "unsupported",
+          "source": "pack"
+        },
+        {
+          "id": "diagnostics.preflight",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "builder.test",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.publish",
+          "status": "unsupported",
+          "source": "host",
+          "detail": "Bundled catalog Packs are read only. Fork one under a user-owned id to use the real reviewed community submission workflow."
+        }
+      ],
+      "driver": {
+        "apiVersion": 1,
+        "protocol": "codex-app-server",
+        "loaded": true,
+        "authorization": "not-required"
+      }
+    },
+    {
+      "schemaVersion": 0,
+      "id": "oh-my-pi",
+      "name": "Oh My Pi",
+      "version": "18.0.3",
+      "description": "Community Harness with native ACP mode and advanced coding tools.",
+      "publisher": "Oh My Pi contributors",
+      "repository": "https://github.com/can1357/oh-my-pi",
+      "verified": false,
+      "protocol": "acp",
+      "account": {
+        "label": "Provider account managed by Oh My Pi",
+        "billing": "harness-managed",
+        "detail": "Oh My Pi owns provider credentials and reports its available models through ACP."
+      },
+      "modelConfiguration": {
+        "owner": "harness",
+        "required": false,
+        "detail": "Models and supported reasoning controls are discovered from the running Oh My Pi session."
+      },
+      "authMethods": [
+        {
+          "id": "omp-provider-login",
+          "name": "Sign in to a model provider",
+          "kind": "terminal",
+          "fields": [],
+          "account": {
+            "label": "Provider selected in Oh My Pi",
+            "billing": "harness-managed",
+            "detail": "Oh My Pi opens its provider picker and stores that provider login inside the isolated OpenFish-managed OMP profile. The selected provider owns usage and billing; OpenFish does not receive its token."
+          },
+          "terminal": {
+            "args": [
+              "auth-broker",
+              "login"
+            ],
+            "env": {}
+          }
+        }
+      ],
+      "distribution": {
+        "kind": "bunx",
+        "package": "@oh-my-pi/pi-coding-agent@18.0.3",
+        "args": [
+          "acp"
+        ],
+        "env": {}
+      },
+      "graph": {
+        "level": "observable",
+        "manifestVersion": 1,
+        "boundary": "Oh My Pi agent process",
+        "evidence": [
+          {
+            "kind": "source-derived",
+            "source": "https://github.com/can1357/oh-my-pi",
+            "version": "18.0.3"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "resources",
+            "kind": "context-loader",
+            "title": "Resource loader",
+            "editable": false,
+            "responsibility": "Discovers context files, prompts, skills, and project configuration.",
+            "inputs": [
+              "workspace",
+              "OMP configuration"
+            ],
+            "outputs": [
+              "agent resources"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/tree/main/packages/coding-agent/src",
+                "version": "18.0.3"
+              }
+            ]
+          },
+          {
+            "id": "session",
+            "kind": "agent-session",
+            "title": "Agent session",
+            "editable": false,
+            "responsibility": "Owns the conversation, agent loop, compaction, and lifecycle events.",
+            "inputs": [
+              "prompt",
+              "agent resources"
+            ],
+            "outputs": [
+              "messages",
+              "tool requests"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/agent-session.ts",
+                "version": "18.0.3"
+              }
+            ],
+            "observes": [
+              "session.ready",
+              "turn.started",
+              "turn.completed",
+              "turn.failed",
+              "output.activity"
+            ]
+          },
+          {
+            "id": "models",
+            "kind": "model-registry",
+            "title": "Model registry",
+            "editable": false,
+            "responsibility": "Combines bundled, configured, discovered, and extension-provided model catalogs.",
+            "inputs": [
+              "provider config",
+              "credentials"
+            ],
+            "outputs": [
+              "available model route"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/config/model-registry.ts",
+                "version": "18.0.3"
+              }
+            ],
+            "observes": [
+              "model.completed"
+            ]
+          },
+          {
+            "id": "tools",
+            "kind": "tool-registry",
+            "title": "Tool registry",
+            "editable": false,
+            "responsibility": "Selects built-in and discoverable tools for the active session.",
+            "inputs": [
+              "tool configuration",
+              "session"
+            ],
+            "outputs": [
+              "validated tool execution"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
+                "version": "18.0.3"
+              }
+            ],
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "id": "permissions",
+            "kind": "permission-policy",
+            "title": "Permission policy",
+            "editable": false,
+            "responsibility": "Classifies tool effects and requests approval for guarded operations.",
+            "inputs": [
+              "tool request",
+              "policy"
+            ],
+            "outputs": [
+              "permission decision"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
+                "version": "18.0.3"
+              }
+            ],
+            "observes": [
+              "approval.requested",
+              "approval.resolved"
+            ]
+          },
+          {
+            "id": "execution",
+            "kind": "execution-runtime",
+            "title": "Execution runtime",
+            "editable": false,
+            "responsibility": "Runs filesystem, shell, language, browser, and other coding tools.",
+            "inputs": [
+              "approved tool request"
+            ],
+            "outputs": [
+              "workspace effect",
+              "tool result"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
+                "version": "18.0.3"
+              }
+            ]
+          },
+          {
+            "id": "extensions",
+            "kind": "extension-runtime",
+            "title": "Extensions",
+            "editable": false,
+            "responsibility": "Adds tools, commands, event handlers, providers, and custom interaction behavior.",
+            "inputs": [
+              "extension packages"
+            ],
+            "outputs": [
+              "runtime contributions"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md",
+                "version": "18.0.3"
+              }
+            ]
+          },
+          {
+            "id": "persistence",
+            "kind": "session-storage",
+            "title": "Persistence",
+            "editable": false,
+            "responsibility": "Stores session entries, branches, checkpoints, and resumable agent state.",
+            "inputs": [
+              "session events"
+            ],
+            "outputs": [
+              "durable history"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/session-manager.ts",
+                "version": "18.0.3"
+              }
+            ]
+          },
+          {
+            "id": "acp",
+            "kind": "protocol-adapter",
+            "title": "ACP interface",
+            "editable": false,
+            "responsibility": "Projects the OMP session into ACP prompts, updates, controls, and permission requests.",
+            "inputs": [
+              "ACP client requests",
+              "agent events"
+            ],
+            "outputs": [
+              "ACP session updates"
+            ],
+            "evidence": [
+              {
+                "kind": "source-derived",
+                "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
+                "version": "18.0.3"
+              }
+            ],
+            "observes": [
+              "protocol.ready"
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "resources",
+            "to": "session",
+            "label": "agent resources",
+            "observes": [
+              "turn.started"
+            ]
+          },
+          {
+            "from": "models",
+            "to": "session",
+            "label": "selected route",
+            "observes": [
+              "model.completed"
+            ]
+          },
+          {
+            "from": "extensions",
+            "to": "session",
+            "label": "event behavior"
+          },
+          {
+            "from": "extensions",
+            "to": "models",
+            "label": "provider contributions"
+          },
+          {
+            "from": "extensions",
+            "to": "tools",
+            "label": "tool contributions"
+          },
+          {
+            "from": "session",
+            "to": "tools",
+            "label": "tool request"
+          },
+          {
+            "from": "tools",
+            "to": "permissions",
+            "label": "classified effect",
+            "observes": [
+              "approval.requested"
+            ]
+          },
+          {
+            "from": "permissions",
+            "to": "execution",
+            "label": "approved operation"
+          },
+          {
+            "from": "execution",
+            "to": "session",
+            "label": "effect and result",
+            "observes": [
+              "tool.activity"
+            ]
+          },
+          {
+            "from": "session",
+            "to": "persistence",
+            "label": "history and checkpoint",
+            "observes": [
+              "turn.completed",
+              "turn.failed"
+            ]
+          },
+          {
+            "from": "acp",
+            "to": "session",
+            "label": "prompt and controls",
+            "observes": [
+              "session.ready",
+              "turn.started"
+            ]
+          },
+          {
+            "from": "session",
+            "to": "acp",
+            "label": "typed updates",
+            "observes": [
+              "output.activity"
+            ]
+          }
+        ]
+      },
+      "source": "builtin",
+      "isDefault": false,
+      "available": true,
+      "installation": {
+        "status": "not-installed",
+        "availableVersion": "18.0.3",
+        "previousVersions": [],
+        "integrity": {
+          "status": "version-pinned",
+          "source": "@oh-my-pi/pi-coding-agent@18.0.3",
+          "detail": "Demo package identity is pinned to the exact live Pack version; this is not a checksum claim."
+        }
+      },
+      "auth": {
+        "methods": [
+          {
+            "id": "omp-provider-login",
+            "name": "Sign in to a model provider",
+            "kind": "terminal",
+            "fields": [],
+            "account": {
+              "label": "Provider selected in Oh My Pi",
+              "billing": "harness-managed",
+              "detail": "Oh My Pi opens its provider picker and stores that provider login inside the isolated OpenFish-managed OMP profile. The selected provider owns usage and billing; OpenFish does not receive its token."
+            },
+            "terminal": {
+              "args": [
+                "auth-broker",
+                "login"
+              ],
+              "env": {}
+            }
+          }
+        ],
+        "status": "needs-selection",
+        "missingFields": []
+      },
+      "compatibility": {
+        "status": "ready",
+        "classification": "experimental",
+        "message": "Available to install in a live OpenFish session."
+      },
+      "capabilities": [
+        {
+          "id": "lifecycle.install",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.update",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.rollback",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "lifecycle.uninstall",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.create",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.resume",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.cancel",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "session.fork",
+          "status": "unsupported",
+          "source": "driver",
+          "detail": "This Driver does not claim a remote-session branch primitive."
+        },
+        {
+          "id": "session.archive",
+          "status": "supported",
+          "source": "host",
+          "detail": "OpenFish archives the task without deleting its Harness session."
+        },
+        {
+          "id": "workspace.project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "workspace.no-project",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "configuration.models",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Discovered from the running Harness."
+        },
+        {
+          "id": "configuration.reasoning",
+          "status": "runtime",
+          "source": "runtime",
+          "detail": "Shown only when the selected model advertises it."
+        },
+        {
+          "id": "configuration.auth",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "configuration.agent-presets",
+          "status": "unsupported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.tools",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.approvals",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "interaction.questions",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The Driver bridges Harness-owned form questions while refusing secret fields."
+        },
+        {
+          "id": "interaction.files",
+          "status": "supported",
+          "source": "driver",
+          "detail": "The Driver bridges image input and workspace-confined file operations."
+        },
+        {
+          "id": "interaction.events",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "architecture.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "architecture.runtime-observation",
+          "status": "runtime",
+          "source": "runtime"
+        },
+        {
+          "id": "architecture.edit",
+          "status": "unsupported",
+          "source": "pack"
+        },
+        {
+          "id": "diagnostics.preflight",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.manifest",
+          "status": "supported",
+          "source": "pack"
+        },
+        {
+          "id": "builder.test",
+          "status": "supported",
+          "source": "driver"
+        },
+        {
+          "id": "builder.publish",
+          "status": "unsupported",
+          "source": "host",
+          "detail": "Bundled catalog Packs are read only. Fork one under a user-owned id to use the real reviewed community submission workflow."
+        }
+      ],
+      "driver": {
+        "apiVersion": 1,
+        "protocol": "acp",
+        "loaded": true,
+        "authorization": "not-required"
+      }
+    }
+  ]
+}

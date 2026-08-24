@@ -119,6 +119,25 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/core/agent/src/types.ts:19`](../packages/core/agent/src/types.ts)
 
+<a id="agentmodel-selected--log-only"></a>
+
+#### `agent/model-selected` — log-only
+
+```ts persistence-catalog
+/**
+ * Complete model choice accepted for this session. Unlike request/header,
+ * this log-only user intent also exists before the first prompt and is
+ * therefore the durable pin for a blank task across Host restarts.
+ */
+'agent/model-selected': {
+  provider: string
+  model: string
+  reasoningEffort?: string
+}
+```
+
+来源：[`packages/core/agent/src/model-selection.ts:17`](../packages/core/agent/src/model-selection.ts)
+
 ### `agent-preset/*`
 
 <a id="agent-presetselected--log-only"></a>
@@ -437,7 +456,61 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'harness/native-event': { harnessId: HarnessId; event: unknown }
 ```
 
-来源：[`packages/harness/harness/src/index.ts:31`](../packages/harness/harness/src/index.ts)
+来源：[`packages/harness/harness/src/index.ts:88`](../packages/harness/harness/src/index.ts)
+
+<a id="harnessremote-session--log-only"></a>
+
+#### `harness/remote-session` — log-only
+
+```ts persistence-catalog
+/** Replacement remote identity for the same pinned Harness after recoverable blank-session loss. */
+'harness/remote-session': {
+  harnessId: HarnessId
+  remoteSessionId: string
+  reason: 'blank-session-recovery' | 'session-fork'
+}
+```
+
+来源：[`packages/harness/harness/src/index.ts:82`](../packages/harness/harness/src/index.ts)
+
+<a id="harnessruntime-edge--log-only"></a>
+
+#### `harness/runtime-edge` — log-only
+
+```ts persistence-catalog
+/** Runtime evidence that one declared data-flow connection participated in this session. */
+'harness/runtime-edge': {
+  harnessId: HarnessId
+  edgeKey: string
+  from: string
+  to: string
+  fromPort?: string
+  toPort?: string
+  signal: import('./types.ts').HarnessRuntimeSignal
+  status: 'active' | 'waiting' | 'completed' | 'failed'
+  activity: string
+}
+```
+
+来源：[`packages/harness/harness/src/index.ts:99`](../packages/harness/harness/src/index.ts)
+
+<a id="harnessruntime-node--log-only"></a>
+
+#### `harness/runtime-node` — log-only
+
+```ts persistence-catalog
+/** Runtime evidence that a declared architecture component participated in this session. */
+'harness/runtime-node': {
+  harnessId: HarnessId
+  nodeId: string
+  /** Absent only on runtime facts written by pre-binding OpenFish builds. */
+  signal?: import('./types.ts').HarnessRuntimeSignal
+  status: 'active' | 'waiting' | 'completed' | 'failed'
+  activity: string
+}
+```
+
+来源：[`packages/harness/harness/src/index.ts:90`](../packages/harness/harness/src/index.ts)
 
 <a id="harnessselected--log-only"></a>
 
@@ -445,10 +518,21 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ```ts persistence-catalog
 /** Selected runtime identity and its remote session, committed before the first turn. */
-'harness/selected': { harnessId: HarnessId; version: string; protocol: string; remoteSessionId?: string }
+'harness/selected': {
+  harnessId: HarnessId
+  version: string
+  protocol: string
+  /** Exact non-secret authentication choice used to create this task. */
+  authMethod?: string
+  /** Exact location contract fixed before the first turn. */
+  workspaceMode?: 'project' | 'no-project' | 'custom-cwd'
+  /** Exact Driver/Pack capability contract visible when the task was created. */
+  capabilities?: import('./types.ts').HarnessCapability[]
+  remoteSessionId?: string
+}
 ```
 
-来源：[`packages/harness/harness/src/index.ts:29`](../packages/harness/harness/src/index.ts)
+来源：[`packages/harness/harness/src/index.ts:69`](../packages/harness/harness/src/index.ts)
 
 ### `hook/*`
 

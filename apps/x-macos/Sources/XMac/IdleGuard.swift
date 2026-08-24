@@ -8,7 +8,7 @@ final class IdleGuard {
         guard activity == nil else { return }
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.idleSystemSleepDisabled, .userInitiated],
-            reason: "An OpenFish task is running through DSH"
+            reason: "An OpenFish task is running"
         )
     }
 

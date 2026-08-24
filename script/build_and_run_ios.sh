@@ -3,12 +3,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-simulator}"
-BUILD_ROOT="$ROOT_DIR/.build/opencodex-ios"
-DERIVED_DATA="$BUILD_ROOT/DerivedData"
+OPENFISH_REPO_ROOT="$ROOT_DIR"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/script/openfish_build_paths.sh"
+BUILD_ROOT="$OPENFISH_BUILD_ROOT/opencodex-ios"
+DERIVED_DATA="$OPENFISH_DERIVED_DATA_ROOT/opencodex-ios"
 PROJECT="$ROOT_DIR/apps/x-ios/OpenCodexIOS.xcodeproj"
 SCHEME="OpenFishIOS"
 BUNDLE_ID="${OPENFISH_IOS_BUNDLE_ID:-app.openfish.ios}"
 DEVICE_ID="${OPENCODEX_IOS_DEVICE_ID:-}"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+unregister_ios_build_product() {
+  local app_bundle="$1"
+  [[ -x "$LSREGISTER" ]] || return 0
+  # Xcode registers simulator/device products with macOS LaunchServices even
+  # though they are not runnable Mac apps. Remove only that build-product
+  # record so Spotlight exposes the installed Mac OpenFish exactly once.
+  "$LSREGISTER" -u "$app_bundle" >/dev/null 2>&1 || true
+}
 
 mkdir -p "$BUILD_ROOT"
 
@@ -33,13 +46,15 @@ if [[ "$MODE" == "simulator" || "$MODE" == "--simulator" ]]; then
 
   xcrun simctl bootstatus booted -b >/dev/null 2>&1 || open -a Simulator
   xcrun simctl bootstatus booted -b
-  xcrun simctl install booted "$DERIVED_DATA/Build/Products/Debug-iphonesimulator/OpenFish.app"
+  SIMULATOR_APP="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/OpenFish.app"
+  xcrun simctl install booted "$SIMULATOR_APP"
+  unregister_ios_build_product "$SIMULATOR_APP"
   xcrun simctl launch booted "$BUNDLE_ID"
   exit
 fi
 
 if [[ -z "$DEVICE_ID" ]]; then
-  DEVICE_TMP="$(mktemp -d /tmp/opencodex-ios-device.XXXXXX)"
+  DEVICE_TMP="$(mktemp -d "$OPENFISH_TEMP_ROOT/opencodex-ios-device.XXXXXX")"
   trap 'rm -rf "$DEVICE_TMP"' EXIT
   DEVICE_JSON="$DEVICE_TMP/devices.json"
   xcrun devicectl list devices --quiet --json-output "$DEVICE_JSON"
@@ -95,4 +110,5 @@ xcodebuild \
 xcrun devicectl device install app \
   --device "$DEVICE_ID" \
   "$DERIVED_DATA/Build/Products/Debug-iphoneos/OpenFish.app"
+unregister_ios_build_product "$DERIVED_DATA/Build/Products/Debug-iphoneos/OpenFish.app"
 xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"

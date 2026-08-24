@@ -50,6 +50,14 @@ export function canonicalPath(path: string): string {
  * @returns the canonical writable roots; empty exactly under `read-only`.
  */
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
-  if (policy.mode !== 'workspace-write') return []
-  return [...new Set([policy.workspaceRoot, '/tmp', tmpdir()].map(canonicalPath))]
+  const extended = policy as SandboxExecutionPolicy & {
+    runtimeWritableRoots?: readonly string[]
+    platformTemporaryWrites?: boolean
+  }
+  const roots = [...(extended.runtimeWritableRoots ?? [])]
+  if (policy.mode === 'workspace-write') {
+    roots.push(policy.workspaceRoot)
+    if (extended.platformTemporaryWrites !== false) roots.push('/tmp', tmpdir())
+  }
+  return [...new Set(roots.map(canonicalPath))]
 }

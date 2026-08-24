@@ -409,7 +409,7 @@ export interface XNativeConfig {
 }
 ```
 
-Source: [`packages/bundle/x-native/src/index.ts:71`](../packages/bundle/x-native/src/index.ts)
+Source: [`packages/bundle/x-native/src/index.ts:72`](../packages/bundle/x-native/src/index.ts)
 
 <a id="deepseek-aidsh-client-connection"></a>
 
@@ -431,6 +431,8 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Require a composed authenticator for every non-loopback request. */
   requireAuthenticationForRemote?: boolean
+  /** Reject non-loopback requests unless the accepted socket is TLS. */
+  requireSecureTransportForRemote?: boolean
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
 }
@@ -587,7 +589,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/credentials/credentials-keychain/src/index.ts:57`](../packages/credentials/credentials-keychain/src/index.ts)
+Source: [`packages/credentials/credentials-keychain/src/index.ts:59`](../packages/credentials/credentials-keychain/src/index.ts)
 
 <a id="deepseek-aidsh-credentials-local"></a>
 
@@ -748,6 +750,8 @@ Source: [`packages/goal/goal/src/index.ts:116`](../packages/goal/goal/src/index.
 
 ## `@deepseek-ai/dsh-harness`
 
+Requires: `sessions`
+
 ```ts config-catalog
 /** Harness catalog configuration. */
 export interface HarnessConfig {
@@ -762,7 +766,7 @@ export interface HarnessConfig {
 }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:36`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:114`](../packages/harness/harness/src/index.ts)
 
 <a id="deepseek-aidsh-headless"></a>
 
@@ -925,10 +929,18 @@ export interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Optional TLS-only all-interfaces listener for native remote clients. */
+  remoteTlsHost?: '' | '0.0.0.0'
+  /** Remote TLS port; zero requests an OS-assigned port. */
+  remoteTlsPort?: number
+  /** PEM certificate path for the remote TLS listener. */
+  remoteTlsCertificatePath?: string
+  /** PEM private-key path for the remote TLS listener. */
+  remoteTlsPrivateKeyPath?: string
 }
 ```
 
-Source: [`packages/host/webserver/src/index.ts:45`](../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:49`](../packages/host/webserver/src/index.ts)
 
 <a id="deepseek-aidsh-invariants"></a>
 
@@ -2311,7 +2323,7 @@ export type CodexPermissionMode =
   | 'dangerously-bypass-approvals-and-sandbox'
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:36`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:48`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -3300,7 +3312,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-fs-e2b` — requires `e2b` ([`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts))
 - `@deepseek-ai/dsh-fs-observation-policy` ([`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts))
 - `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
-- `@deepseek-ai/dsh-harness-acp` — requires `harnesses` · `agents` · `sessions` · `subprocess` · `approval` · `credentials` ([`packages/harness/harness-acp/src/index.ts`](../packages/harness/harness-acp/src/index.ts))
+- `@deepseek-ai/dsh-harness-acp` — requires `harnesses` · `agents` · `sessions` · `subprocess` · `sandbox` · `sandboxPolicy` · `approval` · `userQuestions` · `credentials` · `attachments` ([`packages/harness/harness-acp/src/index.ts`](../packages/harness/harness-acp/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))

@@ -108,8 +108,19 @@ export type {
 } from './sessions/projection-store.ts'
 export type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
 
-/** Client-side Cordis context after declaration merging. */
-export type ClientContext = Context
+/**
+ * Client-side Cordis context with the runtime-owned services made explicit.
+ * The matching module merge below keeps ordinary Cordis consumers typed;
+ * this intersection also gives project-reference tools a stable public face
+ * without requiring them to reconstruct declaration merges across packages.
+ */
+export type ClientContext = Context & {
+  slots: SlotRegistry
+  conversationEvents: ConversationEventRegistry
+  conversationViews: ConversationViewRegistry
+  sessions: import('./contract/sessions.ts').ISessions
+  workspaces: import('./contract/workspaces.ts').IWorkspaces
+}
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertContextMap {

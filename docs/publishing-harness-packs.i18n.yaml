@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/publishing-harness-packs.md
-publishing-harness-packs.md: aa5584bd593206c27bea1b0880378af73e10fbe3
-publishing-harness-packs.zh.md: 51b2ded01d8b3c890e495534a9156d8196dd61ac
+publishing-harness-packs.md: 8fc7f37c7d0d3af5cc83e804c7bf3f494d146bc2
+publishing-harness-packs.zh.md: 59030a0b3a212cd124bd19caa3d63fc35e1fed13

@@ -62,6 +62,8 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Require a composed authenticator for every non-loopback request. */
   requireAuthenticationForRemote?: boolean
+  /** Reject non-loopback requests unless the accepted socket is TLS. */
+  requireSecureTransportForRemote?: boolean
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
 }
@@ -69,6 +71,7 @@ export interface ConnectionConfig {
 export const Config: z<ConnectionConfig> = z.object({
   trustedHosts: z.array(String).default([]),
   requireAuthenticationForRemote: z.boolean().default(false),
+  requireSecureTransportForRemote: z.boolean().default(false),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
 
@@ -122,6 +125,10 @@ const PRIVILEGED_METHODS = new Set([
   'credentials.set',
   'credentials.unset',
   'llm.discoverModels',
+  // Pack authoring/removal writes executable launch definitions; interactive
+  // login opens a terminal on the Mac. Paired clients may install or select a
+  // catalog Harness, but they cannot drive this host-local authoring plane.
+  'harness.manage',
 ])
 
 /**
@@ -137,6 +144,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const requireAuthenticationForRemote = config?.requireAuthenticationForRemote ?? false
+  const requireSecureTransportForRemote = config?.requireSecureTransportForRemote ?? false
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
@@ -149,19 +157,25 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
   ): Promise<boolean> => {
     if (!connection.security.isTrusted(request)) return false
     if (connection.security.isLoopback(request)) return true
+    if (requireSecureTransportForRemote && !connection.security.isSecure(request)) return false
     if (privileged) return false
     if (connection.security.hasAuthenticator) return connection.security.authenticate(request)
     return !requireAuthenticationForRemote
   }
   const fetchHandler = connection.createSharedFetchHandler(API_PATH, {
-    async fetch(request) {
+    async fetch(request, transport) {
       const pathname = new URL(request.url).pathname
       const method = pathname.startsWith(`${API_PATH}/`)
         ? pathname.slice(API_PATH.length + 1)
         : undefined
+      const authenticationRequest: Parameters<typeof isTrustedApiRequest>[0] = {
+        headers: request.headers,
+        ...(transport?.remoteAddress === undefined ? {} : { remoteAddress: transport.remoteAddress }),
+        ...(transport?.secure === true ? { secure: true } : {}),
+      }
       if (method !== undefined
         && PRIVILEGED_METHODS.has(method)
-        && !await authorize(request, true)) {
+        && !await authorize(authenticationRequest, true)) {
         return new Response('forbidden', { status: 403 })
       }
       if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {

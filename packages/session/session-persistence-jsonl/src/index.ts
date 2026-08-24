@@ -199,6 +199,10 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     return this.coordinator.readFrom(id, fromSeq, signal)
   }
 
+  override delete(id: SessionId): Promise<boolean> {
+    return this.coordinator.delete(id)
+  }
+
   // One method serves both public `list` and the backend hook; delegating it to
   // the coordinator would call this hook recursively.
 
@@ -213,6 +217,19 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     const path = await this.findLog(id, signal)
     if (path === undefined) return undefined
     return this.readPrefix(path, id, signal)
+  }
+
+  async deleteStored(id: SessionId): Promise<boolean> {
+    await this.ensureRootEncoding()
+    const path = await this.findLog(id)
+    if (path === undefined) return false
+    try {
+      await rm(path)
+      return true
+    } catch (error: unknown) {
+      if (isENOENT(error)) return false
+      throw error
+    }
   }
 
   /**

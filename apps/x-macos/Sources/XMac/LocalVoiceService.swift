@@ -9,10 +9,122 @@ struct LocalVoiceChoice: Identifiable, Equatable, Sendable {
     let quality: String
 }
 
+private enum LocalAudioCaptureError: LocalizedError {
+    case noInput
+    case startupTimedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .noInput:
+            "No microphone input is available. Check the input device in System Settings."
+        case .startupTimedOut:
+            "The microphone did not respond. Dictation stopped safely; check the input device and try again."
+        }
+    }
+}
+
+/// AVAudioEngine can block synchronously while macOS reconnects an input device.
+/// Keep every engine operation on one private queue so a broken audio service
+/// cannot freeze SwiftUI's main actor or race a new start against an old stop.
+private final class LocalAudioCapture: @unchecked Sendable {
+    private final class RequestBox: @unchecked Sendable {
+        let request: SFSpeechAudioBufferRecognitionRequest
+        init(_ request: SFSpeechAudioBufferRecognitionRequest) { self.request = request }
+    }
+
+    private final class CompletionGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completed = false
+        private let continuation: CheckedContinuation<Result<LocalAudioCapture, Error>, Never>
+
+        init(_ continuation: CheckedContinuation<Result<LocalAudioCapture, Error>, Never>) {
+            self.continuation = continuation
+        }
+
+        @discardableResult
+        func finish(_ result: Result<LocalAudioCapture, Error>) -> Bool {
+            lock.lock()
+            guard !completed else {
+                lock.unlock()
+                return false
+            }
+            completed = true
+            lock.unlock()
+            continuation.resume(returning: result)
+            return true
+        }
+    }
+
+    private static let audioQueue = DispatchQueue(label: "app.openfish.voice.audio", qos: .userInitiated)
+
+    private let engine: AVAudioEngine
+    private let input: AVAudioInputNode
+    // The input tap intentionally captures the box weakly so teardown cannot
+    // form a retain cycle. The capture owns it for exactly the tap lifetime.
+    private let requestBox: RequestBox
+
+    private init(engine: AVAudioEngine, input: AVAudioInputNode, requestBox: RequestBox) {
+        self.engine = engine
+        self.input = input
+        self.requestBox = requestBox
+    }
+
+    static func start(
+        request: SFSpeechAudioBufferRecognitionRequest,
+        timeout: Duration = .seconds(5)
+    ) async -> Result<LocalAudioCapture, Error> {
+        let requestBox = RequestBox(request)
+        return await withCheckedContinuation { continuation in
+            let gate = CompletionGate(continuation)
+            audioQueue.async {
+                var tappedInput: AVAudioInputNode?
+                do {
+                    let engine = AVAudioEngine()
+                    let input = engine.inputNode
+                    let format = input.outputFormat(forBus: 0)
+                    guard format.sampleRate > 0, format.channelCount > 0 else {
+                        gate.finish(.failure(LocalAudioCaptureError.noInput))
+                        return
+                    }
+                    input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak requestBox] buffer, _ in
+                        requestBox?.request.append(buffer)
+                    }
+                    tappedInput = input
+                    engine.prepare()
+                    try engine.start()
+                    let capture = LocalAudioCapture(engine: engine, input: input, requestBox: requestBox)
+                    if !gate.finish(.success(capture)) {
+                        capture.stopImmediately()
+                    }
+                } catch {
+                    tappedInput?.removeTap(onBus: 0)
+                    gate.finish(.failure(error))
+                }
+            }
+
+            let timeoutSeconds = Double(timeout.components.seconds)
+                + Double(timeout.components.attoseconds) / 1_000_000_000_000_000_000
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeoutSeconds) {
+                gate.finish(.failure(LocalAudioCaptureError.startupTimedOut))
+            }
+        }
+    }
+
+    func stop() {
+        Self.audioQueue.async { [self] in stopImmediately() }
+    }
+
+    private func stopImmediately() {
+        if engine.isRunning { engine.stop() }
+        input.removeTap(onBus: 0)
+    }
+}
+
 /// Native, local-only voice provider for the OpenCodex surface.
 ///
 /// Recognition refuses to start unless the current Apple recognizer advertises
-/// on-device support. No audio or transcript is sent through DSH or a cloud API.
+/// on-device support. Audio never reaches the Host or Harness; only finalized
+/// text is submitted after the user confirms it.
 @MainActor
 final class LocalVoiceService: NSObject, ObservableObject {
     let providerID = "apple-local"
@@ -31,14 +143,14 @@ final class LocalVoiceService: NSObject, ObservableObject {
         }
     }
 
-    private let audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
+    private var audioCapture: LocalAudioCapture?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var transcriptHandler: ((String, Bool) -> Void)?
     private var speechFinishedHandler: (() -> Void)?
-    private var hasInputTap = false
     private var audioObservers: [NSObjectProtocol] = []
+    private var captureGeneration = 0
 
     private var effectiveSpeechRate: Float { min(max(speechRate, 0.35), 0.62) }
 
@@ -58,7 +170,7 @@ final class LocalVoiceService: NSObject, ObservableObject {
     private func installAudioObservers() {
         let center = NotificationCenter.default
         audioObservers = [Notification.Name.AVAudioEngineConfigurationChange].map { name in
-            center.addObserver(forName: name, object: audioEngine, queue: .main) { [weak self] _ in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.isListening else { return }
                     self.errorMessage = "The microphone configuration changed. Dictation stopped safely; tap the microphone to resume."
@@ -87,7 +199,10 @@ final class LocalVoiceService: NSObject, ObservableObject {
     }
 
     func toggleListening(onTranscript: @escaping (String, Bool) -> Void) async {
-        guard !isStarting else { return }
+        if isStarting {
+            stopListening()
+            return
+        }
         if isListening {
             stopListening()
             return
@@ -101,13 +216,17 @@ final class LocalVoiceService: NSObject, ObservableObject {
         defer { isStarting = false }
         stopSpeaking()
         stopListening()
+        captureGeneration += 1
+        let generation = captureGeneration
         errorMessage = nil
         let speechAuthorization = await Self.requestSpeechAuthorization()
+        guard generation == captureGeneration else { return }
         guard speechAuthorization == .authorized else {
             errorMessage = "Speech recognition permission is required for local dictation."
             return
         }
         let microphoneAllowed = await AVCaptureDevice.requestAccess(for: .audio)
+        guard generation == captureGeneration else { return }
         guard microphoneAllowed else {
             errorMessage = "Microphone permission is required for local dictation."
             return
@@ -129,46 +248,24 @@ final class LocalVoiceService: NSObject, ObservableObject {
         transcriptHandler = onTranscript
         partialTranscript = ""
 
-        let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            recognitionRequest = nil
-            transcriptHandler = nil
-            errorMessage = "No microphone input is available. Check the input device in System Settings."
-            return
-        }
-        if hasInputTap {
-            input.removeTap(onBus: 0)
-            hasInputTap = false
-        }
-        Self.installInputTap(on: input, format: format, request: request)
-        hasInputTap = true
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-        } catch {
-            if hasInputTap {
-                input.removeTap(onBus: 0)
-                hasInputTap = false
-            }
+        switch await LocalAudioCapture.start(request: request) {
+        case .failure(let error):
             recognitionRequest = nil
             transcriptHandler = nil
             errorMessage = "Could not start the microphone: \(error.localizedDescription)"
             return
+        case .success(let capture):
+            guard generation == captureGeneration else {
+                capture.stop()
+                recognitionRequest = nil
+                transcriptHandler = nil
+                return
+            }
+            audioCapture = capture
         }
 
         isListening = true
         recognitionTask = Self.makeRecognitionTask(recognizer: recognizer, request: request, service: self)
-    }
-
-    nonisolated private static func installInputTap(
-        on input: AVAudioInputNode,
-        format: AVAudioFormat,
-        request: SFSpeechAudioBufferRecognitionRequest
-    ) {
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
-            request?.append(buffer)
-        }
     }
 
     nonisolated private static func makeRecognitionTask(
@@ -206,12 +303,10 @@ final class LocalVoiceService: NSObject, ObservableObject {
     }
 
     func stopListening() {
+        captureGeneration += 1
         guard isListening || recognitionRequest != nil || recognitionTask != nil else { return }
-        if audioEngine.isRunning { audioEngine.stop() }
-        if hasInputTap {
-            audioEngine.inputNode.removeTap(onBus: 0)
-            hasInputTap = false
-        }
+        audioCapture?.stop()
+        audioCapture = nil
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionRequest = nil

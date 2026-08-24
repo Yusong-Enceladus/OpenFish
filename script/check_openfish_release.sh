@@ -22,8 +22,16 @@ build_version="$(plutil -extract CFBundleVersion raw -o - "$INFO_PLIST" 2>/dev/n
   exit 1
 }
 
-if rg -n '/Users/[A-Za-z0-9._-]+/|file:///Users/[A-Za-z0-9._-]+/' "$APP_BUNDLE/Contents" >/dev/null; then
+builder_user="$(id -un)"
+if rg -a -n "/Users/${builder_user}/|file:///Users/${builder_user}/" "$APP_BUNDLE/Contents" >/dev/null; then
   echo "check_openfish_release: app contains a build-machine path" >&2
+  exit 1
+fi
+
+if find "$APP_BUNDLE/Contents" -print \
+  | sed "s#^$APP_BUNDLE/Contents##" \
+  | rg -q "file[+]{3,}Users[+]${builder_user}[+]|(^|[+/])Users[+/]${builder_user}[+/]"; then
+  echo "check_openfish_release: app contains a build-machine identity in a packaged path name" >&2
   exit 1
 fi
 

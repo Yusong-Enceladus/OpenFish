@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { harnessRuntimeProjectionDefinition as projection } from '../src/projection.ts'
 
 describe('Harness runtime projection', () => {
@@ -8,11 +7,46 @@ describe('Harness runtime projection', () => {
     state = projection.apply(state, {
       type: 'harness/runtime-node', seq: 1, time: 10,
       data: { harnessId: 'fixture' as never, nodeId: 'tools', status: 'active', activity: 'tool_call' },
-    } as SessionEvent)
+    })
     state = projection.apply(state, {
       type: 'harness/runtime-node', seq: 2, time: 20,
       data: { harnessId: 'fixture' as never, nodeId: 'tools', status: 'completed', activity: 'tool completed' },
-    } as SessionEvent)
+    })
+    expect(projection.view(state)).toMatchObject({ harnessId: 'fixture' })
     expect(projection.view(state).nodes.tools).toEqual({ status: 'completed', activity: 'tool completed', seq: 2, time: 20 })
+  })
+
+  it('keeps the latest durable observation for each declared edge', () => {
+    let state = projection.init()
+    state = projection.apply(state, {
+      type: 'harness/runtime-edge', seq: 3, time: 30,
+      data: {
+        harnessId: 'fixture' as never,
+        edgeKey: 'model\u0000\u0000output\u0000',
+        from: 'model', to: 'output', signal: 'output.activity',
+        status: 'active', activity: 'Harness output activity observed',
+      },
+    })
+    expect(projection.view(state).edges['model\u0000\u0000output\u0000']).toEqual({
+      from: 'model', to: 'output', signal: 'output.activity', status: 'active',
+      activity: 'Harness output activity observed', seq: 3, time: 30,
+    })
+  })
+
+  it('pins observations to the selected Pack identity and clears stale runtime state', () => {
+    let state = projection.init()
+    state = projection.apply(state, {
+      type: 'harness/selected', seq: 1, time: 10,
+      data: { harnessId: 'first' as never, version: '1.0.0', protocol: 'acp', workspaceMode: 'no-project' },
+    })
+    state = projection.apply(state, {
+      type: 'harness/runtime-node', seq: 2, time: 20,
+      data: { harnessId: 'first' as never, nodeId: 'runtime', status: 'active', activity: 'ready' },
+    })
+    state = projection.apply(state, {
+      type: 'harness/selected', seq: 3, time: 30,
+      data: { harnessId: 'second' as never, version: '2.0.0', protocol: 'acp', workspaceMode: 'no-project' },
+    })
+    expect(projection.view(state)).toEqual({ harnessId: 'second', version: '2.0.0', nodes: {}, edges: {} })
   })
 })

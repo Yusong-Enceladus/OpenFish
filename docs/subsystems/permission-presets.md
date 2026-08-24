@@ -121,8 +121,18 @@ optionOf(name: string): PresetOption
  * setter. Selecting the effective preset again appends nothing.
  * @param session - the session the switch belongs to.
  * @param name - the preset to switch to; unknown names throw.
- */
+*/
 set(session: Session, name: string): void
+
+/**
+ * Fill every missing permission fact before a session is published. A
+ * genuinely fresh session uses the current user default; seeded or partially
+ * initialized sessions preserve their effective knob values and only gain
+ * the missing durable facts.
+ * @param session - session receiving any missing durable permission facts.
+ * @param preset - current user default used only for a genuinely fresh session.
+ */
+initialize(session: Session, preset: string = this.defaultPreset): void
 ```
 
 Types: [Session](session.md) · [SessionEvent](session.md)

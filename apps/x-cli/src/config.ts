@@ -74,7 +74,7 @@ export type XConfig = Record<string, unknown> & { features?: Record<string, bool
 /** Read X config, returning an empty document when absent. */
 export function loadXConfig(): XConfig {
   try {
-    return parse(readFileSync(xConfigPath(), 'utf8')) as XConfig
+    return parse(readFileSync(xConfigPath(), 'utf8'))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
     throw error
@@ -82,7 +82,7 @@ export function loadXConfig(): XConfig {
 }
 
 function mergeConfig(base: XConfig, layer: XConfig): XConfig {
-  const merged = structuredClone(base) as XConfig
+  const merged = structuredClone(base)
   for (const [key, value] of Object.entries(layer)) {
     if (typeof value === 'object' && value !== null && !Array.isArray(value)
       && typeof merged[key] === 'object' && merged[key] !== null && !Array.isArray(merged[key])) {

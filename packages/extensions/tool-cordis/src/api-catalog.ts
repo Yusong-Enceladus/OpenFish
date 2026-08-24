@@ -819,6 +819,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Disposer that removes only this exact registration.',
       },
       {
+        signature: 'async authorizeDriverBundle( id: HarnessId, version: string, packageName: string, spec: string, ): Promise<void>',
+        description: 'Record one exact Driver Bundle only after the loopback-pinned Mac bridge admitted it and observed the matching Driver in the restarted Host. Remote clients cannot call the authoring plane that exposes this method.',
+        parameters: [{ name: 'id', description: 'Exact Harness Pack identity.' }, { name: 'version', description: 'Exact admitted Pack version.' }, { name: 'packageName', description: 'Driver package identity declared by the Pack.' }, { name: 'spec', description: 'Exact immutable Driver installation spec.' }],
+      },
+      {
         signature: 'async refresh(signal?: AbortSignal): Promise<void>',
         description: 'Refresh ACP Registry metadata without deleting user or built-in Packs.',
         parameters: [{ name: 'signal', description: 'Optional cancellation for the registry request.' }],
@@ -830,9 +835,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Detached catalog rows in insertion order.',
       },
       {
+        signature: 'async describe(id: HarnessId, version?: string, authMethod?: string): Promise<HarnessCatalogEntry>',
+        description: 'Resolve the exact installed Pack and authentication choice pinned by a task.',
+        parameters: [{ name: 'id', description: 'Stable Harness identity recorded by the task.' }, { name: 'version', description: 'Exact Pack version recorded by the task.' }, { name: 'authMethod', description: 'Exact non-secret authentication method recorded by the task.' }],
+        returns: 'Detached catalog row describing what that task actually runs.',
+      },
+      {
         signature: 'async install(id: HarnessId, signal?: AbortSignal): Promise<void>',
         description: 'Install or update one Pack with a recoverable previous-version snapshot.',
         parameters: [{ name: 'id', description: 'Catalog identity to install.' }, { name: 'signal', description: 'Optional package-download cancellation.' }],
+      },
+      {
+        signature: 'async probe(id: HarnessId, signal?: AbortSignal): Promise<void>',
+        description: 'Run a non-secret live preflight without sending a model prompt. Provider-owned state or setup cost remains provider-specific.',
+        parameters: [{ name: 'id', description: 'Installed Harness Pack to probe.' }, { name: 'signal', description: 'Optional cancellation for installation and protocol checks.' }],
       },
       {
         signature: 'async uninstall(id: HarnessId): Promise<void>',
@@ -850,9 +866,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'id', description: 'Harness whose login mode is selected.' }, { name: 'method', description: 'Pack-declared method id, or absent to clear the preference.' }],
       },
       {
-        signature: 'async authenticateInteractive(id: HarnessId, methodId: string): Promise<void>',
+        signature: 'async authenticateInteractive(id: HarnessId, methodId: string, signal?: AbortSignal): Promise<void>',
         description: 'Launch one explicitly selected interactive authentication flow.',
-        parameters: [{ name: 'id', description: 'Installed Harness whose terminal login should run.' }, { name: 'methodId', description: 'Pack-declared terminal authentication method.' }],
+        parameters: [{ name: 'id', description: 'Installed Harness whose terminal login should run.' }, { name: 'methodId', description: 'Pack-declared terminal authentication method.' }, { name: 'signal', description: 'Optional cancellation forwarded to the Driver login flow.' }],
       },
       {
         signature: 'async selectDefault(id: HarnessId): Promise<void>',
@@ -877,6 +893,22 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Admitted user Pack.',
       },
       {
+        signature: 'async validatePublication(input: unknown): Promise<HarnessPack>',
+        description: 'Validate one public community submission without mutating the local catalog.',
+        parameters: [{ name: 'input', description: 'Untrusted Pack-shaped publication payload.' }],
+        returns: 'Exact installed, preflighted, and admitted Pack safe to submit for review.',
+      },
+      {
+        signature: 'async recordCommunitySubmission(input: HarnessCommunitySubmissionRecord): Promise<void>',
+        description: 'Persist the review identity returned by the documented community backend. This method records no credential or Pack content and never treats a submitted review as catalog inclusion.',
+        parameters: [{ name: 'input', description: 'Exact local Pack identity and GitHub review facts.' }],
+      },
+      {
+        signature: 'async recordCommunityRevocationSubmission(input: HarnessCommunitySubmissionRecord): Promise<void>',
+        description: 'Persist the public review identity for an exact-version revocation request.',
+        parameters: [{ name: 'input', description: 'Exact local Pack identity and GitHub revocation review facts.' }],
+      },
+      {
         signature: 'async removeUserPack(id: HarnessId): Promise<void>',
         description: 'Remove one user-authored Pack definition.',
         parameters: [{ name: 'id', description: 'User Pack identity.' }],
@@ -888,16 +920,38 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Admitted Pack definition.',
       },
       {
-        signature: 'async create(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>',
+        signature: 'runtimeBinding(id: HarnessId, version?: string): { pack: HarnessPack; driver?: HarnessDriver } | undefined',
+        description: 'Resolve the exact Pack and effect-scoped Driver used to project one task\'s runtime evidence.',
+        parameters: [{ name: 'id', description: 'Stable Harness Pack identity.' }, { name: 'version', description: 'Optional exact installed version pinned by a task.' }],
+        returns: 'Matching runtime binding, or undefined when the identity is unavailable.',
+      },
+      {
+        signature: 'async create( id: HarnessId, sessionId: SessionId, cwd: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], signal?: AbortSignal, ): Promise<Agent>',
         description: 'Create a non-DSH session through its registered protocol driver.',
-        parameters: [{ name: 'id', description: 'Selected Harness Pack identity.' }, { name: 'sessionId', description: 'New local session identity.' }, { name: 'cwd', description: 'Absolute session working directory.' }],
+        parameters: [{ name: 'id', description: 'Selected Harness Pack identity.' }, { name: 'sessionId', description: 'New local session identity.' }, { name: 'cwd', description: 'Absolute session working directory.' }, { name: 'workspaceMode', description: 'Explicit project or no-project workspace contract.' }, { name: 'signal', description: 'Optional cancellation for creation and live capability discovery.' }],
         returns: 'Published external Agent.',
       },
       {
-        signature: 'async resume(id: HarnessId, sessionId: SessionId, cwd: string, version?: string): Promise<Agent>',
+        signature: 'async resume( id: HarnessId, sessionId: SessionId, cwd: string, version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], signal?: AbortSignal, ): Promise<Agent>',
         description: 'Resume a persisted non-DSH session through its registered protocol driver.',
-        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Existing local session identity.' }, { name: 'cwd', description: 'Persisted absolute working directory.' }, { name: 'version', description: 'Exact installed Pack version recorded by the session.' }],
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Existing local session identity.' }, { name: 'cwd', description: 'Persisted absolute working directory.' }, { name: 'version', description: 'Exact installed Pack version recorded by the session.' }, { name: 'authMethod', description: 'Exact non-secret authentication choice recorded by the session.' }, { name: 'workspaceMode', description: 'Persisted project or no-project workspace contract.' }, { name: 'signal', description: 'Optional cancellation for resume and live capability discovery.' }],
         returns: 'Restored external Agent.',
+      },
+      {
+        signature: 'async fork( id: HarnessId, sourceSessionId: SessionId, sessionId: SessionId, cwd: string, seed: SessionEvent[], version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], ): Promise<Agent>',
+        description: 'Fork one external Harness through its protocol Driver. The Driver owns both the real remote branch and publication of the local seeded Agent; this service still owns exact-version, authentication, installation, and capability admission.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sourceSessionId', description: 'Existing local source task identity.' }, { name: 'sessionId', description: 'New local child task identity.' }, { name: 'cwd', description: 'Absolute working directory for the child task.' }, { name: 'seed', description: 'Durable source events copied into the child task.' }, { name: 'version', description: 'Exact installed Pack version pinned by the source task.' }, { name: 'authMethod', description: 'Exact non-secret authentication choice pinned by the source task.' }, { name: 'workspaceMode', description: 'Project or no-project workspace contract pinned by the source task.' }],
+        returns: 'Published external child Agent.',
+      },
+      {
+        signature: 'async disposeSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>',
+        description: 'Stop and detach one live external Harness session through the exact Driver and Pack version that created it. This is an in-memory lifecycle action; the durable transcript remains available for a later resume.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Live local task identity to detach.' }, { name: 'version', description: 'Optional exact installed Pack version pinned by the task.' }],
+      },
+      {
+        signature: 'async discardSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>',
+        description: 'Permanently discard one live, never-started external Harness draft. Unlike ordinary disposal, a Driver may use this boundary to remove a provider-side thread that it had to create for live model/configuration discovery. The API Proxy proves the task is blank before calling here.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Blank local draft identity to discard.' }, { name: 'version', description: 'Optional exact installed Pack version pinned by the draft.' }],
       },
     ],
   },
@@ -1134,6 +1188,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Record a changed preset, then update each changed knob through its own setter. Selecting the effective preset again appends nothing.',
         parameters: [{ name: 'session', description: 'the session the switch belongs to.' }, { name: 'name', description: 'the preset to switch to; unknown names throw.' }],
       },
+      {
+        signature: 'initialize(session: Session, preset: string = this.defaultPreset): void',
+        description: 'Fill every missing permission fact before a session is published. A genuinely fresh session uses the current user default; seeded or partially initialized sessions preserve their effective knob values and only gain the missing durable facts.',
+        parameters: [{ name: 'session', description: 'session receiving any missing durable permission facts.' }, { name: 'preset', description: 'current user default used only for a genuinely fresh session.' }],
+      },
     ],
   },
   {
@@ -1259,6 +1318,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Lightweight listing from metadata, without a full-log parse.',
         parameters: [{ name: 'signal', description: 'optional cancellation for backend listing work.' }],
         returns: 'one header per materialized session.',
+      },
+      {
+        signature: 'delete(_id: SessionId): Promise<boolean>',
+        description: 'Permanently remove one detached session. Providers predating this optional lifecycle capability reject explicitly rather than claiming success.',
+        parameters: [{ name: '_id', description: 'detached session identity requested by the caller.' }],
+        returns: 'a rejected promise unless the provider overrides this capability.',
       },
       {
         signature: 'abstract listSnapshots(signal?: AbortSignal): Promise<SessionPersistenceSnapshot[]>',
@@ -2376,6 +2441,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability.',
       },
       {
+        signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
+        description: 'Remove one id from the global archive set, restoring its prior grouping.',
+        parameters: [{ name: 'sessionId', description: 'archived session identity to restore.' }],
+      },
+      {
         signature: 'async resolveByPath(path: string): Promise<Workspace | undefined>',
         description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
         parameters: [{ name: 'path', description: 'Existing directory path in any spelling.' }],
@@ -3450,12 +3520,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
   },
   {
+    name: 'HarnessAccountDescriptor',
+    declaration: 'export interface HarnessAccountDescriptor {\n    label: string;\n    billing: \'subscription\' | \'usage\' | \'local\' | \'harness-managed\' | \'unknown\';\n    detail: string;\n}',
+  },
+  {
     name: 'HarnessAuthField',
     declaration: 'export interface HarnessAuthField {\n    ref: string;\n    name: string;\n    env?: string;\n    required: boolean;\n    secret: boolean;\n    placeholder?: string;\n}',
   },
   {
     name: 'HarnessAuthMethod',
-    declaration: 'export interface HarnessAuthMethod {\n    id: string;\n    name: string;\n    kind: \'agent\' | \'environment\' | \'terminal\';\n    fields: HarnessAuthField[];\n    terminal?: {\n        args: string[];\n        env: Record<string, string>;\n    };\n}',
+    declaration: 'export interface HarnessAuthMethod {\n    id: string;\n    name: string;\n    kind: \'agent\' | \'environment\' | \'terminal\';\n    fields: HarnessAuthField[];\n    account?: HarnessAccountDescriptor;\n    agent?: {\n        metaKey: string;\n        fieldMap: Record<string, string>;\n    };\n    terminal?: {\n        args: string[];\n        env: Record<string, string>;\n    };\n}',
+  },
+  {
+    name: 'HarnessCapability',
+    declaration: 'export interface HarnessCapability {\n    id: HarnessCapabilityId;\n    status: \'supported\' | \'runtime\' | \'unsupported\';\n    source: \'host\' | \'pack\' | \'driver\' | \'runtime\';\n    detail?: string;\n}',
+  },
+  {
+    name: 'HarnessCapabilityId',
+    declaration: 'export type HarnessCapabilityId = \'lifecycle.install\' | \'lifecycle.update\' | \'lifecycle.rollback\' | \'lifecycle.uninstall\' | \'session.create\' | \'session.resume\' | \'session.cancel\' | \'session.fork\' | \'session.archive\' | \'workspace.project\' | \'workspace.no-project\' | \'configuration.models\' | \'configuration.reasoning\' | \'configuration.auth\' | \'configuration.agent-presets\' | \'interaction.tools\' | \'interaction.approvals\' | \'interaction.questions\' | \'interaction.files\' | \'interaction.events\' | \'architecture.manifest\' | \'architecture.runtime-observation\' | \'architecture.edit\' | \'diagnostics.preflight\' | \'builder.manifest\' | \'builder.test\' | \'builder.publish\';',
+  },
+  {
+    name: 'HarnessCommunitySubmissionRecord',
+    declaration: 'export interface HarnessCommunitySubmissionRecord {\n    id: HarnessId;\n    version: string;\n    reviewUrl: string;\n    branch: string;\n    submittedAt: string;\n    review: \'pending\' | \'changes-requested\' | \'closed\' | \'merged\';\n}',
   },
   {
     name: 'HarnessDistribution',
@@ -3463,19 +3549,35 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessDriver',
-    declaration: 'export interface HarnessDriver {\n    readonly protocol: string;\n    available(pack: HarnessPack): Promise<string | undefined>;\n    create(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    resume(request: HarnessSessionRequest, pack: HarnessPack): Promise<Agent>;\n    install?(pack: HarnessPack, directory: string, signal?: AbortSignal): Promise<void>;\n    missingCredentials?(pack: HarnessPack, authMethod?: string): Promise<string[]>;\n    discoverAuth?(pack: HarnessPack, installationDirectory: string): Promise<HarnessAuthMethod[]>;\n    authenticateInteractive?(pack: HarnessPack, installationDirectory: string, method: HarnessAuthMethod): Promise<void>;\n}',
+    declaration: 'export interface HarnessDriver {\n    readonly apiVersion: number;\n    readonly protocol: string;\n    capabilities(pack: HarnessPack): Promise<HarnessCapability[]>;\n    validatePack?(pack: HarnessPack): Promise<string[]>;\n    runtimeSignals?(event: SessionEvent, pack: HarnessPack): readonly HarnessRuntimeObservation[];\n    available(pack: HarnessPack): Promise<string | undefined>;\n    preflight?(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<HarnessPreflightResult>;\n    create(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<Agent>;\n    resume(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<Agent>;\n    fork?(request: HarnessForkRequest, pack: HarnessPack): Promise<Agent>;\n    dispose(sessionId: SessionId, pack: HarnessPack): Promise<void>;\n    discard?(sessionId: SessionId, pack: HarnessPack): Promise<void>;\n    install?(pack: HarnessPack, directory: string, runtimeDirectory: string, signal?: AbortSignal): Promise<void>;\n    missingCredentials?(pack: HarnessPack, authMethod?: string, locations?: {\n        installationDirectory: string;\n        runtimeDirectory: string;\n    }): Promise<string[]>;\n    discoverAuth?(pack: HarnessPack, installationDirectory: string, runtimeDirectory: string): Promise<HarnessAuthMethod[]>;\n    authenticateInteractive?(pack: HarnessPack, installationDirectory: string, runtimeDirectory: string, method: HarnessAuthMethod, signal?: AbortSignal): Promis /* …truncated — full shape in source */',
+  },
+  {
+    name: 'HarnessForkRequest',
+    declaration: 'export interface HarnessForkRequest extends HarnessSessionRequest {\n    sourceSessionId: SessionId;\n    seed: SessionEvent[];\n}',
   },
   {
     name: 'HarnessId',
     declaration: 'export type HarnessId = Branded<\'HarnessId\'>;',
   },
   {
+    name: 'HarnessModelConfiguration',
+    declaration: 'export interface HarnessModelConfiguration {\n    owner: \'host\' | \'harness\';\n    required: boolean;\n    detail: string;\n}',
+  },
+  {
     name: 'HarnessPack',
-    declaration: 'export interface HarnessPack {\n    schemaVersion: 0;\n    id: HarnessId;\n    name: string;\n    version: string;\n    description?: string;\n    publisher: string;\n    license?: string;\n    repository?: string;\n    icon?: string;\n    verified: boolean;\n    protocol: string;\n    authMethods?: HarnessAuthMethod[];\n    distribution?: HarnessDistribution;\n    graph: HarnessGraph;\n    source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n}',
+    declaration: 'export interface HarnessPack {\n    schemaVersion: 0;\n    id: HarnessId;\n    name: string;\n    version: string;\n    description?: string;\n    publisher: string;\n    license?: string;\n    repository?: string;\n    icon?: string;\n    verified: boolean;\n    protocol: string;\n    account?: HarnessAccountDescriptor;\n    modelConfiguration?: HarnessModelConfiguration;\n    authMethods?: HarnessAuthMethod[];\n    driverBundle?: HarnessDriverBundleRequirement;\n    distribution?: HarnessDistribution;\n    graph: HarnessGraph;\n    source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n}',
+  },
+  {
+    name: 'HarnessPreflightResult',
+    declaration: 'export interface HarnessPreflightResult {\n    message: string;\n    modelCount?: number;\n    configurationIds?: string[];\n}',
+  },
+  {
+    name: 'HarnessRuntimeObservation',
+    declaration: 'export interface HarnessRuntimeObservation {\n    signal: HarnessRuntimeSignal;\n    status: \'active\' | \'waiting\' | \'completed\' | \'failed\';\n}',
   },
   {
     name: 'HarnessSessionRequest',
-    declaration: 'export interface HarnessSessionRequest {\n    harnessId: HarnessId;\n    sessionId: SessionId;\n    cwd: string;\n    version?: string;\n    installationDirectory?: string;\n    authMethod?: string;\n}',
+    declaration: 'export interface HarnessSessionRequest {\n    harnessId: HarnessId;\n    sessionId: SessionId;\n    cwd: string;\n    version?: string;\n    installationDirectory?: string;\n    runtimeDirectory?: string;\n    authMethod?: string;\n    workspaceMode?: \'project\' | \'no-project\' | \'custom-cwd\';\n    capabilities?: HarnessCapability[];\n}',
   },
   {
     name: 'ImageAttachmentLimits',
@@ -3815,7 +3917,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'NativeCapabilities',
-    declaration: 'export interface NativeCapabilities {\n    product: \'opencodex\';\n    protocolVersion: string;\n    host: \'dsh\';\n    surface: \'native\';\n    api: {\n        base: string;\n        hostEvents: string;\n        muxEvents: string;\n    };\n    features: {\n        apiProxy: boolean;\n        typert: boolean;\n        remotePlugin: boolean;\n        voicePlugin: boolean;\n        localVoice: boolean;\n        imageGenerationExtension: boolean;\n    };\n    contracts: {\n        sessions: boolean;\n        workspaces: boolean;\n        interactions: boolean;\n        settings: boolean;\n        providers: boolean;\n        migration: boolean;\n        sandbox: boolean;\n    };\n    voice?: VoiceCapabilities;\n    pairing: {\n        supported: boolean;\n        kind: \'one-time-code\';\n        durable: boolean;\n    };\n    transports: {\n        lan: boolean;\n        tailscale: boolean;\n        relay: boolean;\n    };\n    surfaces: [\n        \'macos\',\n        \'iphone\',\n        \'cli\',\n        \'web\'\n    ];\n}',
+    declaration: 'export interface NativeCapabilities {\n    product: \'opencodex\';\n    protocolVersion: string;\n    host: \'dsh\';\n    surface: \'native\';\n    api: {\n        base: string;\n        hostEvents: string;\n        muxEvents: string;\n    };\n    features: {\n        apiProxy: boolean;\n        typert: boolean;\n        remotePlugin: boolean;\n        voicePlugin: boolean;\n        localVoice: boolean;\n        imageGenerationExtension: boolean;\n    };\n    contracts: {\n        sessions: boolean;\n        workspaces: boolean;\n        interactions: boolean;\n        settings: boolean;\n        providers: boolean;\n        migration: boolean;\n        sandbox: boolean;\n    };\n    voice?: VoiceCapabilities;\n    pairing: {\n        supported: boolean;\n        kind: \'authenticated-tls-code\';\n        durable: boolean;\n    };\n    transports: {\n        lan: boolean;\n        tailscale: boolean;\n        relay: boolean;\n    };\n    surfaces: [\n        \'macos\',\n        \'iphone\',\n        \'cli\',\n        \'web\'\n    ];\n}',
   },
   {
     name: 'NativeDeviceView',
@@ -3823,7 +3925,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'NativeHandshake',
-    declaration: 'export interface NativeHandshake {\n    product: \'opencodex\';\n    protocolVersion: string;\n    minimumClientProtocol: string;\n    host: \'dsh\';\n    surface: \'native\';\n    embeddedRuntimeId?: string;\n    embeddedProcessId?: number;\n}',
+    declaration: 'export interface NativeHandshake {\n    product: \'opencodex\';\n    protocolVersion: string;\n    minimumClientProtocol: string;\n    host: \'dsh\';\n    surface: \'native\';\n    plainHost?: \'127.0.0.1\' | \'0.0.0.0\';\n    secureRemotePort?: number;\n    embeddedRuntimeId?: string;\n    embeddedProcessId?: number;\n}',
   },
   {
     name: 'NativeMethod',
@@ -3843,15 +3945,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PairingCodeResponse',
-    declaration: 'export interface PairingCodeResponse {\n    code: string;\n    expiresAt: number;\n}',
+    declaration: 'export interface PairingCodeResponse {\n    code: string;\n    codeId: string;\n    expiresAt: number;\n    transport: \'tls-code-proof-v2\';\n    hostURL?: string;\n}',
   },
   {
     name: 'PairingStore',
-    declaration: 'export class PairingStore {\n    constructor(private readonly file: string, private readonly ttlMs: number = DEFAULT_PAIR_TTL_MS, private readonly maxDevices: number = DEFAULT_MAX_DEVICES);\n    async pair(request: PairRequest): Promise<PairResponse>;\n    createPairingCode(now: number = Date.now()): PairingCodeResponse;\n    async redeem(request: PairRequest & {\n        code: string;\n    }): Promise<PairResponse>;\n    async list(): Promise<NativeDeviceView[]>;\n    async verify(token: string): Promise<NativeDeviceView | undefined>;\n    async revoke(deviceId: string): Promise<boolean>;\n}',
+    declaration: 'export class PairingStore {\n    constructor(private readonly file: string, private readonly ttlMs: number = DEFAULT_PAIR_TTL_MS, private readonly maxDevices: number = DEFAULT_MAX_DEVICES);\n    async pair(request: PairRequest): Promise<PairResponse>;\n    createPairingCode(now: number = Date.now()): PairingCodeResponse;\n    async redeem(request: PairRequest & {\n        code: string;\n    }): Promise<PairResponse>;\n    async redeemTlsProof(request: PairRequest & {\n        codeId: string;\n        clientNonce: string;\n        proof: string;\n    }, certificateFingerprint: string): Promise<PairResponse>;\n    async list(): Promise<NativeDeviceView[]>;\n    async verify(token: string): Promise<NativeDeviceView | undefined>;\n    async revoke(deviceId: string): Promise<boolean>;\n}',
   },
   {
     name: 'PairRequest',
-    declaration: 'export interface PairRequest {\n    surface: \'macos\' | \'iphone\' | \'cli\';\n    deviceName: string;\n    appVersion?: string;\n    code?: string;\n}',
+    declaration: 'export interface PairRequest {\n    surface: \'macos\' | \'iphone\' | \'cli\';\n    deviceName: string;\n    appVersion?: string;\n    code?: string;\n    codeId?: string;\n    clientNonce?: string;\n    proof?: string;\n}',
   },
   {
     name: 'PairResponse',
@@ -4050,12 +4152,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    sessionId?: SessionId;\n}',
   },
   {
+    name: 'SandboxIsolationPolicy',
+    declaration: 'export interface SandboxIsolationPolicy {\n    protectedReadRoots: readonly string[];\n    readableRoots: readonly string[];\n    denyNetworkInbound: true;\n    denyHostProcessControl: true;\n    denyHostInterprocessCommunication: true;\n}',
+  },
+  {
     name: 'SandboxMode',
     declaration: 'export type SandboxMode = \'read-only\' | \'workspace-write\' | \'danger-full-access\';',
   },
   {
     name: 'SandboxPolicy',
-    declaration: 'export interface SandboxPolicy extends SandboxExecutionPolicy {\n    mode: ConfinedSandboxMode;\n}',
+    declaration: 'export interface SandboxPolicy extends SandboxExecutionPolicy {\n    mode: ConfinedSandboxMode;\n    runtimeWritableRoots?: readonly string[];\n    platformTemporaryWrites?: boolean;\n    isolation?: SandboxIsolationPolicy;\n}',
   },
   {
     name: 'SandboxPolicyRequest',

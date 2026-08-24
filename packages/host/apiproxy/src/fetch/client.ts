@@ -21,6 +21,7 @@ import {
   sessionCancelValueSchema,
   sessionAttachmentValueSchema,
   sessionCreateValueSchema,
+  sessionDiscardValueSchema,
   sessionForkValueSchema,
   sessionHistoryValueSchema,
   sessionListValueSchema,
@@ -34,6 +35,7 @@ import {
 } from '../api/sessions.schema.ts'
 import {
   workspaceArchiveSessionValueSchema,
+  workspaceUnarchiveSessionValueSchema,
   workspaceCreateValueSchema,
   workspaceDeleteValueSchema,
   workspaceInsertBeforeValueSchema,
@@ -42,7 +44,10 @@ import {
   workspaceRenameValueSchema,
 } from '../api/workspace.schema.ts'
 import { skillListValueSchema } from '../api/skills.schema.ts'
-import { harnessListValueSchema, harnessMutateValueSchema, harnessRefreshValueSchema } from '../api/harnesses.schema.ts'
+import {
+  harnessListValueSchema, harnessManageValueSchema, harnessMutateValueSchema,
+  harnessRefreshValueSchema, harnessResolveValueSchema,
+} from '../api/harnesses.schema.ts'
 import {
   agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
   agentPresetReadValueSchema, agentPresetRemoveValueSchema, agentPresetSelectValueSchema,
@@ -91,6 +96,7 @@ export interface IApiClient {
     list(payload: RequestPayload<'session.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.list'>>>
     search(payload: RequestPayload<'session.search'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.search'>>>
     create(payload: RequestPayload<'session.create'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.create'>>>
+    discard(payload: RequestPayload<'session.discard'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.discard'>>>
     history(payload: RequestPayload<'session.history'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.history'>>>
     models(payload: RequestPayload<'session.models'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.models'>>>
     selectModel(payload: RequestPayload<'session.selectModel'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.selectModel'>>>
@@ -123,14 +129,17 @@ export interface IApiClient {
     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
     insertSessionBefore(payload: RequestPayload<'workspace.insertSessionBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertSessionBefore'>>>
     archiveSession(payload: RequestPayload<'workspace.archiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.archiveSession'>>>
+    unarchiveSession(payload: RequestPayload<'workspace.unarchiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.unarchiveSession'>>>
   }
   skills: {
     list(payload: RequestPayload<'skill.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'skill.list'>>>
   }
   harnesses: {
     list(payload: RequestPayload<'harness.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'harness.list'>>>
+    resolve(payload: RequestPayload<'harness.resolve'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'harness.resolve'>>>
     refresh(payload: RequestPayload<'harness.refresh'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'harness.refresh'>>>
     mutate(payload: RequestPayload<'harness.mutate'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'harness.mutate'>>>
+    manage(payload: RequestPayload<'harness.manage'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'harness.manage'>>>
   }
   agentPresets: {
     list(payload: RequestPayload<'agentPreset.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.list'>>>
@@ -181,6 +190,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'session.list': sessionListValueSchema,
   'session.search': sessionSearchValueSchema,
   'session.create': sessionCreateValueSchema,
+  'session.discard': sessionDiscardValueSchema,
   'session.history': sessionHistoryValueSchema,
   'session.models': sessionModelsValueSchema,
   'session.selectModel': sessionSelectModelValueSchema,
@@ -207,10 +217,13 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
   'workspace.insertSessionBefore': workspaceInsertSessionBeforeValueSchema,
   'workspace.archiveSession': workspaceArchiveSessionValueSchema,
+  'workspace.unarchiveSession': workspaceUnarchiveSessionValueSchema,
   'skill.list': skillListValueSchema,
   'harness.list': harnessListValueSchema,
+  'harness.resolve': harnessResolveValueSchema,
   'harness.refresh': harnessRefreshValueSchema,
   'harness.mutate': harnessMutateValueSchema,
+  'harness.manage': harnessManageValueSchema,
   'agentPreset.list': agentPresetListValueSchema,
   'agentPreset.select': agentPresetSelectValueSchema,
   'agentPreset.read': agentPresetReadValueSchema,
@@ -425,6 +438,7 @@ export abstract class AbstractApiClient implements IApiClient {
     list: (payload, signal) => this.callUnary('session.list', payload, signal),
     search: (payload, signal) => this.callUnary('session.search', payload, signal),
     create: (payload, signal) => this.callUnary('session.create', payload, signal),
+    discard: (payload, signal) => this.callUnary('session.discard', payload, signal),
     history: (payload, signal) => this.callUnary('session.history', payload, signal),
     models: (payload, signal) => this.callUnary('session.models', payload, signal),
     selectModel: (payload, signal) => this.callUnary('session.selectModel', payload, signal),
@@ -464,6 +478,7 @@ export abstract class AbstractApiClient implements IApiClient {
     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),
     insertSessionBefore: (payload, signal) => this.callUnary('workspace.insertSessionBefore', payload, signal),
     archiveSession: (payload, signal) => this.callUnary('workspace.archiveSession', payload, signal),
+    unarchiveSession: (payload, signal) => this.callUnary('workspace.unarchiveSession', payload, signal),
   }
 
   readonly skills: IApiClient['skills'] = {
@@ -472,8 +487,10 @@ export abstract class AbstractApiClient implements IApiClient {
 
   readonly harnesses: IApiClient['harnesses'] = {
     list: (payload, signal) => this.callUnary('harness.list', payload, signal),
+    resolve: (payload, signal) => this.callUnary('harness.resolve', payload, signal),
     refresh: (payload, signal) => this.callUnary('harness.refresh', payload, signal),
     mutate: (payload, signal) => this.callUnary('harness.mutate', payload, signal),
+    manage: (payload, signal) => this.callUnary('harness.manage', payload, signal),
   }
 
   // Annotated like every sibling, and load-bearing rather than cosmetic:

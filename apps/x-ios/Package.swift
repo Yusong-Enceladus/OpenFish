@@ -16,7 +16,8 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
-            path: "Sources/XiOS"
+            path: "Sources/XiOS",
+            resources: [.process("Resources")]
         ),
     ]
 )

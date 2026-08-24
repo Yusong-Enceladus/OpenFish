@@ -24,7 +24,9 @@ export { canonicalPath, writableRoots } from './roots.ts'
  * File-effect policy for confined processes. `read-only` permits only required
  * sinks such as `/dev/null`; `workspace-write` also permits the workspace and a
  * backend-defined temp area; `danger-full-access` bypasses confinement. Network
- * and process visibility are outside this vocabulary.
+ * Additional resident-runtime isolation is expressed explicitly through
+ * {@link SandboxPolicy.isolation}; ordinary one-shot callers retain the
+ * historical file-effect-only policy.
  */
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
@@ -69,6 +71,41 @@ export type SandboxEnforcement = 'full' | 'partial'
 export interface SandboxPolicy extends SandboxExecutionPolicy {
   /** The file-effect mode this execution runs under. */
   mode: ConfinedSandboxMode
+  /**
+   * Additional private state roots the consumer owns and may write even when
+   * the workspace itself is read-only. This is for runtime state such as an
+   * isolated Harness home, never an ambient user directory.
+   */
+  runtimeWritableRoots?: readonly string[]
+  /**
+   * Whether `workspace-write` also grants the platform temporary roots.
+   * Ordinary shell calls retain the historical default (`true`). Long-lived
+   * third-party runtimes set this to `false` and receive a private temp root
+   * through {@link runtimeWritableRoots} instead.
+   */
+  platformTemporaryWrites?: boolean
+  /**
+   * Optional host-privacy boundary for an untrusted long-lived runtime. The
+   * provider must deny reads beneath every protected root except the exact
+   * readable roots, reject inbound listeners, and prevent control or
+   * inspection of unrelated host processes. A provider that cannot enforce
+   * every requested boundary fails closed.
+   */
+  isolation?: SandboxIsolationPolicy
+}
+
+/** Extra same-world isolation required by untrusted resident processes. */
+export interface SandboxIsolationPolicy {
+  /** Host path trees hidden from the confined process by default. */
+  protectedReadRoots: readonly string[]
+  /** Exact subtrees restored for the selected workspace, runtime, and auth method. */
+  readableRoots: readonly string[]
+  /** Reject sockets that listen for inbound connections while retaining outbound provider access. */
+  denyNetworkInbound: true
+  /** Restrict process inspection and signals to the sandbox process tree. */
+  denyHostProcessControl: true
+  /** Deny ambient host IPC such as Apple Events, pasteboard, and launch services. */
+  denyHostInterprocessCommunication: true
 }
 
 /**

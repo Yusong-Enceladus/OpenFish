@@ -2,17 +2,22 @@
 # Cordis plugin; DSH remains the sole runtime and state owner.
 - id: webserver
   config:
-    # OpenCodex is remotely reachable by default, unlike the ordinary Web
-    # profile. The connection row below requires a paired bearer for every
-    # non-loopback API/WebSocket request; an explicit --host 127.0.0.1 keeps a
-    # deployment local-only.
-    host: !!js ctx.webStartup.host ?? '0.0.0.0'
+    # Plain HTTP is loopback-only. The packaged Mac app supplies a private
+    # certificate and key for a separate TLS-only all-interfaces listener; a
+    # source checkout without those values stays local instead of silently
+    # exposing bearer tokens and task traffic in clear text.
+    host: !!js ctx.webStartup.host ?? '127.0.0.1'
     port: !!js ctx.webStartup.port ?? 3080
+    remoteTlsHost: !!js "process.env.OPENFISH_TLS_CERT_PATH && process.env.OPENFISH_TLS_PRIVATE_KEY_PATH ? '0.0.0.0' : ''"
+    remoteTlsPort: !!js Number(process.env.OPENFISH_TLS_PORT ?? 3081)
+    remoteTlsCertificatePath: !!js process.env.OPENFISH_TLS_CERT_PATH ?? ''
+    remoteTlsPrivateKeyPath: !!js process.env.OPENFISH_TLS_PRIVATE_KEY_PATH ?? ''
 
 - id: connection
   config:
     trustedHosts: !!js ctx.webRuntime.trustedHosts
     requireAuthenticationForRemote: true
+    requireSecureTransportForRemote: true
 
 - insert:
     - id: voice

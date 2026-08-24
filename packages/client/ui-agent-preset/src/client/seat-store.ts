@@ -71,7 +71,7 @@ export class AgentPresetSeatController {
      * moves with the composition instead of waiting for the next full list
      * refresh. Optional: a harness that renders no list omits it.
      */
-    private readonly onApplied?: (sessionId: string, agentPreset: string) => void,
+    private readonly onApplied?: (sessionId: SessionId, agentPreset: string) => void,
   ) {}
 
   private set(patch: Partial<AgentPresetSeatState>): void {

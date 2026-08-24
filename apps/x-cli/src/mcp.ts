@@ -31,7 +31,7 @@ export function profilePatchPath(): string {
 
 function loadPatch(): PatchRow[] {
   try {
-    const value = load(readFileSync(profilePatchPath(), 'utf8')) as unknown
+    const value = load(readFileSync(profilePatchPath(), 'utf8'))
     if (Array.isArray(value)) return value as PatchRow[]
     return []
   } catch (error) {
@@ -58,7 +58,7 @@ export function listServers(): McpServerView[] {
       && typeof row.config === 'object' && row.config !== null)
     .map(row => ({
       id: row.id,
-      name: String(row.config.serverName ?? row.id),
+      name: typeof row.config.serverName === 'string' ? row.config.serverName : row.id,
       transport: row.config.transport === 'stdio' ? 'stdio' : 'streamable-http',
       config: row.config,
     }))

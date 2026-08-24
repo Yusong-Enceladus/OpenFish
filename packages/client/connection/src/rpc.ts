@@ -25,6 +25,12 @@ export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean
 export interface ConnectionAuthenticationRequest {
   /** HTTP request headers. Header names are case-insensitive. */
   readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+  /** Transport-authenticated peer address, when the carrier is fetch-shaped. */
+  readonly remoteAddress?: string
+  /** Transport-authenticated TLS state, when available. */
+  readonly secure?: boolean
+  /** Node HTTP carrier peer address. */
+  readonly socket?: { readonly remoteAddress?: string | undefined; readonly encrypted?: boolean }
 }
 
 /** Authentication provider for non-loopback Connection traffic. */
@@ -36,6 +42,7 @@ export type ConnectionAuthenticator = (
 export interface HostConnectionSecurity {
   isTrusted(request: ConnectionAuthenticationRequest): boolean
   isLoopback(request: ConnectionAuthenticationRequest): boolean
+  isSecure(request: ConnectionAuthenticationRequest): boolean
   authenticate(request: ConnectionAuthenticationRequest): Promise<boolean>
   registerAuthenticator(authenticator: ConnectionAuthenticator): () => Promise<void>
   readonly hasAuthenticator: boolean

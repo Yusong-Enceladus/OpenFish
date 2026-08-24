@@ -15,6 +15,7 @@
 | POST | `/x-native/v2/pair` | 注册本地设备或兑换远程配对码 |
 | GET | `/x-native/v2/devices` | 在 Host 上列出不含 secret 的设备记录 |
 | POST | `/x-native/v2/revoke` | 在 Host 上撤销设备 token |
+| POST | `/x-native/v2/self/revoke` | 只撤销已认证的调用设备自身 |
 
 ## 协议事实
 
@@ -22,10 +23,10 @@
 - `api.base: /api`，事件位于 `/api/events.host` 与 `/api/events.mux`；这些路径由 `dsh-client-connection` 拥有，此处只将其镜像为启动发现事实。
 - 方法清单来自实时 Typert 本地注册表，因此未组合 `typert` 服务时为空，并会自动包含完整 Web profile 中所有已挂载的远程 namespace。
 - 配对记录存储在 `$DSH_HOME/x-native/devices.json`（可通过 `config.dataDir` 覆盖）。token 以 SHA-256 摘要持久化；secret 只在配对时返回一次。
-- 本地客户端可直接配对。远程客户端必须兑换 Host 上创建的十分钟、一次性配对码。所得 bearer 会被普通 DSH HTTP 与 WebSocket 信任边界接受；设备列表、配对码创建和撤销仍只允许 Host 本地操作。
+- 本地客户端可直接配对。远程客户端必须通过 TLS Code Proof 兑换 Host 上创建的十分钟、一次性配对码：HMAC 使用带外配对码本身作为密钥，并绑定 Host Certificate Fingerprint，因此 Bootstrap Connection 中公开传输的 Code Id 无法制造有效证明。所得 bearer 会被普通 DSH HTTP 与 WebSocket 信任边界接受；设备列表、配对码创建与撤销其他设备仍只允许 Host 本地操作，已配对设备只能撤销自身。
 - LAN 与 Tailscale 共用同一条经过认证的 DSH carrier。relay 仍是可替换的传输插件，只在已挂载时报告。
 - 图片生成能力标志表示已挂载 provider registry；OpenCodex 刻意不内置图片模型。
-- 未指定 Workspace 的原生任务使用 `$DSH_HOME/openfish/sessions/no-workspace` 作为 cwd，绝不继承 Host 进程的启动目录。
+- 未指定 Workspace 的原生任务使用各自的 `$DSH_HOME/openfish/no-project/<session-id>` cwd，绝不继承 Host 进程的启动目录，也不会与其他 No Project 任务共享文件。
 
 ## 组合
 
@@ -53,7 +54,8 @@ curl http://127.0.0.1:3180/x-native/v2/capabilities
 
 ## 安全边界
 
-- 配对码只存在于 Host 内存中，十分钟后过期，并在设备注册开始前即被消费。
+- 配对码只存在于 Host 内存中，十分钟后过期，并在设备注册开始前即被消费。原始配对码永远不会进入 Bootstrap Request，也不会写入磁盘。
+- HTTP 解析器必须先得到受支持的客户端 surface 与非空设备名，才能修改 registry；畸形的配对与撤销请求会以 `invalid-request` 失败。
 - 设备变更会串行执行；registry 以 `0600` 权限原子写入；bearer 通过恒定时间摘要比较验证。
 - bearer 可授权普通的非特权 DSH API。配置与凭据方法仍服从 Host connection 层更严格的 loopback-only 策略。
 - registry 目前采用部署级授权，尚无逐设备 ACL。relay 行为属于所选 relay 插件，而不属于本组合包。

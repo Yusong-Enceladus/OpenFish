@@ -278,7 +278,10 @@ export function virtualManifest(virtual: string, name: string): VirtualManifest 
   const prefix = `${name.replace('/', '+')}@`
   const entry = readdirSync(virtual).find(dir => dir.startsWith(prefix))
   if (entry !== undefined) {
-    return JSON.parse(readFileSync(resolve(virtual, entry, 'node_modules', name, 'package.json'), 'utf8')) as VirtualManifest
+    const candidate = resolve(virtual, entry, 'node_modules', name, 'package.json')
+    if (existsSync(candidate)) {
+      return JSON.parse(readFileSync(candidate, 'utf8')) as VirtualManifest
+    }
   }
   for (const dir of readdirSync(virtual)) {
     const candidate = resolve(virtual, dir, 'node_modules', name, 'package.json')
@@ -289,20 +292,45 @@ export function virtualManifest(virtual: string, name: string): VirtualManifest 
   return undefined
 }
 
+/**
+ * Resolve the virtual stores backing one pnpm `node_modules` tree.
+ *
+ * pnpm records an absolute or node_modules-relative `virtualStoreDir` in
+ * `.modules.yaml` when a workspace routes its virtual store elsewhere. Keep
+ * the conventional `.pnpm` directory as a fallback for ordinary installs.
+ *
+ * @param nodeModules - absolute path to a pnpm-managed `node_modules` tree.
+ * @returns existing and configured virtual-store candidates in lookup order.
+ */
+export function pnpmVirtualStoreDirectories(nodeModules: string): string[] {
+  const conventional = resolve(nodeModules, '.pnpm')
+  const metadataPath = resolve(nodeModules, '.modules.yaml')
+  if (!existsSync(metadataPath)) return [conventional]
+  const metadata = yaml.load(readFileSync(metadataPath, 'utf8')) as { virtualStoreDir?: unknown } | null
+  if (typeof metadata?.virtualStoreDir !== 'string' || metadata.virtualStoreDir.length === 0) {
+    return [conventional]
+  }
+  const configured = resolve(nodeModules, metadata.virtualStoreDir)
+  return configured === conventional ? [conventional] : [conventional, configured]
+}
+
 /** Resolve one installed external package manifest from either pnpm store. */
 function installedManifest(name: string): VirtualManifest | undefined {
   let manifest: (Manifest & { license?: string; repository?: string | { url?: string }; homepage?: string }) | undefined
   // Workspace-local link farms can expose a dependency that is not linked at
   // the repository root; both are backed by the root workspace's lockfile.
   for (const store of ['node_modules', 'native/landlock-run/node_modules']) {
-    const direct = resolve(root, store, name, 'package.json')
+    const nodeModules = resolve(root, store)
+    const direct = resolve(nodeModules, name, 'package.json')
     if (existsSync(direct)) {
       manifest = JSON.parse(readFileSync(direct, 'utf8')) as typeof manifest
       break
     }
-    const virtual = resolve(root, store, '.pnpm')
-    if (!existsSync(virtual)) continue
-    manifest = virtualManifest(virtual, name)
+    for (const virtual of pnpmVirtualStoreDirectories(nodeModules)) {
+      if (!existsSync(virtual)) continue
+      manifest = virtualManifest(virtual, name)
+      if (manifest !== undefined) break
+    }
     if (manifest !== undefined) break
   }
   return manifest

@@ -16,13 +16,31 @@ function validate(events: readonly SessionEvent[], fail: InvariantFailure): void
   if (selected[0] !== undefined && firstTurn !== undefined && selected[0].seq > firstTurn.seq) {
     fail('Harness selection must precede the first turn')
   }
-  const selectedId = selected[0]?.data.harnessId
+  const selectedId = selected[0]?.data.harnessId ?? 'dsh'
+  const capabilitySnapshot = selected[0]?.data.capabilities
+  if (capabilitySnapshot !== undefined) {
+    if (capabilitySnapshot.length === 0) fail('a new Harness selection capability snapshot must not be empty')
+    const ids = capabilitySnapshot.map(capability => capability.id)
+    if (new Set(ids).size !== ids.length) fail('a Harness selection capability snapshot must not contain duplicate ids')
+  }
   for (const event of events) {
-    if ((event.type === 'harness/native-event' || event.type === 'harness/runtime-node') && event.data.harnessId !== selectedId) {
+    if ((event.type === 'harness/native-event' || event.type === 'harness/runtime-node' || event.type === 'harness/runtime-edge' || event.type === 'harness/remote-session')
+      && event.data.harnessId !== selectedId) {
       fail(`Harness event ${event.seq} does not match the selected Harness`)
     }
     if (event.type === 'harness/runtime-node') {
       if (event.data.nodeId.length === 0 || event.data.activity.length === 0) fail(`Harness runtime event ${event.seq} is incomplete`)
+    }
+    if (event.type === 'harness/runtime-edge') {
+      if (event.data.edgeKey.length === 0
+        || event.data.from.length === 0
+        || event.data.to.length === 0
+        || event.data.activity.length === 0) {
+        fail(`Harness runtime edge event ${event.seq} is incomplete`)
+      }
+    }
+    if (event.type === 'harness/remote-session' && event.data.remoteSessionId.length === 0) {
+      fail(`Harness remote-session event ${event.seq} has no remote identity`)
     }
   }
 }
@@ -33,7 +51,8 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return
     const [session, event] = args as [Session, SessionEvent]
-    if (event.type !== 'harness/selected' && event.type !== 'harness/native-event' && event.type !== 'harness/runtime-node') return
+    if (event.type !== 'harness/selected' && event.type !== 'harness/native-event'
+      && event.type !== 'harness/runtime-node' && event.type !== 'harness/runtime-edge' && event.type !== 'harness/remote-session') return
     validate([...session.events, event], fail)
   }, { global: true })
 }, { inject: ['sessions'] })

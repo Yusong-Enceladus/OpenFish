@@ -112,7 +112,7 @@ export function apply(ctx: ClientContext): void {
           ...summary.agentPreset === undefined ? {} : { agentPreset: summary.agentPreset },
         }
     }, (sessionId, agentPreset) => {
-      scope.sessions.noteAgentPreset(sessionId as never, agentPreset)
+      scope.sessions.noteAgentPreset(sessionId, agentPreset)
     })
 
     const seatInjected = (): AgentPresetSeatInjected => ({

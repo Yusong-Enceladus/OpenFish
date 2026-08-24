@@ -152,6 +152,10 @@ it('routes Harness model listing and selection through the live Harness controll
     harnessModelCatalog: () => ({
       current: 'anthropic/claude-sonnet',
       currentReasoningEffort: 'high',
+      account: {
+        label: 'Anthropic API billing', billing: 'usage',
+        detail: 'The live Harness reports usage billing for this route.',
+      },
       models: [
         { id: 'anthropic/claude-sonnet', name: 'Claude Sonnet', reasoning: {
           efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'high',
@@ -181,16 +185,56 @@ it('routes Harness model listing and selection through the live Harness controll
       ],
     }],
     failures: [],
+    account: {
+      label: 'Anthropic API billing', billing: 'usage',
+      detail: 'The live Harness reports usage billing for this route.',
+    },
     harnessOptions,
   })
   expect(expectValue(await api.sessions.selectModel(request({
     sessionId, provider: 'harness', model: 'openai/gpt-5', reasoningEffort: 'high',
   }))).selected).toEqual({ provider: 'harness', model: 'openai/gpt-5', reasoningEffort: 'high' })
-  expect(selectHarnessModel).toHaveBeenCalledWith('openai/gpt-5', 'high')
+  expect(selectHarnessModel).toHaveBeenCalledWith('openai/gpt-5', 'high', expect.any(AbortSignal))
   expect(expectValue(await api.sessions.setHarnessConfig(request({
     sessionId, configId: 'mode', value: 'plan',
   }))).options[0]?.currentValue).toBe('plan')
-  expect(selectHarnessConfig).toHaveBeenCalledWith('mode', 'plan')
+  expect(selectHarnessConfig).toHaveBeenCalledWith('mode', 'plan', expect.any(AbortSignal))
+  await ctx.fiber.dispose()
+})
+
+it('cancels a live Harness model mutation through the protocol controller', async () => {
+  const { ctx, agent, sessionId } = await harness()
+  let receivedSignal: AbortSignal | undefined
+  let markStarted: (() => void) | undefined
+  const started = new Promise<void>((resolve) => { markStarted = resolve })
+  Object.assign(agent, {
+    options: { provider: 'harness', model: 'future/a' },
+    harnessModelCatalog: () => ({ current: 'future/a', models: [{ id: 'future/a', name: 'A' }, { id: 'future/b', name: 'B' }] }),
+    selectHarnessModel: (_model: string, _effort?: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      receivedSignal = signal
+      markStarted?.()
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error('Harness model mutation aborted'))
+      }, { once: true })
+    }),
+    harnessConfigCatalog: () => [],
+    selectHarnessConfig: () => Promise.resolve([]),
+  })
+  const api = createApiProxy(ctx, {
+    defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+    cwd: '/tmp',
+  })
+  const controller = new AbortController()
+  const pending = api.sessions.selectModel(request({
+    sessionId, provider: 'harness', model: 'future/b',
+  }), controller.signal)
+  await started
+  controller.abort(new DOMException('cancelled by client', 'AbortError'))
+  const response = await pending
+
+  expect(receivedSignal).toBe(controller.signal)
+  expect(response.result).toMatchObject({ ok: false, error: { code: 'cancelled' } })
+  expect(agent.session.events.filter(event => event.type === 'agent/model-selected')).toHaveLength(0)
   await ctx.fiber.dispose()
 })
 
@@ -220,6 +264,89 @@ it('lets an external Harness own prompt routing without an LLM adapter named har
     sessionId, mode: 'queue' as const, content: [{ type: 'text' as const, text: 'hi' }],
   })))
   expect(followup).toHaveBeenCalledOnce()
+  await ctx.fiber.dispose()
+})
+
+it('keeps an ACP Harness routable when it intentionally owns models without advertising a picker', async () => {
+  const { ctx, agent, sessionId } = await harness()
+  const followup = vi.fn()
+  agent.session.append('harness/selected', {
+    harnessId: 'future-internal-model' as never,
+    version: '1.0.0',
+    protocol: 'acp',
+    remoteSessionId: 'remote-internal-model',
+  })
+  Object.assign(agent, {
+    options: { provider: 'harness', model: 'future-internal-model' },
+    harnessModelCatalog: () => undefined,
+    harnessConfigCatalog: () => [],
+    followup,
+  })
+  ctx.provide('harnesses', {
+    describe: () => Promise.resolve({
+      modelConfiguration: {
+        owner: 'harness', required: false,
+        detail: 'This Harness owns an internal model route and exposes no model picker.',
+      },
+    }),
+  } as never)
+  const api = createApiProxy(ctx, {
+    defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+    cwd: '/tmp',
+  })
+
+  expect(expectValue(await api.sessions.models(request({ sessionId })))).toMatchObject({
+    current: { provider: 'harness', model: 'future-internal-model' },
+    routable: true,
+    groups: [],
+    failures: [],
+  })
+  expectValue(await api.sessions.prompt(request({
+    sessionId,
+    mode: 'queue' as const,
+    content: [{ type: 'text' as const, text: 'use your internal route' }],
+  })))
+  expect(followup).toHaveBeenCalledOnce()
+  await ctx.fiber.dispose()
+})
+
+it('fails closed when a model-required Harness advertises no live models', async () => {
+  const { ctx, agent, sessionId } = await harness()
+  const followup = vi.fn()
+  agent.session.append('harness/selected', {
+    harnessId: 'future-required' as never,
+    version: '1.0.0',
+    protocol: 'future-protocol',
+    remoteSessionId: 'remote-required',
+  })
+  Object.assign(agent, {
+    options: { provider: 'harness', model: 'future-required' },
+    harnessModelCatalog: () => undefined,
+    harnessConfigCatalog: () => [],
+    followup,
+  })
+  ctx.provide('harnesses', {
+    describe: () => Promise.resolve({
+      modelConfiguration: { owner: 'harness', required: true, detail: 'Live catalog required.' },
+    }),
+  } as never)
+  const api = createApiProxy(ctx, {
+    defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+    cwd: '/tmp',
+  })
+
+  const models = expectValue(await api.sessions.models(request({ sessionId })))
+  expect(models.routable).toBe(false)
+  expect(models.groups).toEqual([])
+  expect(models.failures).toHaveLength(1)
+  expect(models.failures[0]?.id).toBe('harness')
+  expect(models.failures[0]?.message).toContain('did not advertise')
+  expect((await api.sessions.prompt(request({
+    sessionId,
+    mode: 'queue' as const,
+    content: [{ type: 'text' as const, text: 'must not run' }],
+  }))).result).toMatchObject({ ok: false, error: { code: 'model-unavailable' } })
+  expect(followup).not.toHaveBeenCalled()
   await ctx.fiber.dispose()
 })
 
@@ -406,6 +533,26 @@ describe('Web session model selection', () => {
         message: 'adapter returned invalid or duplicate model metadata for provider "duplicate"',
       },
     ])
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps provider catalog diagnostics useful without reflecting credentials', async () => {
+    const { ctx, sessionId } = await harness()
+    const secret = 'github_pat_openfish_private_fixture'
+    ctx.llm.registerAdapter(['leaky-provider'], new CatalogAdapter(
+      'Leaky Provider',
+      new Error(`Authorization: Bearer bearer-private-fixture token=${secret}`),
+    ))
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId })))
+    const failure = catalog.failures.find(item => item.id === 'leaky-provider')
+    expect(failure?.message).toContain('[redacted]')
+    expect(failure?.message).not.toContain(secret)
+    expect(failure?.message).not.toContain('bearer-private-fixture')
     await ctx.fiber.dispose()
   })
 

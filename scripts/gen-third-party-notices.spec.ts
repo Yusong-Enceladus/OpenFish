@@ -16,6 +16,7 @@ import {
   manifestPatterns,
   parsePyprojectRequirements,
   parseVendoredRows,
+  pnpmVirtualStoreDirectories,
   render,
   tierExternalDeps,
   virtualManifest,
@@ -129,6 +130,40 @@ describe('virtualManifest', () => {
       expect(virtualManifest(store, '@scope/missing')).toBeUndefined()
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores an optional-package store entry whose manifest was not installed on this platform', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-optional-miss-'))
+    try {
+      const store = join(root, 'store')
+      mkdirSync(join(store, '@scope+missing@1.0.0', 'node_modules'), { recursive: true })
+
+      expect(virtualManifest(store, '@scope/missing')).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('pnpmVirtualStoreDirectories', () => {
+  it('honors the virtual store recorded by pnpm outside the workspace', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'dsh-notices-external-store-'))
+    try {
+      const nodeModules = join(fixture, 'workspace', 'node_modules')
+      const configured = join(fixture, 'external-virtual-store')
+      mkdirSync(nodeModules, { recursive: true })
+      mkdirSync(configured, { recursive: true })
+      writeFileSync(join(nodeModules, '.modules.yaml'), JSON.stringify({
+        virtualStoreDir: '../../external-virtual-store',
+      }))
+
+      expect(pnpmVirtualStoreDirectories(nodeModules)).toEqual([
+        join(nodeModules, '.pnpm'),
+        configured,
+      ])
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
     }
   })
 })

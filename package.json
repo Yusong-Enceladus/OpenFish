@@ -39,6 +39,8 @@
     "test:harness-contract": "bash script/check_harness_contract.sh",
     "gen-openfish-community-catalog": "tsx scripts/gen-openfish-community-catalog.ts",
     "verify-openfish-community-catalog": "tsx scripts/gen-openfish-community-catalog.ts --check",
+    "gen-openfish-demo-harness-catalog": "tsx scripts/gen-openfish-demo-harness-catalog.ts",
+    "verify-openfish-demo-harness-catalog": "tsx scripts/gen-openfish-demo-harness-catalog.ts --check",
     "release:openfish:preflight": "bash script/check_openfish_source_release.sh",
     "test:issue-management": "node .github/issue-management/policy.test.mjs",
     "test:snapshot": "vitest run --config vitest.snapshot.config.ts",

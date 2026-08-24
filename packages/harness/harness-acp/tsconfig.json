@@ -10,8 +10,13 @@
     { "path": "../../core/session" },
     { "path": "../../session/session-persistence" },
     { "path": "../../llm/llm" },
+    { "path": "../../sandbox/sandbox" },
+    { "path": "../../sandbox/sandbox-policy" },
+    { "path": "../../interaction/permission-presets" },
     { "path": "../../subprocess/subprocess" },
+    { "path": "../../subagent/subagent-codex" },
     { "path": "../../interaction/user-approval" },
+    { "path": "../../interaction/user-questions" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

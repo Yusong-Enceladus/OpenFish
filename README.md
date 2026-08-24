@@ -14,7 +14,7 @@ English | [中文](README.zh.md)
 
 OpenFish is a native macOS and iPhone home for interchangeable coding-agent Harnesses. Install one app, choose a Harness, and keep the same durable tasks, approvals, model controls, and streamed activity available on the Mac and a paired iPhone.
 
-OpenFish is built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) and retains its MIT license and third-party notices. DSH owns the Host, session log, tools, permissions, and plugin composition; OpenFish adds the native shell, managed Harness installation, ACP compatibility layer, and cross-device experience.
+OpenFish is built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) and retains its MIT license and third-party notices. DSH provides the Host-side control plane, durable event log, credential boundary, process supervision, and device transport. The selected Harness still owns its agent loop, model-facing context, tool semantics, approvals, and remote-session behavior; its versioned Driver maps only the capabilities it actually exposes. OpenFish adds the native shell, managed Harness installation, protocol adapters, and cross-device experience.
 
 <p align="center">
   <img src="docs/assets/openfish-iphone-demo.png" alt="OpenFish on iPhone showing synthetic remote tasks" width="320">
@@ -24,7 +24,7 @@ The images above use OpenFish's deterministic, network-isolated demo state. No r
 
 ## Public Alpha
 
-OpenFish is ready for evaluation, not a stable compatibility promise. Harnesses and ACP are evolving quickly, and breaking changes are possible. Read the [compatibility matrix](docs/openfish-compatibility.md) before reporting a Harness as supported, and the [Public Alpha release notes](docs/openfish-public-alpha.md) before installing it on a primary machine.
+This source tree is a Public Alpha release candidate, not a stable compatibility promise or a passed release certificate. Harnesses and ACP are evolving quickly, and breaking changes are possible. Read the [compatibility matrix](docs/openfish-compatibility.md) before reporting a Harness as supported, the [value-evidence status](docs/openfish-value-evidence.md) for what has and has not been demonstrated, the [threat model](docs/openfish-threat-model.md), and the [Public Alpha release notes](docs/openfish-public-alpha.md) before installing it on a primary machine.
 
 ## What is different
 
@@ -33,7 +33,7 @@ OpenFish is ready for evaluation, not a stable compatibility promise. Harnesses 
 - **Protocol-driven controls.** ACP models, reasoning levels, modes, and future standard configuration options come from the live Harness rather than a provider-name switch in the UI.
 - **Mac and iPhone share one authority.** The phone pairs to the Mac Host over LAN or Tailscale and follows the same session log, approvals, queue, and task state.
 - **Version-pinned tasks.** A task remains attached to the Harness Pack version that created it, while new tasks can use an updated version.
-- **Progressive Harness Lens.** Start with a plain-language summary, inspect an evidence-backed architecture and observed runtime activity when needed, then use Manifest Editor on the Mac to create or edit declared composable nodes, run a non-billed preflight, and exchange credential-free manifests. Unknown private internals stay visibly opaque instead of becoming invented diagrams.
+- **Progressive Harness Lens.** Start with a plain-language summary, inspect an evidence-backed architecture and observed runtime activity when needed, then use Manifest Editor on the Mac to create or edit declared composable nodes, run a prompt-free live preflight, and exchange credential-free manifests. A preflight may still create provider-owned session state or incur provider-specific setup cost; unknown private internals stay visibly opaque instead of becoming invented diagrams.
 
 ![OpenFish default Harness picker with synthetic DSH, Oh My Pi, and Codex entries](docs/assets/openfish-harness-picker-demo.png)
 
@@ -58,6 +58,8 @@ See the [macOS guide](apps/x-macos/README.md), [iPhone guide](apps/x-ios/README.
 Build an unsigned local macOS artifact:
 
 ```sh
+git clone https://github.com/Yusong-Enceladus/OpenFish.git
+cd OpenFish
 pnpm install --frozen-lockfile
 ./script/build_openfish_release.sh "$(uname -m)"
 ```

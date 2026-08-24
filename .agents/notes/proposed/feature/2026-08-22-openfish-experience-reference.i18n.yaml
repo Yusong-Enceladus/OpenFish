@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-22-openfish-experience-reference.md
-2026-08-22-openfish-experience-reference.md: d0b7cf8ade27affe93f4b4d51aeec1b47cbd052c
-2026-08-22-openfish-experience-reference.zh.md: c3fc1185edddd73541af2565c4c56798f43e8b7c
+2026-08-22-openfish-experience-reference.md: c011f6af70fce54328f30b4ada29efb23674ba02
+2026-08-22-openfish-experience-reference.zh.md: e14ddc6a49b4a50dd7f4ff6c773896add50876b7

@@ -35,10 +35,18 @@ interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Optional TLS-only all-interfaces listener for native remote clients. */
+  remoteTlsHost?: '' | '0.0.0.0'
+  /** Remote TLS port; zero requests an OS-assigned port. */
+  remoteTlsPort?: number
+  /** PEM certificate path for the remote TLS listener. */
+  remoteTlsCertificatePath?: string
+  /** PEM private-key path for the remote TLS listener. */
+  remoteTlsPrivateKeyPath?: string
 }
 ```
 
-`host` 只接受 `127.0.0.1`（默认姿态）和 `0.0.0.0`（刻意的网络暴露）；没有 TLS、认证或 origin 策略，因此绑定到非回环地址会把服务器暴露给该网络。dist 位置是认领席位的前端插件的组装事实。
+`host` 只接受 `127.0.0.1`（默认姿态）和 `0.0.0.0`（刻意的明文 HTTP 暴露）。原生远程客户端使用另一个可选的仅 TLS 监听器：它只绑定所有网络接口，要求显式证书和私钥路径，会拒绝不安全的私钥权限，并且不会削弱浏览器监听器默认只绑定回环地址的姿态。认证和 origin 策略仍由叠加在该载体上的路由负责。dist 位置是认领席位的前端插件的组装事实。
 
 ## 服务
 
@@ -104,7 +112,7 @@ tapIndex(transform: (html: string) => string): () => void
 applyIndexTaps(html: string): string
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:90`](../../packages/host/webserver/src/index.ts)
 
 <a id="ctxxnative--xnative"></a>
 
@@ -171,5 +179,5 @@ devices(): Promise<NativeDeviceView[]>
 revoke(deviceId: string): Promise<boolean>
 ```
 
-Source: [`packages/bundle/x-native/src/index.ts:191`](../../packages/bundle/x-native/src/index.ts)
+Source: [`packages/bundle/x-native/src/index.ts:195`](../../packages/bundle/x-native/src/index.ts)
 <!-- END GENERATED cordis-surface -->

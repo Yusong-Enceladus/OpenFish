@@ -27,6 +27,18 @@ import {
   type CodexRunSpec,
 } from './run.ts'
 
+// The Harness Driver consumes the same reviewed app-server transport through
+// the package boundary. Exporting it here keeps release bundles on built JS
+// instead of reaching into workspace TypeScript source files.
+export {
+  CodexAppServerWire,
+  type CodexAppServerAccount,
+  type CodexAppServerModel,
+  type CodexAppServerThreadSelection,
+  type CodexAppServerTurnInput,
+  type CodexAppServerWireHooks,
+} from './wire.ts'
+
 export const name = 'subagent-codex'
 export const inject = ['subagents', 'subprocess']
 

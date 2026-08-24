@@ -78,12 +78,32 @@ enum MobileConversationProjector {
         let summary: String?
         let sections: [MobileConversationSection]
     }
+    private struct NativeToolState {
+        let id: String
+        let seq: Int
+        var title: String
+        var kind: String?
+        var status: String?
+        var rawInput: MobileJSONValue?
+        var rawOutput: MobileJSONValue?
+        var content: MobileJSONValue?
+        var locations: MobileJSONValue?
+    }
+    private struct NativePlanState {
+        let id: String
+        let seq: Int
+        var text: String
+        var detail: String?
+        var completed: Bool
+    }
 
     static func project(_ records: [MobileEventRecord]) -> [MobileConversationItem] {
         let ordered = records.sorted { $0.event.seq < $1.event.seq }
         var results: [String: ToolResult] = [:]
         var finalized: Set<StepKey> = []
         var partials: [StepKey: Partial] = [:]
+        var nativeTools: [String: NativeToolState] = [:]
+        var nativePlans: [String: NativePlanState] = [:]
 
         for record in ordered {
             if record.event.type == "assistant/message", let key = stepKey(record.event.data) {
@@ -95,6 +115,14 @@ enum MobileConversationProjector {
                 apply(chunk, to: &partial)
                 partial.seq = record.event.seq
                 partials[key] = partial
+            }
+            if record.event.type == "harness/native-event", let native = record.event.data["event"] {
+                foldNativeEvent(
+                    native,
+                    seq: record.event.seq,
+                    tools: &nativeTools,
+                    plans: &nativePlans
+                )
             }
             guard record.event.type == "tool/result" else { continue }
             let message = record.event.data["message"] ?? record.event.data
@@ -187,6 +215,17 @@ enum MobileConversationProjector {
                 isRunning: true, failed: false
             ))
         }
+        for tool in nativeTools.values {
+            output.append(nativeToolItem(tool))
+        }
+        for plan in nativePlans.values {
+            output.append(.init(
+                id: "harness-plan:\(plan.id)", seq: plan.seq, kind: .activity,
+                title: "Plan", text: "", detail: plan.detail,
+                isRunning: !plan.completed, failed: false,
+                sections: [.init(id: "plan", title: nil, text: plan.text, style: .markdown)]
+            ))
+        }
         return output.sorted { $0.seq == $1.seq ? $0.id < $1.id : $0.seq < $1.seq }
     }
 
@@ -234,6 +273,136 @@ enum MobileConversationProjector {
                   let height = attachment["height"]?.intValue else { return nil }
             return .init(attachmentId: id, mediaType: mediaType, width: width, height: height, name: attachment["name"]?.stringValue)
         } ?? []
+    }
+
+    private static func foldNativeEvent(
+        _ native: MobileJSONValue,
+        seq: Int,
+        tools: inout [String: NativeToolState],
+        plans: inout [String: NativePlanState]
+    ) {
+        if let updateType = native["sessionUpdate"]?.stringValue {
+            switch updateType {
+            case "tool_call", "tool_call_update":
+                guard let id = native["toolCallId"]?.stringValue else { return }
+                var state = tools[id] ?? NativeToolState(
+                    id: id, seq: seq, title: native["title"]?.stringValue ?? "Harness tool",
+                    kind: nil, status: nil, rawInput: nil, rawOutput: nil, content: nil, locations: nil
+                )
+                if let title = native["title"]?.stringValue { state.title = title }
+                if let kind = native["kind"]?.stringValue { state.kind = kind }
+                if let status = native["status"]?.stringValue { state.status = status }
+                if let value = native["rawInput"], value != .null { state.rawInput = value }
+                if let value = native["rawOutput"], value != .null { state.rawOutput = value }
+                if let value = native["content"], value != .null { state.content = value }
+                if let value = native["locations"], value != .null { state.locations = value }
+                tools[id] = state
+            case "plan":
+                plans["default"] = nativePlan(id: "default", seq: seq, entries: native["entries"]?.arrayValue ?? [])
+            case "plan_update":
+                guard let plan = native["plan"], let id = plan["id"]?.stringValue else { return }
+                switch plan["type"]?.stringValue {
+                case "items":
+                    plans[id] = nativePlan(id: id, seq: plans[id]?.seq ?? seq, entries: plan["entries"]?.arrayValue ?? [])
+                case "markdown":
+                    plans[id] = NativePlanState(
+                        id: id, seq: plans[id]?.seq ?? seq,
+                        text: plan["content"]?.stringValue ?? "", detail: "Harness plan", completed: false
+                    )
+                case "file":
+                    plans[id] = NativePlanState(
+                        id: id, seq: plans[id]?.seq ?? seq,
+                        text: plan["uri"]?.stringValue ?? "Plan file", detail: "Plan stored by the Harness", completed: false
+                    )
+                default: break
+                }
+            case "plan_removed":
+                if let id = native["id"]?.stringValue { plans.removeValue(forKey: id) }
+            default: break
+            }
+            return
+        }
+
+        guard let method = native["method"]?.stringValue, method.hasPrefix("item/"),
+              let item = native["params"]?["item"], let itemType = item["type"]?.stringValue,
+              itemType != "agentMessage", itemType != "reasoning" else { return }
+        let id = item["id"]?.stringValue ?? native["params"]?["itemId"]?.stringValue ?? "codex-\(seq)"
+        var state = tools[id] ?? NativeToolState(
+            id: id, seq: seq, title: codexItemTitle(itemType: itemType, item: item),
+            kind: itemType, status: nil, rawInput: nil, rawOutput: nil, content: nil, locations: nil
+        )
+        state.title = codexItemTitle(itemType: itemType, item: item)
+        state.status = method == "item/completed" ? codexItemTerminalStatus(item) : "in_progress"
+        state.rawInput = item["command"] ?? item["query"] ?? item["input"] ?? state.rawInput
+        state.rawOutput = item["aggregatedOutput"] ?? item["output"] ?? item["result"] ?? state.rawOutput
+        state.content = item["changes"] ?? item["content"] ?? state.content
+        tools[id] = state
+    }
+
+    private static func nativePlan(id: String, seq: Int, entries: [MobileJSONValue]) -> NativePlanState {
+        let completedCount = entries.filter { $0["status"]?.stringValue == "completed" }.count
+        let text = entries.map { entry -> String in
+            let checked = entry["status"]?.stringValue == "completed" ? "x" : " "
+            return "- [\(checked)] \(entry["content"]?.stringValue ?? "Untitled step")"
+        }.joined(separator: "\n")
+        return .init(
+            id: id, seq: seq, text: text,
+            detail: entries.isEmpty ? "Empty plan" : "\(completedCount) of \(entries.count) complete",
+            completed: !entries.isEmpty && completedCount == entries.count
+        )
+    }
+
+    private static func nativeToolItem(_ tool: NativeToolState) -> MobileConversationItem {
+        var sections: [MobileConversationSection] = []
+        if let input = tool.rawInput {
+            sections.append(.init(id: "input", title: "Input", text: prettyJSON(input), style: .code(language: "json")))
+        }
+        if let content = tool.content?.arrayValue {
+            for (index, block) in content.enumerated() {
+                switch block["type"]?.stringValue {
+                case "content":
+                    let value = block["content"] ?? block
+                    let text = value["text"]?.stringValue ?? value["uri"]?.stringValue ?? ""
+                    if !text.isEmpty { sections.append(.init(id: "content:\(index)", title: nil, text: text, style: .markdown)) }
+                case "diff":
+                    let path = block["path"]?.stringValue ?? "File change"
+                    let newText = block["newText"]?.stringValue ?? ""
+                    sections.append(.init(
+                        id: "diff:\(index)", title: path,
+                        text: renderDiff(path: path, oldText: block["oldText"]?.stringValue, newText: newText), style: .diff
+                    ))
+                case "terminal":
+                    if let id = block["terminalId"]?.stringValue {
+                        sections.append(.init(id: "terminal:\(index)", title: "Terminal", text: id, style: .code(language: "console")))
+                    }
+                default: break
+                }
+            }
+        }
+        if let output = tool.rawOutput {
+            sections.append(.init(id: "output", title: "Output", text: prettyJSON(output), style: .code(language: nil)))
+        }
+        let locationSummary = tool.locations?.arrayValue?.compactMap { $0["path"]?.stringValue }.joined(separator: ", ")
+        return .init(
+            id: "harness-tool:\(tool.id)", seq: tool.seq, kind: .activity,
+            title: tool.title, text: "", detail: locationSummary,
+            isRunning: tool.status != "completed" && tool.status != "failed",
+            failed: tool.status == "failed", sections: sections
+        )
+    }
+
+    private static func codexItemTitle(itemType: String, item: MobileJSONValue) -> String {
+        if let title = item["title"]?.stringValue, !title.isEmpty { return title }
+        if itemType == "commandExecution", let command = item["command"]?.stringValue {
+            return firstLine(command)
+        }
+        if itemType == "webSearch", let query = item["query"]?.stringValue { return "Search: \(query)" }
+        return humanize(itemType)
+    }
+
+    private static func codexItemTerminalStatus(_ item: MobileJSONValue) -> String {
+        let status = item["status"]?.stringValue ?? "completed"
+        return ["failed", "declined", "error"].contains(status) ? "failed" : "completed"
     }
 
     private static func flattenContent(_ value: MobileJSONValue?) -> String {

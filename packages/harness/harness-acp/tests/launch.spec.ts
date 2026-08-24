@@ -1,9 +1,12 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { zipSync } from 'fflate'
+import type { Context } from '@deepseek-ai/cordis'
 import { parseHarnessPack } from '../../harness/src/manifest.ts'
-import { acpHarnessConfigCatalog, acpHarnessModelCatalog, launchArgv, managedLaunchArgv, packSessionConfiguration } from '../src/agent.ts'
+import { acpHarnessConfigCatalog, acpHarnessModelCatalog, installHarnessPack, launchArgv, managedLaunchArgv, packSessionConfiguration } from '../src/agent.ts'
 
 const evidence = [{ kind: 'declared' as const, source: 'ACP launch test fixture', version: '1' }]
 
@@ -86,6 +89,20 @@ describe('ACP Harness launch boundary', () => {
         { id: 'openai/gpt-5', name: 'GPT-5', description: 'OpenAI' },
       ],
     })
+  })
+
+  it('keeps live ACP provider groups distinct from Harness identity', () => {
+    expect(acpHarnessModelCatalog([{
+      id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'openai/gpt-test',
+      options: [{ group: 'openai', name: 'OpenAI', options: [
+        { value: 'openai/gpt-test', name: 'GPT Test' },
+      ] }, { group: 'anthropic', name: 'Anthropic', options: [
+        { value: 'anthropic/claude-test', name: 'Claude Test' },
+      ] }],
+    }])?.models).toEqual([
+      { id: 'openai/gpt-test', name: 'GPT Test', providerId: 'openai', providerName: 'OpenAI' },
+      { id: 'anthropic/claude-test', name: 'Claude Test', providerId: 'anthropic', providerName: 'Anthropic' },
+    ])
   })
 
   it('projects grouped, boolean, missing, and unknown ACP configuration categories without Harness-specific code', () => {
@@ -227,6 +244,109 @@ describe('ACP Harness launch boundary', () => {
       if (previousRuntimeRoot === undefined) delete process.env.OPENFISH_EMBEDDED_RUNTIME_ROOT
       else process.env.OPENFISH_EMBEDDED_RUNTIME_ROOT = previousRuntimeRoot
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('promotes a checksummed direct binary into its declared nested command path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openfish-direct-binary-'))
+    const installation = join(root, 'installed')
+    const runtime = join(root, 'runtime')
+    const bytes = new TextEncoder().encode('#!/bin/sh\nprintf direct-binary-ok\\n')
+    const digest = createHash('sha256').update(bytes).digest('hex')
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'binary-acp', name: 'Binary ACP', version: '1.0.0', publisher: 'Test', verified: false,
+      protocol: 'acp', source: 'user', graph: opaqueGraph,
+      distribution: {
+        kind: 'binary', archive: 'https://example.com/download.bin', sha256: digest,
+        command: 'bin/acp-agent', args: ['--acp'], env: {},
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(bytes, {
+      status: 200,
+      headers: { 'content-length': String(bytes.byteLength) },
+    }))))
+    try {
+      await installHarnessPack({} as Context, pack, installation, runtime)
+      const command = join(installation, 'bin', 'acp-agent')
+      expect(await readFile(command)).toEqual(Buffer.from(bytes))
+      if (process.platform !== 'win32') expect((await stat(command)).mode & 0o111).not.toBe(0)
+      await expect(readFile(join(installation, 'download.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      vi.unstubAllGlobals()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses every remote binary distribution without a checksum before download', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openfish-unverified-binary-'))
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'unverified-binary', name: 'Unverified Binary', version: '1.0.0', publisher: 'Test', verified: false,
+      protocol: 'acp', source: 'user', graph: opaqueGraph,
+      distribution: {
+        kind: 'binary', archive: 'https://example.com/unverified.bin',
+        command: 'bin/acp-agent', args: [], env: {},
+      },
+    })
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    try {
+      await expect(installHarnessPack({} as Context, pack, join(root, 'installed'), join(root, 'runtime')))
+        .rejects.toThrow('no SHA-256 checksum')
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts a checksummed ZIP through the bounded in-process installer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openfish-bounded-zip-'))
+    const installation = join(root, 'installed')
+    const runtime = join(root, 'runtime')
+    const commandBytes = new TextEncoder().encode('#!/bin/sh\nprintf bounded-zip-ok\\n')
+    const archive = zipSync({ 'bin/acp-agent': commandBytes })
+    const digest = createHash('sha256').update(archive).digest('hex')
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'zip-acp', name: 'ZIP ACP', version: '1.0.0', publisher: 'Test', verified: false,
+      protocol: 'acp', source: 'user', graph: opaqueGraph,
+      distribution: {
+        kind: 'binary', archive: 'https://example.com/harness.zip', sha256: digest,
+        command: 'bin/acp-agent', args: [], env: {},
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(archive, { status: 200 }))))
+    try {
+      await installHarnessPack({} as Context, pack, installation, runtime)
+      expect(await readFile(join(installation, 'bin', 'acp-agent'))).toEqual(Buffer.from(commandBytes))
+      await expect(readFile(join(installation, 'harness.zip'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      vi.unstubAllGlobals()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a ZIP entry that escapes the managed installation root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openfish-escaping-zip-'))
+    const installation = join(root, 'installed')
+    const runtime = join(root, 'runtime')
+    const archive = zipSync({ '../escaped': new Uint8Array([1]), 'bin/acp-agent': new Uint8Array([2]) })
+    const digest = createHash('sha256').update(archive).digest('hex')
+    const pack = parseHarnessPack({
+      schemaVersion: 0, id: 'escaping-zip-acp', name: 'Escaping ZIP ACP', version: '1.0.0', publisher: 'Test', verified: false,
+      protocol: 'acp', source: 'user', graph: opaqueGraph,
+      distribution: {
+        kind: 'binary', archive: 'https://example.com/harness.zip', sha256: digest,
+        command: 'bin/acp-agent', args: [], env: {},
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(archive, { status: 200 }))))
+    try {
+      await expect(installHarnessPack({} as Context, pack, installation, runtime))
+        .rejects.toThrow('outside its installation directory')
+      await expect(readFile(join(root, 'escaped'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      vi.unstubAllGlobals()
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

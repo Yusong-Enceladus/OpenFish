@@ -12,7 +12,7 @@
 
 OpenFish 是一个原生 macOS 与 iPhone 编程智能体客户端：用户只安装一个应用，选择自己要用的 Harness，并在 Mac 与已配对的 iPhone 上继续使用同一批持久任务、审批、模型控制和实时活动。
 
-OpenFish 构建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) （`dsh`）之上，并保留其 MIT 许可证与第三方声明。DSH 负责 Host、会话日志、工具、权限和插件组合；OpenFish 增加原生壳子、托管式 Harness 安装、ACP 兼容层与跨设备体验。
+OpenFish 构建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) （`dsh`）之上，并保留其 MIT 许可证与第三方声明。DSH 提供 Host 侧控制平面、持久事件日志、凭证边界、进程监管和设备传输；所选 Harness 仍拥有自己的 Agent Loop、面向模型的上下文、工具语义、审批和远端会话行为，版本化 Driver 只映射它真实暴露的能力。OpenFish 增加原生壳子、托管式 Harness 安装、协议适配与跨设备体验。
 
 <p align="center">
   <img src="docs/assets/openfish-iphone-demo.png" alt="OpenFish iPhone 合成远程任务界面" width="320">
@@ -22,7 +22,7 @@ OpenFish 构建在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-ha
 
 ## Public Alpha
 
-OpenFish 当前适合公开评估，尚不承诺稳定兼容。Harness 与 ACP 都在快速变化，未来可能出现破坏性变更。判断某个 Harness 是否受支持前，请先阅读[兼容矩阵](docs/openfish-compatibility.md)，在主力电脑安装前还应阅读 [Public Alpha 发布说明](docs/openfish-public-alpha.md)。
+当前源码树是 Public Alpha Release Candidate，不是稳定兼容承诺，也不等于已经取得发布证书。Harness 与 ACP 都在快速变化，未来可能出现破坏性变更。判断某个 Harness 是否受支持前，请先阅读[兼容矩阵](docs/openfish-compatibility.md)，通过[价值证据状态](docs/openfish-value-evidence.md)了解哪些结论尚未得到证明，并在主力电脑安装前阅读[威胁模型](docs/openfish-threat-model.md)与 [Public Alpha 发布说明](docs/openfish-public-alpha.md)。
 
 ## 它有什么不同
 
@@ -31,7 +31,7 @@ OpenFish 当前适合公开评估，尚不承诺稳定兼容。Harness 与 ACP �
 - **控件由协议驱动。** ACP 模型、思考强度、模式与未来标准选项来自正在运行的 Harness，而不是 UI 中按厂商名称写死。
 - **Mac 与 iPhone 共享一个权威状态。** 手机通过 LAN 或 Tailscale 配对到 Mac Host，共用会话日志、审批、队列与任务状态。
 - **任务固定 Harness 版本。** 已有任务继续使用创建时的 Pack；新任务可以选更新版本。
-- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，需要时再检查带证据的架构与实际观测到的 Runtime 活动；Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不计费预检，并交换不含凭证的 Manifest。无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
+- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，需要时再检查带证据的架构与实际观测到的 Runtime 活动；Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不发送模型提示词的实时预检，并交换不含凭证的 Manifest。预检仍可能创建 Provider 自己的会话状态或产生其定义的初始化成本；无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
 
 ![使用合成 DSH、Oh My Pi 与 Codex 条目的 OpenFish 默认 Harness 选择器](docs/assets/openfish-harness-picker-demo.png)
 
@@ -56,6 +56,8 @@ Mac Host 是任务状态和凭据的权威来源。OpenFish 不会把一种 Prov
 从源码构建本地未签名 macOS 产物：
 
 ```sh
+git clone https://github.com/Yusong-Enceladus/OpenFish.git
+cd OpenFish
 pnpm install --frozen-lockfile
 ./script/build_openfish_release.sh "$(uname -m)"
 ```

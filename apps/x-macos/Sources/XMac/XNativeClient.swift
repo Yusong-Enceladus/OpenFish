@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Security
 
 /// Bootstrap-only wire models exposed before a native client joins the ordinary DSH API.
 struct BootstrapHandshake: Codable {
@@ -8,6 +10,8 @@ struct BootstrapHandshake: Codable {
     let minimumClientProtocol: String
     let host: String
     let surface: String
+    let plainHost: String?
+    let secureRemotePort: Int?
     let embeddedRuntimeId: String?
     let embeddedProcessId: Int32?
 }
@@ -82,7 +86,10 @@ struct NativeBootstrapCapabilities: Codable {
 
 struct NativePairingCode: Codable, Equatable, Sendable {
     let code: String
+    let codeId: String
     let expiresAt: Double
+    let transport: String
+    let hostURL: String?
 }
 
 struct NativePairingReceipt: Codable, Equatable, Sendable {
@@ -90,6 +97,11 @@ struct NativePairingReceipt: Codable, Equatable, Sendable {
     let token: String
     let expiresAt: Double
     let createdAt: Double
+}
+
+struct NativePairingResult: Sendable {
+    let receipt: NativePairingReceipt
+    let tlsFingerprint: String?
 }
 
 struct NativeDevice: Codable, Identifiable, Equatable, Sendable {
@@ -126,16 +138,24 @@ actor DshBootstrapClient {
     let baseURL: URL
     private let session: URLSession
     private let bearerToken: String?
+    private let trustDelegate: OpenFishTLSDelegate
 
     init(
         baseURL: URL = URL(string: "http://127.0.0.1:3080")!,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        tlsFingerprint: String? = nil,
+        permitsBootstrapTrust: Bool = false
     ) {
         self.baseURL = baseURL
         self.bearerToken = bearerToken
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5
-        session = URLSession(configuration: config)
+        let trustDelegate = OpenFishTLSDelegate(
+            expectedFingerprint: tlsFingerprint,
+            permitsBootstrapTrust: permitsBootstrapTrust
+        )
+        self.trustDelegate = trustDelegate
+        session = URLSession(configuration: config, delegate: trustDelegate, delegateQueue: nil)
     }
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
@@ -165,18 +185,56 @@ actor DshBootstrapClient {
         try await post("/x-native/v2/pairing-code", payload: EmptyPayload(), as: NativePairingCode.self)
     }
 
-    func pair(deviceName: String, code: String?) async throws -> NativePairingReceipt {
+    func pair(deviceName: String, code: String?) async throws -> NativePairingResult {
         struct Payload: Encodable, Sendable {
             let surface = "macos"
             let deviceName: String
             let appVersion: String
-            let code: String?
+            let codeId: String?
+            let clientNonce: String?
+            let proof: String?
         }
-        return try await post(
+        let appVersion = "0.1.0"
+        guard let code, !code.isEmpty else {
+            let receipt = try await post(
+                "/x-native/v2/pair",
+                payload: Payload(
+                    deviceName: deviceName,
+                    appVersion: appVersion,
+                    codeId: nil,
+                    clientNonce: nil,
+                    proof: nil
+                ),
+                as: NativePairingReceipt.self
+            )
+            return NativePairingResult(receipt: receipt, tlsFingerprint: nil)
+        }
+        guard baseURL.scheme == "https" else {
+            throw NativeCredentialError.incompleteRemoteAuthorization
+        }
+        _ = try await handshake()
+        guard let fingerprint = trustDelegate.acceptedFingerprint else {
+            throw NativeCredentialError.incompleteRemoteAuthorization
+        }
+        let proof = try Self.pairingProof(
+            code: code,
+            certificateFingerprint: fingerprint,
+            surface: "macos",
+            deviceName: deviceName,
+            appVersion: appVersion
+        )
+        let receipt = try await post(
             "/x-native/v2/pair",
-            payload: Payload(deviceName: deviceName, appVersion: "0.1.0", code: code),
+            payload: Payload(
+                deviceName: deviceName,
+                appVersion: appVersion,
+                codeId: proof.codeId,
+                clientNonce: proof.clientNonce,
+                proof: proof.proof
+            ),
             as: NativePairingReceipt.self
         )
+        return NativePairingResult(receipt: receipt, tlsFingerprint: fingerprint)
     }
 
     func devices() async throws -> [NativeDevice] {
@@ -210,5 +268,47 @@ actor DshBootstrapClient {
     private func authorize(_ request: inout URLRequest) {
         guard let bearerToken, !bearerToken.isEmpty else { return }
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "authorization")
+    }
+
+    private static func pairingProof(
+        code: String,
+        certificateFingerprint: String,
+        surface: String,
+        deviceName: String,
+        appVersion: String
+    ) throws -> (codeId: String, clientNonce: String, proof: String) {
+        let normalized = code.uppercased().unicodeScalars.filter {
+            $0.isASCII && (($0.value >= 65 && $0.value <= 90) || ($0.value >= 48 && $0.value <= 57))
+        }.map(String.init).joined()
+        guard normalized.count == 16 else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        let codeDigest = SHA256.hash(data: Data(normalized.utf8))
+        let codeId = Data(codeDigest).map { String(format: "%02x", $0) }.joined()
+        var nonceBytes = [UInt8](repeating: 0, count: 24)
+        guard SecRandomCopyBytes(kSecRandomDefault, nonceBytes.count, &nonceBytes) == errSecSuccess else {
+            throw URLError(.cannotCreateFile)
+        }
+        let clientNonce = Data(nonceBytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let message = [
+            "openfish-pair-v1",
+            certificateFingerprint.lowercased(),
+            clientNonce,
+            surface,
+            deviceName,
+            appVersion,
+        ].joined(separator: "\0")
+        let authentication = HMAC<SHA256>.authenticationCode(
+            for: Data(message.utf8),
+            using: SymmetricKey(data: Data(normalized.utf8))
+        )
+        return (
+            codeId,
+            clientNonce,
+            Data(authentication).map { String(format: "%02x", $0) }.joined()
+        )
     }
 }

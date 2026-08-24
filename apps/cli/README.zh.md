@@ -12,8 +12,11 @@
 | `dsh --profile headless "job"` | 运行一个全新的持久化会话，打印最终答案并退出。 |
 | `dsh web` | `--profile web` 的别名。 |
 | `dsh plugin --profile <name> <pnpm args>` | 通过在 profile 目录中转发给 pnpm 来管理该 profile 的插件。 |
+| `dsh driver --profile <name> <action>` | 在不接受任意包管理器参数的情况下，对准确版本的 Harness Driver Bundle 执行暂存、校验、列出或移除操作。 |
 
 运行命令时所在的目录将作为默认 workspace 根目录。`web` 和 `headless` profile 在首次使用时会从随附模板自动初始化；其他任何 profile 都必须通过 `dsh plugin` 创建。
+
+OpenFish 的原生插件设置会调用 `dsh driver`。打包后的应用自行提供 Node 与 npm，只接受准确的注册表版本或完整 GitHub commit，默认禁用生命周期脚本，并且仅在候选项通过 DSH Bundle 结构准入后才会激活它。受管安装不继承 npm 与 Git 凭据，固定使用公共 npm Registry 与私有临时 HOME／配置／缓存目录；系统按准确来源记录脚本许可，并在许可记录存在时于更新失败后恢复同一准确旧来源。
 
 ## 应用参数
 

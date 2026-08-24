@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -108,5 +108,40 @@ describe.skipIf(!seatbeltUsable)('sandbox-local: real Seatbelt confinement throu
     expect(result.status).toBe(0)
     expect(readFileSync(join(hostTmp, 'scratch.txt'), 'utf8')).toBe('tmp-ok')
     expect(readFileSync(join(userTmp, 'scratch.txt'), 'utf8')).toBe('user-tmp-ok')
+  })
+
+  it('resident isolation reads its workspace and private runtime but not a sibling user directory', async () => {
+    const workspace = await tempDir(homedir())
+    const runtime = await tempDir(homedir())
+    const privateSibling = await tempDir(homedir())
+    writeFileSync(join(workspace, 'workspace.txt'), 'workspace-ok')
+    writeFileSync(join(runtime, 'runtime.txt'), 'runtime-ok')
+    writeFileSync(join(privateSibling, 'private.txt'), 'must-not-read')
+    const sandbox = await provider()
+    const policy: SandboxPolicy = {
+      mode: 'workspace-write',
+      workspaceRoot: workspace,
+      runtimeWritableRoots: [runtime],
+      platformTemporaryWrites: false,
+      isolation: {
+        protectedReadRoots: [homedir(), '/private/tmp'],
+        readableRoots: [workspace, runtime, '/bin', '/usr', '/System', '/Library', '/dev'],
+        denyNetworkInbound: true,
+        denyHostProcessControl: true,
+        denyHostInterprocessCommunication: true,
+      },
+    }
+    const allowed = runConfined(
+      sandbox,
+      `cat ${workspace}/workspace.txt ${runtime}/runtime.txt && printf writable > ${runtime}/written.txt`,
+      policy,
+    )
+    expect(allowed.result.status).toBe(0)
+    expect(allowed.result.stdout).toBe('workspace-okruntime-ok')
+    expect(readFileSync(join(runtime, 'written.txt'), 'utf8')).toBe('writable')
+
+    const denied = runConfined(sandbox, `cat ${privateSibling}/private.txt`, policy)
+    expect(denied.result.status).not.toBe(0)
+    expect(denied.result.stdout).not.toContain('must-not-read')
   })
 })

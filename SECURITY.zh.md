@@ -1,5 +1,8 @@
 # 安全策略
 
+完整的信任边界、威胁、控制与剩余风险分析见
+[OpenFish 威胁模型](docs/openfish-threat-model.zh.md)。
+
 OpenFish 会运行本地编程 Agent；在用户批准的权限范围内，它们可以读取文件和执行命令。请将每个
 Harness Pack、ACP Registry 条目、插件、MCP Server 与项目指令文件都视为可执行或模型可见的
 第三方输入。

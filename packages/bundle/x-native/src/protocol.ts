@@ -22,6 +22,10 @@ export interface NativeHandshake {
   host: 'dsh'
   /** Presentation family joining that runtime. */
   surface: 'native'
+  /** Actual address of the plaintext carrier; present on loopback health. */
+  plainHost?: '127.0.0.1' | '0.0.0.0'
+  /** Actual TLS-only remote port, absent when the Host is safely local-only. */
+  secureRemotePort?: number
   /** Identity of the packaged Host closure, present only for an embedded Open Fish Host. */
   embeddedRuntimeId?: string
   /** Process owning the embedded Host, used by the native launcher to retire a stale build. */
@@ -86,7 +90,7 @@ export interface NativeCapabilities {
   /** Native-device identity registration. */
   pairing: {
     supported: boolean
-    kind: 'one-time-code'
+    kind: 'authenticated-tls-code'
     /** Whether pairing records survive a host restart. */
     durable: boolean
   }
@@ -110,12 +114,21 @@ export interface PairRequest {
   appVersion?: string
   /** One-time code required when redeeming from a non-loopback device. */
   code?: string
+  /** SHA-256 id derived from the out-of-band pairing code. */
+  codeId?: string
+  /** Fresh client nonce used by the authenticated TLS bootstrap. */
+  clientNonce?: string
+  /** HMAC proof keyed by the out-of-band code and bound to the Host TLS certificate. */
+  proof?: string
 }
 
 /** Short-lived code created on the Host and typed into a remote client. */
 export interface PairingCodeResponse {
   code: string
+  codeId: string
   expiresAt: number
+  transport: 'tls-code-proof-v2'
+  hostURL?: string
 }
 
 /** Registration response returned by `POST /x-native/v2/pair`. */

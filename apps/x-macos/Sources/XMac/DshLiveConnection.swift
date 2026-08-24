@@ -21,6 +21,9 @@ enum DshDownlinkChannel: Sendable {
 
 enum DshLiveUpdate: Sendable {
     case state(DshConnectionState)
+    /// The Host explicitly rejected the saved bearer credential. This is not
+    /// a transient network retry: the user must pair this Mac again.
+    case authorizationRevoked
     case envelope(DshDownlinkChannel, DshServerRequest)
 }
 
@@ -35,11 +38,15 @@ private enum DshLiveConnectionError: Error {
 
 /// Bridges URLSession's WebSocket open callback into async readiness without sending
 /// application data on DSH's strictly downlink-only sockets.
-private final class DshWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+private final class DshWebSocketDelegate: OpenFishTLSDelegate, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var opened: Set<Int> = []
     private var failures: [Int: Error] = [:]
     private var waiters: [Int: CheckedContinuation<Void, Error>] = [:]
+
+    init(expectedFingerprint: String?) {
+        super.init(expectedFingerprint: expectedFingerprint)
+    }
 
     func waitUntilOpen(_ task: URLSessionWebSocketTask) async throws {
         let identifier = task.taskIdentifier
@@ -118,12 +125,12 @@ actor DshLiveConnection {
     private var loopTask: Task<Void, Never>?
     private var activeSockets: [URLSessionWebSocketTask] = []
 
-    init(baseURL: URL, bearerToken: String? = nil) {
+    init(baseURL: URL, bearerToken: String? = nil, tlsFingerprint: String? = nil) {
         self.baseURL = baseURL
         self.bearerToken = bearerToken
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
-        let delegate = DshWebSocketDelegate()
+        let delegate = DshWebSocketDelegate(expectedFingerprint: tlsFingerprint)
         self.delegate = delegate
         session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
 
@@ -145,7 +152,9 @@ actor DshLiveConnection {
             socket.cancel(with: .goingAway, reason: nil)
         }
         activeSockets = []
-        continuation.finish()
+        // `stop()` is also the retry/reconfigure primitive. Finishing the
+        // stream here made every subsequent `start()` publish into a dead
+        // continuation, so a manual retry could never reconnect.
     }
 
     private func runLoop() async {
@@ -168,11 +177,21 @@ actor DshLiveConnection {
                 try publish(.state(.connected))
                 try await pumpGeneration(mux: mux, host: host)
             } catch {
+                let authorizationRevoked = activeSockets.contains { socket in
+                    guard let response = socket.response as? HTTPURLResponse else { return false }
+                    return response.statusCode == 401 || response.statusCode == 403
+                }
                 for socket in activeSockets {
                     socket.cancel(with: .goingAway, reason: nil)
                 }
                 activeSockets = []
                 if Task.isCancelled { break }
+
+                if authorizationRevoked {
+                    continuation.yield(.authorizationRevoked)
+                    loopTask = nil
+                    return
+                }
 
                 attempt += 1
                 continuation.yield(.state(.reconnecting(attempt: attempt)))

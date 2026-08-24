@@ -1,0 +1,37 @@
+# OpenFish value evidence
+
+English | [中文](openfish-value-evidence.zh.md)
+
+OpenFish is valuable only if its control plane removes setup and continuity work without hiding who runs code, who receives data, or who bills the user. A large catalog, attractive graph, or successful build is not evidence of that outcome. This report keeps product value separate from Harness task quality and records missing evidence instead of replacing it with marketing.
+
+## Claims under evaluation
+
+| Product claim | Success measure | Current evidence status | Release interpretation |
+| --- | --- | --- | --- |
+| One app reaches a first successful task on a clean Mac | Median and failure distribution from app install through explicit Harness auth, live model selection, Project/No Project creation, and a completed response | Not measured on a clean-machine sample | Implemented release-candidate path; do not claim effortless setup yet |
+| A user can switch Harnesses without learning their CLIs | Successful new-task override, correct account/model/reasoning controls, and no mutation of an existing task | Release-candidate Harness/ACP contracts and the packaged-runtime gate pass on Apple Silicon; the live DSH/Codex/OMP artifact matrix is still pending | Claim protocol-driven selection, not universal success |
+| Tasks resume reliably across app and Host restarts | Resume success by Harness/version/workspace mode, with remote identity and pinned configuration retained | Resume, fork, and Pack-pinning fixtures plus the packaged clean-state Host smoke pass; the live multi-Harness retention matrix is still pending | Do not publish a reliability percentage |
+| Setup failures are recoverable | Recovery from missing auth, no routable model, corrupt download, interrupted update, Harness exit, registry outage, and Host reconnect without losing existing tasks | Missing-auth/model, invalid-Pack, ACP exit/cancel, Host reconnect, and update/rollback contracts pass; a complete chaos run has not been recorded | Describe explicit recovery states, not proven robustness |
+| Architecture views improve understanding | Users correctly identify Host, Harness, account/provider, model, workspace boundary, evidence level, and active runtime component from representative Packs | No comprehension study has been run | Call it an evidence-backed lens, not a proven comprehension improvement |
+| A technical user can create a Pack efficiently | Time from empty Manifest Editor to admitted exact-version Pack, prompt-free live preflight, credential-free export, and successful task | Executable workflow implemented; task-time sample not measured; provider-owned preflight state/cost is not asserted | Call the current surface Manifest Editor, not a universal visual Harness Builder |
+| Mac–iPhone continuity reduces interruption | Pair/reconnect/follow-up/approval/question/revoke completion and recovery after background or network loss on a physical phone | A DEBUG physical-device candidate passed fresh pairing, cold profile restore, exact Host replacement/reconnect, and five microphone start/stop cycles. Simulator approval/question and microphone-denied UI plus the authenticated Host self-revoke contract pass; the final physical end-to-end interaction, background, and revoke row remains pending | Do not infer unrecorded physical-device behavior from Simulator or protocol tests |
+
+## Harness quality is a different experiment
+
+OpenFish compatibility answers whether a Harness can be installed, configured, invoked, observed, resumed, and controlled through the shell. It does not answer whether that Harness is best. Comparing DSH, Codex, OMP, Pi, OpenCode, Claude Code, or another agent requires the same task set and independent measurements for task completion, regressions, latency, cost, tool fidelity, security behavior, and subjective fit. Provider quota and account type must be reported with those results.
+
+OpenFish will not rank a Harness from repository stars, launch recency, naming, a single demo, or the shell's own compatibility result. A future benchmark report must publish its tasks, Harness and model versions, settings, accounts/billing modes, repetitions, failures, and raw redacted outcomes.
+
+## Release evidence record
+
+The exact release candidate supplies the evidence row, not the working-copy implementation. Record each item as **passed**, **failed**, or **not run**, with an artifact version and date:
+
+1. Clean Apple Silicon setup and, when supported, clean Intel setup.
+2. DSH, official Codex app-server, and OMP ACP live journeys.
+3. Fresh generic ACP Pack and fresh non-ACP Driver conformance journeys.
+4. Project and No Project creation, send, cancel, resume, archive, search, fork where supported, update, rollback, and uninstall retention.
+5. Mac and iPhone loading, empty, setup, offline, recoverable, fatal, accessibility, resize, and Dynamic Type states.
+6. Physical iPhone pairing, reconnect, follow-up, approval, question, continuity, voice allow/deny, repeated start/stop, background recovery, and revoke.
+7. Source/history/assets privacy review, threat-model review, packaged-runtime checks, signing/notarization, and install/uninstall review.
+
+Until these rows are recorded for the final artifact, the honest position is: **OpenFish has a meaningful and differentiated architecture, but its public impact and reliability are not yet demonstrated.**

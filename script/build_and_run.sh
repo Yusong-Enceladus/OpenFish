@@ -6,8 +6,11 @@ APP_NAME="OpenFish"
 BUNDLE_ID="${OPENFISH_MAC_BUNDLE_ID:-app.openfish.mac}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_ROOT="$ROOT_DIR/.build/opencodex"
-DERIVED_DATA="$BUILD_ROOT/DerivedData"
+OPENFISH_REPO_ROOT="$ROOT_DIR"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/script/openfish_build_paths.sh"
+BUILD_ROOT="$OPENFISH_BUILD_ROOT/opencodex-macos"
+DERIVED_DATA="$OPENFISH_DERIVED_DATA_ROOT/opencodex-macos"
 HOST_LOG="$BUILD_ROOT/host.log"
 HOST_ERROR_LOG="$BUILD_ROOT/host-error.log"
 HOST_SERVICE="$BUNDLE_ID.host"
@@ -28,6 +31,7 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 pkill -x OpenCodex >/dev/null 2>&1 || true
 
 pnpm run build:lib:host
+node "$ROOT_DIR/script/check_openfish_built_harness_runtime.mjs"
 
 xcodebuild \
   -project "$ROOT_DIR/apps/x-macos/XMac.xcodeproj" \
@@ -57,13 +61,64 @@ fi
 # This matters when upgrading from the historical ai.deepseek.opencodex id:
 # otherwise Spotlight can keep both identities for one on-disk application.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+unregister_transient_openfish_records() {
+  [[ -x "$LSREGISTER" ]] || return 0
+
+  # LaunchServices keeps records for build products after DerivedData has been
+  # deleted, so `find` alone cannot remove every duplicate Spotlight result.
+  # Only unregister OpenFish build products; never touch an installed app.
+  while IFS= read -r candidate; do
+    [[ -z "$candidate" || "$candidate" == "$INSTALLED_APP" ]] && continue
+    "$LSREGISTER" -u "$candidate" >/dev/null 2>&1 || true
+  done < <(
+    "$LSREGISTER" -dump 2>/dev/null \
+      | awk '
+          /^path:[[:space:]]/ {
+            path = $0
+            sub(/^path:[[:space:]]*/, "", path)
+            sub(/ \(0x[[:xdigit:]]+\)$/, "", path)
+            if (index(path, "/Build/Products/") > 0 && path ~ /\/OpenFish[.]app$/) print path
+          }
+        ' \
+      | sort -u
+  )
+}
+
+unregister_transient_openfish_records
 if [[ -d "$INSTALLED_APP" && -x "$LSREGISTER" ]]; then
   "$LSREGISTER" -u "$INSTALLED_APP" >/dev/null 2>&1 || true
+fi
+if [[ -x "$LSREGISTER" ]]; then
+  # xcodebuild registers its DerivedData product before this script moves it.
+  # Remove that transient identity so Spotlight/Dock expose only the installed
+  # bundle in ~/Applications after repeated development installs.
+  "$LSREGISTER" -u "$APP_BUNDLE" >/dev/null 2>&1 || true
 fi
 rm -rf "$INSTALLED_APP"
 mkdir -p "$USER_APPLICATIONS"
 mv "$APP_BUNDLE" "$INSTALLED_APP"
 if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -f "$INSTALLED_APP" >/dev/null 2>&1 || true
+
+  # Xcode and screenshot builds can be indexed directly from DerivedData even
+  # after LaunchServices unregisters them. Remove only generated macOS
+  # OpenFish.app products after installation so Spotlight has one identity.
+  XCODE_DERIVED_ROOT="/Users/$(id -un)/Library/Developer/Xcode/DerivedData"
+  SEARCH_ROOTS=("$OPENFISH_BUILD_ROOT" "$OPENFISH_DERIVED_DATA_ROOT")
+  [[ -d "$XCODE_DERIVED_ROOT" ]] && SEARCH_ROOTS+=("$XCODE_DERIVED_ROOT")
+  while IFS= read -r candidate; do
+    [[ "$candidate" == "$INSTALLED_APP" ]] && continue
+    info="$candidate/Contents/Info.plist"
+    [[ -f "$info" ]] || continue
+    # iPhone build products share the filename. LSMinimumSystemVersion is the
+    # macOS-only admission fact that prevents deleting a phone build here.
+    if ! /usr/bin/plutil -extract LSMinimumSystemVersion raw "$info" >/dev/null 2>&1; then
+      continue
+    fi
+    "$LSREGISTER" -u "$candidate" >/dev/null 2>&1 || true
+    rm -rf -- "$candidate"
+  done < <(find "${SEARCH_ROOTS[@]}" -type d -name "$APP_NAME.app" -path '*/Build/Products/*' -prune -print 2>/dev/null)
+  unregister_transient_openfish_records
   "$LSREGISTER" -f "$INSTALLED_APP" >/dev/null 2>&1 || true
 fi
 

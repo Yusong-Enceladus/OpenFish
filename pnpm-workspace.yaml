@@ -24,6 +24,13 @@ packages:
 # builds must resolve those matching names to this workspace's pinned sources.
 linkWorkspacePackages: true
 
+# Keep the content store and virtual store behind one repository-local cache
+# boundary. Contributors may use the ignored directory normally; constrained
+# machines can point .openfish-cache at external storage without committing an
+# absolute, machine-specific path.
+storeDir: .openfish-cache/pnpm-store
+virtualStoreDir: .openfish-cache/virtual-store-main-v2
+
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'

@@ -22,6 +22,7 @@
 		C4B563BAF922057AD8F29D0A /* XApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCD4EFE65797602061CE677 /* XApp.swift */; };
 		DA26876A92D2DEBA597BD324 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A0ABAA1DDFE8D3C35FDFC93C /* AppIcon.icon */; };
 		E18481F101803FB6355FC341 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73EE348D0C8D5EC8DB87B597 /* ContentView.swift */; };
+		E865D4BEB417B0D50B21EE70 /* openfish-demo-harnesses.json in Resources */ = {isa = PBXBuildFile; fileRef = 02F4148E0CEABFB6D6ECF63D /* openfish-demo-harnesses.json */; };
 		EA9A673906B15E012B21723C /* DshLiveConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36DA095690025A0E805BF398 /* DshLiveConnection.swift */; };
 		FCE254B576CA4CFACF77628E /* NativeConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FBB22A6D216E3AEA283CB5 /* NativeConnectionProfile.swift */; };
 /* End PBXBuildFile section */
@@ -37,6 +38,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		02F4148E0CEABFB6D6ECF63D /* openfish-demo-harnesses.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "openfish-demo-harnesses.json"; sourceTree = "<group>"; };
 		0A6416063D8C032398379D54 /* XMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0DCD4EFE65797602061CE677 /* XApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XApp.swift; sourceTree = "<group>"; };
 		10F86DB4304EEE96D2CAEAF8 /* XApiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XApiClient.swift; sourceTree = "<group>"; };
@@ -59,6 +61,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		1E58B23BA7594F616F50EC6E /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				02F4148E0CEABFB6D6ECF63D /* openfish-demo-harnesses.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		265083AC4D9AE8291E41EF0C /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -96,6 +106,7 @@
 				10F86DB4304EEE96D2CAEAF8 /* XApiClient.swift */,
 				0DCD4EFE65797602061CE677 /* XApp.swift */,
 				A67B041C3256A02CB635FDA5 /* XNativeClient.swift */,
+				1E58B23BA7594F616F50EC6E /* Resources */,
 			);
 			name = XMac;
 			path = Sources/XMac;
@@ -189,6 +200,7 @@
 			files = (
 				DA26876A92D2DEBA597BD324 /* AppIcon.icon in Resources */,
 				9A4FC3496E65F6E43CDA6002 /* Assets.xcassets in Resources */,
+				E865D4BEB417B0D50B21EE70 /* openfish-demo-harnesses.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -324,8 +336,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish converts speech to text on this Mac without a cloud fallback.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish records audio only while you use dictation and requests Apple’s on-device speech recognition.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish requests Apple’s on-device recognition mode and does not provide its own cloud fallback.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -333,6 +345,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
 				PRODUCT_NAME = OpenFish;
+				REGISTER_APP_WITH_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -362,8 +375,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenFish;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish uses the microphone only for on-device dictation.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish converts speech to text on this Mac without a cloud fallback.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenFish records audio only while you use dictation and requests Apple’s on-device speech recognition.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "OpenFish requests Apple’s on-device recognition mode and does not provide its own cloud fallback.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -371,6 +384,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.openfish.mac;
 				PRODUCT_NAME = OpenFish;
+				REGISTER_APP_WITH_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 			};
 			name = Release;

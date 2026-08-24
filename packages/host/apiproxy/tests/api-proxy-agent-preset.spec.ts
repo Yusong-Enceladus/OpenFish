@@ -149,7 +149,7 @@ describe('session.create with an agent preset', () => {
 
     const created = await api.sessions.create(request({ sessionId: SessionId('s1'), agentPreset: 'minimal' }))
 
-    expect(created.result.ok).toBe(true)
+    expect(created.result.ok, JSON.stringify(created.result)).toBe(true)
     expect(ctx.sessions.get(SessionId('s1'))?.header.agentPreset).toBe('minimal')
   })
 
@@ -199,7 +199,7 @@ describe('session.create with an agent preset', () => {
 
     // Comparing against the header would invert both answers: the preset the
     // session actually runs would be refused, and the one it left would pass.
-    expect(adopted.result.ok).toBe(true)
+    expect(adopted.result.ok, JSON.stringify(adopted.result)).toBe(true)
     // The echo has to name the same preset the adoption just accepted, or the
     // client labels the session with one it has already left — and disagrees
     // with the row `session.list` serves for it.
@@ -217,7 +217,7 @@ describe('session.create with an agent preset', () => {
     // Reconnecting and retrying a create must stay ordinary operations.
     const response = await api.sessions.create(request({ sessionId: SessionId('s5') }))
 
-    expect(response.result.ok).toBe(true)
+    expect(response.result.ok, JSON.stringify(response.result)).toBe(true)
   })
 
   it('leaves the header preset-less when no roster is composed', async () => {

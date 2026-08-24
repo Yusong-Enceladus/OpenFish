@@ -17,12 +17,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.openfish.mac
         PRODUCT_NAME: OpenFish
+        REGISTER_APP_WITH_LAUNCH_SERVICES: NO
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         INFOPLIST_KEY_CFBundleDisplayName: OpenFish
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: OpenFish uses the microphone only for on-device dictation.
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: OpenFish converts speech to text on this Mac without a cloud fallback.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: OpenFish records audio only while you use dictation and requests Apple’s on-device speech recognition.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: OpenFish requests Apple’s on-device recognition mode and does not provide its own cloud fallback.
         GENERATE_INFOPLIST_FILE: YES
   XMacUITests:
     type: bundle.ui-testing

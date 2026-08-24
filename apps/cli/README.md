@@ -12,8 +12,11 @@ The `dsh` command is the product launcher for profiles: ordered stacks of plugin
 | `dsh --profile headless "job"` | Run one fresh persisted session, print the final answer, and exit. |
 | `dsh web` | Alias of `--profile web`. |
 | `dsh plugin --profile <name> <pnpm args>` | Manage a profile's plugins by forwarding to pnpm in the profile directory. |
+| `dsh driver --profile <name> <action>` | Stage, validate, list, or remove exact Harness Driver Bundles without arbitrary package-manager arguments. |
 
 The invoking directory is the default workspace root. The `web` and `headless` profiles auto-initialize on first use from shipped templates; any other profile must be created through `dsh plugin`.
+
+OpenFish calls `dsh driver` from its native Plugins settings. The packaged app supplies Node and npm itself, accepts only an exact registry version or full GitHub commit, disables lifecycle scripts by default, and activates a candidate only after its DSH Bundle structure passes admission. Managed installation ignores ambient npm and Git credentials, uses the public npm registry with private temporary HOME/config/cache directories, records script consent for the exact source, and restores the exact prior source after a failed update when that consent record exists.
 
 ## App arguments
 

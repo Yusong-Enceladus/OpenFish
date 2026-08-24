@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This reference defines the profile, web-alias, plugin-management, and config-dump command modes. Argv is parsed once through [`src/args.ts`](../src/args.ts), and [`src/bin.ts`](../src/bin.ts) dynamically imports only the selected runner.
+This reference defines the profile, web-alias, Driver-management, plugin-management, and config-dump command modes. Argv is parsed once through [`src/args.ts`](../src/args.ts), and [`src/bin.ts`](../src/bin.ts) dynamically imports only the selected runner.
 
 ## Profile boot
 
@@ -37,6 +37,24 @@ dsh --profile web --patch ./extra.yml --dump-config
 ```
 
 `--dump-default-config` prints only the bundle layers; `--dump-config` adds the profile's `cordis.patch.yml`, the home-level `$DSH_HOME/cordis.patch.yml`, and `--patch` overlays. Both print comments naming the file that supplied each row and every overlay that changed it; `!!js` expressions remain unevaluated, and unmatched patch targets are reported on stderr. A dump never runs app command-line providers, so it shows the composed tree before any app argument is resolved and rejects an invocation that carries app arguments.
+
+## Harness Driver Bundle management
+
+`dsh driver --profile <name> list` reports dependency-managed Bundle layers that are materially present and structurally readable. `install` accepts only `package@<exact-semver>` or `github:<owner>/<repo>#<full-40-character-commit>`; the GitHub form also requires `--package <expected-name>`. Tags, ranges, local paths, URLs, and arbitrary npm flags are rejected.
+
+Installation first uses a private disposable directory below `$DSH_HOME/openfish/driver-staging`. The candidate must materialize as the expected package, declare an in-package `dsh.bundle.patch`, parse under the real Loader patch dialect, and insert at least one module owned by that package. This pass never imports the module and always disables lifecycle scripts. The same exact spec is then installed into the Profile with a lock; lifecycle scripts remain disabled unless `--allow-scripts` was explicitly supplied. Managed npm runs with private temporary HOME/config/cache/temp directories, the public npm registry, a small runtime PATH, no inherited npm or Git credentials, no system Git configuration, and no interactive credential prompt. A project `.npmrc` is rejected because private registries are outside this one-click trust path.
+
+Before replacing an active Bundle, the manager records its exact source and prior lifecycle-script consent, then deactivates it so the Loader never points at a half-materialized package. A failed update restores that exact old source with its recorded consent and reactivates the prior manifest. A legacy source without a consent record stays inactive and requires an explicit reinstall instead of guessing whether scripts may run. Removal similarly deactivates first, then asks npm to remove the dependency. Every mutation is serialized per Profile and requires a Profile restart.
+
+```sh
+dsh driver --profile x list
+dsh driver --profile x install @acme/openfish-driver-demo@1.2.3
+dsh driver --profile x --package @acme/openfish-driver-demo \
+  install github:acme/openfish-driver-demo#0123456789abcdef0123456789abcdef01234567
+dsh driver --profile x remove @acme/openfish-driver-demo
+```
+
+This structural admission is not Driver conformance or a security endorsement. On restart, the real Loader imports the Bundle and the Harness registry separately negotiates the Driver API and Pack capabilities. `--allow-scripts` lets third-party code run even earlier, during installation, and must be used only for a reviewed exact source.
 
 ## Plugin management
 

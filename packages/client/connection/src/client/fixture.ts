@@ -2263,79 +2263,77 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     replays.set(id, { timer: setTimeout(tick, 80), finish })
   }
 
+  const fixtureHarness = {
+    schemaVersion: 0,
+    id: 'dsh',
+    name: 'DeepSeek Harness',
+    version: '0.1.0-x.0',
+    publisher: 'DeepSeek',
+    verified: true,
+    protocol: 'dsh',
+    source: 'builtin',
+    isDefault: true,
+    account: {
+      label: 'Fixture model account', billing: 'local',
+      detail: 'Synthetic fixture data; no provider, credential, or quota is used.',
+    },
+    modelConfiguration: {
+      owner: 'host', required: true,
+      detail: 'The fixture exposes one deterministic local model route.',
+    },
+    graph: {
+      level: 'observable', manifestVersion: 1, boundary: 'DSH Harness process',
+      evidence: [{ kind: 'source-derived', source: 'DSH source fixture', version: '0.1.0-x.0' }],
+      nodes: [
+        { id: 'context', kind: 'context-runtime', title: 'Context assembly', editable: false, responsibility: 'Builds model context from instructions, workspace, skills, and task history.', evidence: [{ kind: 'source-derived', source: 'packages/context', version: '0.1.0-x.0' }] },
+        { id: 'loop', kind: 'agent-loop', title: 'Agent loop', editable: false, responsibility: 'Coordinates model inference, tools, approvals, and task progress.', evidence: [{ kind: 'source-derived', source: 'packages/core/agent-loop', version: '0.1.0-x.0' }] },
+        { id: 'models', kind: 'model-router', title: 'Model routing', editable: false, responsibility: 'Resolves the selected provider, model, and reasoning controls.', evidence: [{ kind: 'source-derived', source: 'packages/llm', version: '0.1.0-x.0' }] },
+        { id: 'tools', kind: 'tool-runtime', title: 'Tool runtime', editable: false, responsibility: 'Executes the tool calls exposed to the active agent.', evidence: [{ kind: 'source-derived', source: 'packages/core/tools', version: '0.1.0-x.0' }] },
+        { id: 'execution', kind: 'execution-boundary', title: 'Execution boundary', editable: false, responsibility: 'Constrains filesystem, subprocess, and network authority.', evidence: [{ kind: 'source-derived', source: 'packages/sandbox', version: '0.1.0-x.0' }] },
+        { id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false, responsibility: 'Requests and records user decisions before sensitive actions.', evidence: [{ kind: 'source-derived', source: 'packages/guard', version: '0.1.0-x.0' }] },
+        { id: 'session', kind: 'session-runtime', title: 'Session persistence', editable: false, responsibility: 'Owns durable events, projections, queue state, resume, and archive.', evidence: [{ kind: 'source-derived', source: 'packages/session', version: '0.1.0-x.0' }] },
+        { id: 'plugins', kind: 'plugin-runtime', title: 'Plugin composition', editable: false, responsibility: 'Composes capabilities and extensions into the running Host.', evidence: [{ kind: 'source-derived', source: 'packages/core', version: '0.1.0-x.0' }] },
+      ],
+      edges: [
+        { from: 'context', to: 'loop' }, { from: 'loop', to: 'models' }, { from: 'models', to: 'loop' },
+        { from: 'loop', to: 'tools' }, { from: 'tools', to: 'execution' }, { from: 'execution', to: 'approvals' },
+        { from: 'approvals', to: 'tools' }, { from: 'loop', to: 'session' }, { from: 'plugins', to: 'loop' },
+      ],
+    },
+    available: true,
+    installation: {
+      status: 'builtin', installedVersion: '0.1.0-x.0', availableVersion: '0.1.0-x.0', previousVersions: [],
+      integrity: { status: 'trusted-runtime', source: 'OpenFish fixture', detail: 'Synthetic packaged-runtime fixture.' },
+    },
+    auth: { methods: [], status: 'not-required', missingFields: [] },
+    compatibility: { status: 'compatible', classification: 'supported' },
+    capabilities: [
+      { id: 'session.create', status: 'supported', source: 'driver' },
+      { id: 'session.resume', status: 'supported', source: 'driver' },
+      { id: 'workspace.project', status: 'supported', source: 'driver' },
+      { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+      { id: 'configuration.models', status: 'supported', source: 'runtime' },
+      { id: 'configuration.reasoning', status: 'supported', source: 'runtime' },
+      { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      { id: 'architecture.runtime-observation', status: 'runtime', source: 'runtime' },
+    ],
+    driver: { apiVersion: 1, protocol: 'dsh', loaded: true, authorization: 'not-required' },
+  } satisfies HarnessCatalogEntry
+
   const api: ApiProxy = {
     harnesses: {
-      list: request => ok(request, { items: [{
-        schemaVersion: 0,
-        id: 'dsh',
-        name: 'DeepSeek Harness',
-        version: 'builtin',
-        publisher: 'DeepSeek',
-        verified: true,
-        protocol: 'dsh',
-        source: 'builtin',
-        isDefault: true,
-        graph: {
-          level: 'observable', manifestVersion: 1, boundary: 'DSH Harness process',
-          evidence: [{ kind: 'declared', source: 'OpenFish fixture' }],
-          nodes: [
-            { id: 'session', kind: 'session', title: 'Session', editable: false, responsibility: 'Owns resumable task state.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-            { id: 'loop', kind: 'agent-loop', title: 'Agent loop', editable: false, responsibility: 'Coordinates model and tools.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-            { id: 'tools', kind: 'tools', title: 'Tool runtime', editable: false, responsibility: 'Executes approved actions.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-          ],
-          edges: [{ from: 'session', to: 'loop' }, { from: 'loop', to: 'tools' }],
-        },
-        available: true,
-        installation: { status: 'builtin', installedVersion: 'builtin', availableVersion: 'builtin', previousVersions: [] },
-        auth: { methods: [], status: 'not-required', missingFields: [] },
-        compatibility: { status: 'ready' },
-        capabilities: [
-          { id: 'session.create', status: 'supported', source: 'driver' },
-          { id: 'session.resume', status: 'supported', source: 'driver' },
-          { id: 'workspace.project', status: 'supported', source: 'driver' },
-          { id: 'workspace.no-project', status: 'supported', source: 'driver' },
-          { id: 'configuration.models', status: 'supported', source: 'runtime' },
-          { id: 'configuration.reasoning', status: 'supported', source: 'runtime' },
-          { id: 'architecture.manifest', status: 'supported', source: 'pack' },
-        ],
-        driver: { apiVersion: 1, protocol: 'dsh', loaded: true },
-      } satisfies HarnessCatalogEntry] }),
-      refresh: request => ok(request, { items: [{
-        schemaVersion: 0,
-        id: 'dsh',
-        name: 'DeepSeek Harness',
-        version: 'builtin',
-        publisher: 'DeepSeek',
-        verified: true,
-        protocol: 'dsh',
-        source: 'builtin',
-        isDefault: true,
-        graph: {
-          level: 'observable', manifestVersion: 1, boundary: 'DSH Harness process',
-          evidence: [{ kind: 'declared', source: 'OpenFish fixture' }],
-          nodes: [
-            { id: 'session', kind: 'session', title: 'Session', editable: false, responsibility: 'Owns resumable task state.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-            { id: 'loop', kind: 'agent-loop', title: 'Agent loop', editable: false, responsibility: 'Coordinates model and tools.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-            { id: 'tools', kind: 'tools', title: 'Tool runtime', editable: false, responsibility: 'Executes approved actions.', evidence: [{ kind: 'declared', source: 'OpenFish fixture' }] },
-          ],
-          edges: [{ from: 'session', to: 'loop' }, { from: 'loop', to: 'tools' }],
-        },
-        available: true,
-        installation: { status: 'builtin', installedVersion: 'builtin', availableVersion: 'builtin', previousVersions: [] },
-        auth: { methods: [], status: 'not-required', missingFields: [] },
-        compatibility: { status: 'ready' },
-        capabilities: [
-          { id: 'session.create', status: 'supported', source: 'driver' },
-          { id: 'session.resume', status: 'supported', source: 'driver' },
-          { id: 'workspace.project', status: 'supported', source: 'driver' },
-          { id: 'workspace.no-project', status: 'supported', source: 'driver' },
-          { id: 'configuration.models', status: 'supported', source: 'runtime' },
-          { id: 'configuration.reasoning', status: 'supported', source: 'runtime' },
-          { id: 'architecture.manifest', status: 'supported', source: 'pack' },
-        ],
-        driver: { apiVersion: 1, protocol: 'dsh', loaded: true },
-      } satisfies HarnessCatalogEntry] }),
+      list: request => ok(request, { items: [fixtureHarness] }),
+      resolve: request => request.payload.id === fixtureHarness.id
+        && (request.payload.version === undefined || request.payload.version === fixtureHarness.version)
+        ? ok(request, { item: fixtureHarness })
+        : err(request, {
+          code: 'harness-failed',
+          message: `fixture has no Harness ${request.payload.id}${request.payload.version === undefined ? '' : ` ${request.payload.version}`}`,
+          details: {},
+        }),
+      refresh: request => ok(request, { items: [fixtureHarness] }),
       mutate: request => ok(request, { items: [] }),
+      manage: request => ok(request, { items: [] }),
     },
     sessions: {
       list: request => ok(request, { items: [...sessions].sort((a, b) => b.updatedAt - a.updatedAt) }),
@@ -2447,6 +2445,38 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         }
         if (options.dropSessionCreateResponse) throw new Error('fixture: dropped session.create response after publication')
         return ok(request, { sessionId: created.sessionId, harnessId: created.harnessId ?? 'dsh' })
+      },
+      discard: (request) => {
+        const { sessionId } = request.payload
+        const index = sessions.findIndex(summary => summary.sessionId === sessionId)
+        if (index === -1) {
+          return err(request, {
+            code: 'session-not-found',
+            message: `draft session "${sessionId}" was not found`,
+            details: { sessionId },
+          })
+        }
+        if ((logs.get(sessionId) ?? []).some(event => event.type === 'turn/start')) {
+          return err(request, {
+            code: 'agent-busy',
+            message: `session "${sessionId}" has started and cannot be discarded as a draft`,
+            details: { reason: 'only a conversation-not-started draft can be discarded' },
+          })
+        }
+        sessions.splice(index, 1)
+        logs.delete(sessionId)
+        modelSelections.delete(sessionId)
+        attachedSessions = Math.max(0, attachedSessions - 1)
+        const archivedIndex = archivedSessionIds.indexOf(sessionId)
+        if (archivedIndex !== -1) archivedSessionIds.splice(archivedIndex, 1)
+        for (const workspace of workspaces) {
+          if (!workspace.sessionIds.includes(sessionId)) continue
+          workspace.sessionIds = workspace.sessionIds.filter(candidate => candidate !== sessionId)
+          workspace.updatedAt = new Date().toISOString()
+          emitHost({ type: 'host/workspace-changed', workspace: { ...workspace } })
+        }
+        emitHost({ type: 'host/session-removed', sessionId })
+        return ok(request, { discarded: true as const })
       },
       rename: (request) => {
         const missing = requireSession(request)
@@ -2864,6 +2894,17 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         }
         return ok(request, { archivedSessionIds: [...archivedSessionIds] })
       },
+      unarchiveSession: (request) => {
+        const missing = requireSession(request)
+        if (missing !== undefined) return missing
+        const { sessionId } = request.payload
+        const index = archivedSessionIds.indexOf(sessionId)
+        if (index !== -1) {
+          archivedSessionIds.splice(index, 1)
+          emitHost({ type: 'host/archived-sessions-changed', archivedSessionIds: [...archivedSessionIds] })
+        }
+        return ok(request, { archivedSessionIds: [...archivedSessionIds] })
+      },
     },
     agentPresets: {
       // Both trusts appear, because a surface must present a locally authored
@@ -3252,11 +3293,14 @@ export class FixtureApiClient extends AbstractApiClient {
   ): Promise<RpcResponse<unknown>> {
     switch (method) {
       case 'harness.list': return this.api.harnesses.list(request)
+      case 'harness.resolve': return this.api.harnesses.resolve(request)
       case 'harness.refresh': return this.api.harnesses.refresh(request)
       case 'harness.mutate': return this.api.harnesses.mutate(request, signal)
+      case 'harness.manage': return this.api.harnesses.manage(request, signal)
       case 'session.list': return this.api.sessions.list(request)
       case 'session.search': return this.api.sessions.search(request, signal)
       case 'session.create': return this.api.sessions.create(request)
+      case 'session.discard': return this.api.sessions.discard(request)
       case 'session.history': return this.api.sessions.history(request)
       case 'session.models': return this.api.sessions.models(request)
       case 'session.selectModel': return this.api.sessions.selectModel(request)
@@ -3283,6 +3327,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)
       case 'workspace.insertSessionBefore': return this.api.workspace.insertSessionBefore(request)
       case 'workspace.archiveSession': return this.api.workspace.archiveSession(request)
+      case 'workspace.unarchiveSession': return this.api.workspace.unarchiveSession(request)
       case 'skill.list': return this.api.skills.list(request)
       case 'agentPreset.list': return this.api.agentPresets.list(request)
       case 'agentPreset.select': return this.api.agentPresets.select(request)

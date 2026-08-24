@@ -59,7 +59,7 @@ function build(manifest: CommandManifest): Command {
   program.action(async (prompt: string[], command: Command) => {
     const code = await run(
       { path: prompt.length === 0 ? 'app' : 'exec', args: prompt },
-      command.opts() as Record<string, unknown>,
+      command.opts(),
     )
     if (code !== 0) process.exitCode = code
   })
@@ -84,7 +84,7 @@ function build(manifest: CommandManifest): Command {
     const leafName = segments.at(-1)
     if (leafName === undefined) throw new Error(`invalid command path ${JSON.stringify(entry.path)}`)
     const leaf = new Command(leafName)
-    const commandArguments = entry.path === 'sandbox' ? ['[command...]'] : entry.arguments ?? []
+    const commandArguments = entry.path === 'sandbox' ? ['[command...]'] : entry.arguments
     for (const argument of commandArguments) {
       leaf.argument(argument)
     }
@@ -105,7 +105,7 @@ function build(manifest: CommandManifest): Command {
         if (Array.isArray(arg)) return arg.filter((value): value is string => typeof value === 'string')
         return []
       })
-      const code = await run({ path: entry.path, args }, opts as Record<string, unknown>)
+      const code = await run({ path: entry.path, args }, opts)
       if (code !== 0) process.exitCode = code
     })
     parent.addCommand(leaf)

@@ -52,6 +52,10 @@ export const sessionEventSchema = z.object({
 export const sessionSummarySchema = z.object({
   sessionId: sessionIdSchema,
   harnessId: z.string().min(1).default('dsh'),
+  harnessVersion: z.string().min(1).optional(),
+  harnessAuthMethod: z.string().min(1).optional(),
+  workspaceMode: z.enum(['project', 'no-project', 'custom-cwd']).optional(),
+  harnessCapabilities: z.array(z.string().min(1)).optional(),
   updatedAt: z.number(),
   running: z.boolean(),
   blank: z.boolean(),
@@ -119,6 +123,16 @@ export const sessionCreateValueSchema = z.object({
   agentPreset: z.string().optional(),
 }) satisfies z.ZodType<Wire<ResponseValue<'session.create'>>>
 
+/** session.discard accepts only an exact draft identity. */
+export const sessionDiscardRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'session.discard'>>>
+
+/** session.discard response after process, workspace, and persistence cleanup. */
+export const sessionDiscardValueSchema = z.object({
+  discarded: z.literal(true),
+}) satisfies z.ZodType<Wire<ResponseValue<'session.discard'>>>
+
 /** session.rename request payload (raw title; host-side normalization decides acceptance). */
 export const sessionRenameRequestSchema = z.object({
   sessionId: sessionIdSchema,
@@ -174,6 +188,8 @@ export const modelCatalogModelSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
+  providerId: z.string().min(1).optional(),
+  providerName: z.string().min(1).optional(),
   reasoning: modelReasoningSchema.optional(),
 }) satisfies z.ZodType<Wire<ModelCatalogModel>>
 
@@ -257,6 +273,11 @@ export const sessionModelsValueSchema = z.object({
   routable: z.boolean(),
   groups: z.array(modelProviderGroupSchema),
   failures: z.array(modelCatalogFailureSchema),
+  account: z.object({
+    label: z.string().min(1),
+    billing: z.enum(['subscription', 'usage', 'local', 'harness-managed', 'unknown']),
+    detail: z.string().min(1),
+  }).optional(),
   harnessOptions: z.array(z.object({
     id: z.string().min(1),
     name: z.string(),

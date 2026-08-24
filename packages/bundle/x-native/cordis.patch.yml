@@ -19,7 +19,7 @@
       config: {}
     - id: openfish-harness-acp
       name: '@deepseek-ai/dsh-harness-acp'
-      inject: [harnesses, agents, sessions, subprocess, approval, credentials]
+      inject: [harnesses, agents, sessions, subprocess, sandbox, sandboxPolicy, approval, userQuestions, credentials, attachments]
     - id: x-native
       name: '@deepseek-ai/dsh-bundle-x-native'
       inject: [webServer, connection]

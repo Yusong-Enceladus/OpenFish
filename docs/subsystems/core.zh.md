@@ -745,6 +745,17 @@ Catalog plus effect-scoped protocol drivers.
 registerDriver(driver: HarnessDriver): () => void
 
 /**
+ * Record one exact Driver Bundle only after the loopback-pinned Mac bridge
+ * admitted it and observed the matching Driver in the restarted Host.
+ * Remote clients cannot call the authoring plane that exposes this method.
+ * @param id - Exact Harness Pack identity.
+ * @param version - Exact admitted Pack version.
+ * @param packageName - Driver package identity declared by the Pack.
+ * @param spec - Exact immutable Driver installation spec.
+ */
+async authorizeDriverBundle( id: HarnessId, version: string, packageName: string, spec: string, ): Promise<void>
+
+/**
  * Refresh ACP Registry metadata without deleting user or built-in Packs.
  * @param signal - Optional cancellation for the registry request.
  */
@@ -757,11 +768,28 @@ async refresh(signal?: AbortSignal): Promise<void>
 async list(): Promise<HarnessCatalogEntry[]>
 
 /**
+ * Resolve the exact installed Pack and authentication choice pinned by a task.
+ * @param id - Stable Harness identity recorded by the task.
+ * @param version - Exact Pack version recorded by the task.
+ * @param authMethod - Exact non-secret authentication method recorded by the task.
+ * @returns Detached catalog row describing what that task actually runs.
+ */
+async describe(id: HarnessId, version?: string, authMethod?: string): Promise<HarnessCatalogEntry>
+
+/**
  * Install or update one Pack with a recoverable previous-version snapshot.
  * @param id - Catalog identity to install.
  * @param signal - Optional package-download cancellation.
  */
 async install(id: HarnessId, signal?: AbortSignal): Promise<void>
+
+/**
+ * Run a non-secret live preflight without sending a model prompt.
+ * Provider-owned state or setup cost remains provider-specific.
+ * @param id - Installed Harness Pack to probe.
+ * @param signal - Optional cancellation for installation and protocol checks.
+ */
+async probe(id: HarnessId, signal?: AbortSignal): Promise<void>
 
 /**
  * Remove managed package files while retaining the discoverable catalog row.
@@ -786,8 +814,9 @@ async selectAuth(id: HarnessId, method?: string): Promise<void>
  * Launch one explicitly selected interactive authentication flow.
  * @param id - Installed Harness whose terminal login should run.
  * @param methodId - Pack-declared terminal authentication method.
+ * @param signal - Optional cancellation forwarded to the Driver login flow.
  */
-async authenticateInteractive(id: HarnessId, methodId: string): Promise<void>
+async authenticateInteractive(id: HarnessId, methodId: string, signal?: AbortSignal): Promise<void>
 
 /**
  * Persist the cross-device default chosen by native Open Fish clients.
@@ -812,6 +841,28 @@ async defaultId(): Promise<HarnessId | undefined>
 async upsert(input: unknown): Promise<HarnessPack>
 
 /**
+ * Validate one public community submission without mutating the local catalog.
+ * @param input - Untrusted Pack-shaped publication payload.
+ * @returns Exact installed, preflighted, and admitted Pack safe to submit for review.
+ */
+async validatePublication(input: unknown): Promise<HarnessPack>
+
+/**
+ * Persist the review identity returned by the documented community backend.
+ * This method records no credential or Pack content and never treats a
+ * submitted review as catalog inclusion.
+ *
+ * @param input - Exact local Pack identity and GitHub review facts.
+ */
+async recordCommunitySubmission(input: HarnessCommunitySubmissionRecord): Promise<void>
+
+/**
+ * Persist the public review identity for an exact-version revocation request.
+ * @param input - Exact local Pack identity and GitHub revocation review facts.
+ */
+async recordCommunityRevocationSubmission(input: HarnessCommunitySubmissionRecord): Promise<void>
+
+/**
  * Remove one user-authored Pack definition.
  * @param id - User Pack identity.
  */
@@ -825,13 +876,23 @@ async removeUserPack(id: HarnessId): Promise<void>
 require(id: HarnessId): HarnessPack
 
 /**
+ * Resolve the exact Pack and effect-scoped Driver used to project one task's runtime evidence.
+ * @param id - Stable Harness Pack identity.
+ * @param version - Optional exact installed version pinned by a task.
+ * @returns Matching runtime binding, or undefined when the identity is unavailable.
+ */
+runtimeBinding(id: HarnessId, version?: string): { pack: HarnessPack; driver?: HarnessDriver } | undefined
+
+/**
  * Create a non-DSH session through its registered protocol driver.
  * @param id - Selected Harness Pack identity.
  * @param sessionId - New local session identity.
  * @param cwd - Absolute session working directory.
+ * @param workspaceMode - Explicit project or no-project workspace contract.
+ * @param signal - Optional cancellation for creation and live capability discovery.
  * @returns Published external Agent.
  */
-async create(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>
+async create( id: HarnessId, sessionId: SessionId, cwd: string, workspaceMode?: HarnessSessionRequest['workspaceMode'], signal?: AbortSignal, ): Promise<Agent>
 
 /**
  * Resume a persisted non-DSH session through its registered protocol driver.
@@ -839,12 +900,55 @@ async create(id: HarnessId, sessionId: SessionId, cwd: string): Promise<Agent>
  * @param sessionId - Existing local session identity.
  * @param cwd - Persisted absolute working directory.
  * @param version - Exact installed Pack version recorded by the session.
+ * @param authMethod - Exact non-secret authentication choice recorded by the session.
+ * @param workspaceMode - Persisted project or no-project workspace contract.
+ * @param signal - Optional cancellation for resume and live capability discovery.
  * @returns Restored external Agent.
  */
-async resume(id: HarnessId, sessionId: SessionId, cwd: string, version?: string): Promise<Agent>
+async resume( id: HarnessId, sessionId: SessionId, cwd: string, version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest['workspaceMode'], signal?: AbortSignal, ): Promise<Agent>
+
+/**
+ * Fork one external Harness through its protocol Driver. The Driver owns
+ * both the real remote branch and publication of the local seeded Agent;
+ * this service still owns exact-version, authentication, installation, and
+ * capability admission.
+ * @param id - Persisted Harness Pack identity.
+ * @param sourceSessionId - Existing local source task identity.
+ * @param sessionId - New local child task identity.
+ * @param cwd - Absolute working directory for the child task.
+ * @param seed - Durable source events copied into the child task.
+ * @param version - Exact installed Pack version pinned by the source task.
+ * @param authMethod - Exact non-secret authentication choice pinned by the source task.
+ * @param workspaceMode - Project or no-project workspace contract pinned by the source task.
+ * @returns Published external child Agent.
+ */
+async fork( id: HarnessId, sourceSessionId: SessionId, sessionId: SessionId, cwd: string, seed: SessionEvent[], version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest['workspaceMode'], ): Promise<Agent>
+
+/**
+ * Stop and detach one live external Harness session through the exact Driver
+ * and Pack version that created it. This is an in-memory lifecycle action;
+ * the durable transcript remains available for a later resume.
+ * @param id - Persisted Harness Pack identity.
+ * @param sessionId - Live local task identity to detach.
+ * @param version - Optional exact installed Pack version pinned by the task.
+ */
+async disposeSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>
+
+/**
+ * Permanently discard one live, never-started external Harness draft.
+ * Unlike ordinary disposal, a Driver may use this boundary to remove a
+ * provider-side thread that it had to create for live model/configuration
+ * discovery. The API Proxy proves the task is blank before calling here.
+ * @param id - Persisted Harness Pack identity.
+ * @param sessionId - Blank local draft identity to discard.
+ * @param version - Optional exact installed Pack version pinned by the draft.
+ */
+async discardSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>
 ```
 
-Source: [`packages/harness/harness/src/index.ts:134`](../../packages/harness/harness/src/index.ts)
+Types: [SessionEvent](session.md)
+
+Source: [`packages/harness/harness/src/index.ts:923`](../../packages/harness/harness/src/index.ts)
 
 <a id="ctxvoice--voice"></a>
 

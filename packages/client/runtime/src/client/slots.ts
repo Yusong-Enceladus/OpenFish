@@ -21,6 +21,7 @@ import type {
   LiveSlotNode, LocaleFace, OwnerOf, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
   SlotScope, SlotSpec, StoreDecl, StoreFactory, StoredEntry, StoreInstanceLike,
 } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ISessions } from './contract/sessions.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -385,7 +386,7 @@ export class SlotRegistry extends Service {
   /** Build once after both object-layer services mount; per-session provide bundles still resolve lazily. */
   private hostFace(): SlotRendererHost {
     if (this._host !== undefined) return this._host
-    const sessions = this.ctx.get('sessions')
+    const sessions = this.ctx.get('sessions') as ISessions | undefined
     if (sessions === undefined) {
       throw new Error("renderSlot('root') before the sessions service mounted — boot order puts runtime apply first")
     }

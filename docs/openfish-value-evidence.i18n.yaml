@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/openfish-value-evidence.md
+openfish-value-evidence.md: 46d62dadd610f4a220dbda45cb675c8ef59871f0
+openfish-value-evidence.zh.md: 72b53ce28a8c3cbbbd82eee3ed76b7a442c2afc7

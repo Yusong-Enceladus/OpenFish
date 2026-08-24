@@ -315,6 +315,9 @@ export class LocalSandboxProvider extends SandboxProvider {
    */
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
     if (this.runnerCommand !== undefined) {
+      if (policy.isolation !== undefined) {
+        throw new SandboxUnavailableError(policy.mode, 'the configured runner does not declare the resident-process isolation contract')
+      }
       return {
         argv: [...this.runnerCommand, ...bwrapProfileArgs(policy), '--', ...argv],
         enforcement: 'full',
@@ -323,6 +326,12 @@ export class LocalSandboxProvider extends SandboxProvider {
       }
     }
     const selected = this.selectRunner(policy.mode)
+    if (policy.isolation !== undefined && selected.runner !== 'seatbelt') {
+      throw new SandboxUnavailableError(
+        policy.mode,
+        `${selected.runner} does not implement the resident-process isolation contract on this host`,
+      )
+    }
     const runnerArgv = this.runnerArgv(selected.runner, policy)
     return {
       argv: [...runnerArgv, '--', ...argv],

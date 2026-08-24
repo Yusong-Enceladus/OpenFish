@@ -124,6 +124,9 @@ export interface ModelCatalogModel {
   name: string
   /** Optional provider-supplied description. */
   description?: string
+  /** Model provider identity only when the active adapter declares it. */
+  providerId?: string
+  providerName?: string
   /** Exact-route reasoning metadata when the adapter exposes it. */
   reasoning?: ModelReasoning
 }
@@ -165,6 +168,12 @@ export interface SessionModels {
   groups: ModelProviderGroup[]
   /** Provider-local failures; successful groups remain usable. */
   failures: ModelCatalogFailure[]
+  /** Runtime-reported account and billing boundary, when the Harness exposes one. */
+  account?: {
+    label: string
+    billing: 'subscription' | 'usage' | 'local' | 'harness-managed' | 'unknown'
+    detail: string
+  }
   /** Complete live ACP configuration directory; absent for native DSH sessions. */
   harnessOptions?: HarnessConfigOption[]
 }
@@ -200,6 +209,14 @@ export interface SessionSummary {
   sessionId: SessionId
   /** Harness runtime selected for this session; legacy sessions resolve to `dsh`. */
   harnessId?: string
+  /** Exact Harness Pack version fixed when this session was created. */
+  harnessVersion?: string
+  /** Exact non-secret Harness authentication choice fixed for this session. */
+  harnessAuthMethod?: string
+  /** Location contract fixed when this task was created. */
+  workspaceMode?: 'project' | 'no-project' | 'custom-cwd'
+  /** Supported/runtime capabilities fixed when this task was created. */
+  harnessCapabilities?: string[]
   /**
    * The later of creation and the latest human-authored prompt. Attached
    * Sessions fold their live log; cold Sessions use a projection-cache hint or
@@ -269,9 +286,9 @@ export interface SessionsApi {
 
   /**
    * Creates a real session and its idle agent. At most one of `workspaceId`,
-   * `cwd`, or explicit `noProject` is accepted; No Project uses a private
-   * OpenFish-managed working directory while a legacy omitted location uses
-   * the Host cwd. A caller may
+   * `cwd`, or explicit `noProject` is accepted. No Project (including an
+   * omitted location) uses a private OpenFish-managed working directory; the
+   * Host launch cwd is never an implicit project. A caller may
    * preallocate `sessionId`: retries with the same id and cwd return the same
    * session, while a different cwd fails with `session-conflict`. Workspace
    * creation attaches the session after publication; an attach failure
@@ -292,8 +309,16 @@ export interface SessionsApi {
     sessionId?: SessionId
     agentPreset?: string
     harnessId?: string
-  }>):
+  }>, signal?: AbortSignal):
   Promise<RpcResponse<{ sessionId: SessionId; harnessId?: string; agentPreset?: string }>>
+
+  /**
+   * Permanently discard a conversation-not-started draft, stopping its live
+   * Harness process and removing its local persistence artifact. Started
+   * sessions are never accepted by this endpoint.
+   */
+  discard(request: RpcRequest<{ sessionId: SessionId }>):
+  Promise<RpcResponse<{ discarded: true }>>
 
   /**
    * Reads a window of history events; page boundaries align to append-origin message
@@ -320,7 +345,7 @@ export interface SessionsApi {
    * Reads a fresh advisory model directory for an ordinary session. Provider
    * lookups run independently; subagents reject with `agent-busy`.
    */
-  models(request: RpcRequest<{ sessionId: SessionId }>): Promise<RpcResponse<SessionModels>>
+  models(request: RpcRequest<{ sessionId: SessionId }>, signal?: AbortSignal): Promise<RpcResponse<SessionModels>>
 
   /**
    * Selects the complete model selection for this session. Exact model metadata
@@ -332,7 +357,7 @@ export interface SessionsApi {
     provider: string
     model: string
     reasoningEffort?: string
-  }>):
+  }>, signal?: AbortSignal):
   Promise<RpcResponse<{ selected: ModelSelection }>>
 
   /** Sets any ACP-advertised session configuration option and returns the refreshed directory. */
@@ -340,7 +365,7 @@ export interface SessionsApi {
     sessionId: SessionId
     configId: string
     value: string | boolean
-  }>): Promise<RpcResponse<{ options: HarnessConfigOption[] }>>
+  }>, signal?: AbortSignal): Promise<RpcResponse<{ options: HarnessConfigOption[] }>>
 
   /**
    * Renames a session: appends a `session/title` event with the `user`

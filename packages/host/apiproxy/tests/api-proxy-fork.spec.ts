@@ -240,6 +240,53 @@ describe('sessions.fork', () => {
     await ctx.fiber.dispose()
   })
 
+  it('delegates an external fork to the pinned Harness Driver and preserves the exact local prefix', async () => {
+    const ctx = await composed()
+    const source = liveAgent(ctx, 'session-codex-source', 1)
+    source.append('harness/selected', {
+      harnessId: 'codex' as never,
+      version: '1.2.3',
+      protocol: 'codex-app-server',
+      authMethod: 'codex-local-login',
+      workspaceMode: 'no-project',
+      remoteSessionId: 'remote-source',
+    })
+    source.append('harness/native-event', {
+      harnessId: 'codex' as never,
+      event: { method: 'turn/completed', params: { turn: { id: 'remote-turn-1' } } },
+    })
+    const fork = vi.fn(async (
+      _harnessId: string, sourceSessionId: SessionId, childSessionId: SessionId,
+      cwd: string, seed: SessionEvent[],
+    ) => {
+      const childSession = ctx.sessions.create(childSessionId, {
+        seed,
+        meta: { cwd, parentSession: sourceSessionId, seedLength: seed.length },
+      })
+      const child = { id: childSessionId, session: childSession, status: 'idle', ctx } as Agent
+      ctx.agents.register(child)
+      return child
+    })
+    ctx.provide('harnesses', { fork } as never)
+
+    const response = await api(ctx).sessions.fork(request({ sessionId: source.id }))
+
+    expect(response.result.ok).toBe(true)
+    if (!response.result.ok) return
+    expect(fork).toHaveBeenCalledOnce()
+    expect(fork.mock.calls[0]?.slice(0, 4)).toEqual([
+      'codex', source.id, response.result.value.sessionId, '/proj',
+    ])
+    expect(fork.mock.calls[0]?.[4].map((event: SessionEvent) => event.type)).toEqual([
+      'turn/start', 'user/message', 'turn/end', 'harness/selected', 'harness/native-event',
+    ])
+    expect(fork.mock.calls[0]?.slice(5)).toEqual([
+      '1.2.3', 'codex-local-login', 'no-project',
+    ])
+    expect(ctx.sessions.get(response.result.value.sessionId)?.header.parentSession).toBe(source.id)
+    await ctx.fiber.dispose()
+  })
+
   it('rejects an in-log anchor whose turn is still open', async () => {
     const ctx = await composed()
     const source = liveAgent(ctx, 'session-open', 1, 'open')

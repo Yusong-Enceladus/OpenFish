@@ -57,6 +57,30 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'plugin', profile: 'tui', args: ['add', '--save-dev', 'x'] })
   })
 
+  it('routes the exact OpenFish Driver Bundle manager without arbitrary package-manager arguments', () => {
+    expect(parse(['driver', '--profile', 'x', 'list'])).toEqual({
+      mode: 'driver', profile: 'x', action: 'list', allowScripts: false,
+    })
+    expect(parse(['driver', '--profile', 'x', 'install', '@acme/openfish-driver-demo@1.2.3']))
+      .toEqual({
+        mode: 'driver', profile: 'x', action: 'install',
+        target: '@acme/openfish-driver-demo@1.2.3', allowScripts: false,
+      })
+    expect(parse([
+      'driver', '--profile', 'x', '--package', '@acme/openfish-driver-demo', '--allow-scripts',
+      'install', 'github:acme/openfish-driver-demo#0123456789abcdef0123456789abcdef01234567',
+    ])).toEqual({
+      mode: 'driver', profile: 'x', action: 'install',
+      target: 'github:acme/openfish-driver-demo#0123456789abcdef0123456789abcdef01234567',
+      packageName: '@acme/openfish-driver-demo', allowScripts: true,
+    })
+    expect(parse(['driver', '--profile', 'x', 'remove', '@acme/openfish-driver-demo']))
+      .toEqual({
+        mode: 'driver', profile: 'x', action: 'remove',
+        target: '@acme/openfish-driver-demo', allowScripts: false,
+      })
+  })
+
   it('routes profile and web config dumps', () => {
     expect(parse(['--profile', 'web', '--dump-config']))
       .toEqual({ mode: 'dump-config', profile: 'web', defaultOnly: false, patches: [] })
@@ -96,6 +120,12 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', 'install'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', 'remove'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', 'list', 'extra'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', '--allow-scripts', 'list'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', '--package', 'demo', 'remove', 'demo'])).toBe(1)
+    expect(exitCode(['driver', '--profile', 'x', 'upgrade', 'demo'])).toBe(1)
   })
 
   it('keeps its own help for an invocation with no app to hand it to', () => {

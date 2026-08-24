@@ -6,7 +6,7 @@
  * SHA-256 digests only; the secret is returned once at pairing time.
  */
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
@@ -35,7 +35,11 @@ const LAST_SEEN_WRITE_INTERVAL_MS = 60 * 1000
 
 export class PairingStore {
   private readonly loaded: StoredDevice[] = []
-  private readonly pairingCodes = new Map<string, number>()
+  // Short-lived pairing codes never touch disk. Retaining the normalized
+  // secret in Host memory lets the TLS bootstrap prove knowledge of the code
+  // itself; using only its transmitted public id as an HMAC key would let a
+  // first-connection TLS interceptor manufacture a valid proof.
+  private readonly pairingCodes = new Map<string, { expiresAt: number; secret: string }>()
   private loadedAt: number | undefined
   private operationTail: Promise<void> = Promise.resolve()
 
@@ -149,17 +153,19 @@ export class PairingStore {
     this.prunePairingCodes(now)
     // Grouped uppercase base32 avoids ambiguous punctuation and is easy to type.
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    const bytes = randomBytes(8)
+    const bytes = randomBytes(16)
     let raw = ''
     for (const byte of bytes) {
       const character = alphabet[byte % alphabet.length]
       if (character === undefined) throw new PairingError('invalid-request', 'pairing alphabet lookup failed')
       raw += character
     }
-    const code = `${raw.slice(0, 4)}-${raw.slice(4)}`
+    const code = raw.match(/.{1,4}/g)?.join('-')
+    if (code === undefined) throw new PairingError('invalid-request', 'could not create a pairing code')
     const expiresAt = now + DEFAULT_PAIR_CODE_TTL_MS
-    this.pairingCodes.set(this.pairingCodeHash(code), expiresAt)
-    return { code, expiresAt }
+    const codeId = this.pairingCodeHash(code)
+    this.pairingCodes.set(codeId, { expiresAt, secret: this.normalizePairingCode(code) })
+    return { code, codeId, expiresAt, transport: 'tls-code-proof-v2' }
   }
 
   /** Redeem a Host-minted code exactly once and register the remote device. */
@@ -168,14 +174,50 @@ export class PairingStore {
       const now = Date.now()
       this.prunePairingCodes(now)
       const hash = this.pairingCodeHash(request.code)
-      const expiresAt = this.pairingCodes.get(hash)
-      if (expiresAt === undefined || expiresAt <= now) {
+      const record = this.pairingCodes.get(hash)
+      if (record === undefined || record.expiresAt <= now) {
         throw new PairingError('invalid-code', 'pairing code is invalid or expired')
       }
       // Consume before the first await so two concurrent redemptions can never
       // register two devices with one code. A later capacity/I/O failure still
       // consumes the code, which is the safer one-time-secret behavior.
       this.pairingCodes.delete(hash)
+      return this.pairUnlocked(request)
+    })
+  }
+
+  /**
+   * Redeem without sending the out-of-band code over an unauthenticated TLS
+   * connection. The client proves knowledge of that high-entropy code and
+   * binds the proof to the leaf certificate it is currently talking to.
+   */
+  async redeemTlsProof(
+    request: PairRequest & { codeId: string; clientNonce: string; proof: string },
+    certificateFingerprint: string,
+  ): Promise<PairResponse> {
+    return this.exclusive(async () => {
+      const now = Date.now()
+      this.prunePairingCodes(now)
+      const codeId = request.codeId.toLowerCase()
+      const fingerprint = certificateFingerprint.toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(codeId)
+        || !/^[a-f0-9]{64}$/.test(fingerprint)
+        || !/^[A-Za-z0-9_-]{22,86}$/.test(request.clientNonce)
+        || !/^[a-fA-F0-9]{64}$/.test(request.proof)) {
+        throw new PairingError('invalid-request', 'invalid authenticated pairing proof')
+      }
+      const record = this.pairingCodes.get(codeId)
+      if (record === undefined || record.expiresAt <= now) {
+        throw new PairingError('invalid-code', 'pairing code is invalid or expired')
+      }
+      const expected = createHmac('sha256', record.secret)
+        .update(this.pairingProofMessage(request, fingerprint))
+        .digest()
+      const supplied = Buffer.from(request.proof, 'hex')
+      if (supplied.byteLength !== expected.byteLength || !timingSafeEqual(supplied, expected)) {
+        throw new PairingError('invalid-code', 'pairing proof does not match this Host')
+      }
+      this.pairingCodes.delete(codeId)
       return this.pairUnlocked(request)
     })
   }
@@ -226,13 +268,31 @@ export class PairingStore {
 
   private pairingCodeHash(code: string): string {
     return createHash('sha256')
-      .update(code.replace(/[^A-Za-z0-9]/g, '').toUpperCase())
+      .update(this.normalizePairingCode(code))
       .digest('hex')
   }
 
+  private normalizePairingCode(code: string): string {
+    return code.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+  }
+
+  private pairingProofMessage(
+    request: Pick<PairRequest, 'surface' | 'deviceName' | 'appVersion'> & { clientNonce: string },
+    certificateFingerprint: string,
+  ): string {
+    return [
+      'openfish-pair-v1',
+      certificateFingerprint,
+      request.clientNonce,
+      request.surface,
+      request.deviceName,
+      request.appVersion ?? '',
+    ].join('\0')
+  }
+
   private prunePairingCodes(now: number): void {
-    for (const [hash, expiresAt] of this.pairingCodes) {
-      if (expiresAt <= now) this.pairingCodes.delete(hash)
+    for (const [hash, record] of this.pairingCodes) {
+      if (record.expiresAt <= now) this.pairingCodes.delete(hash)
     }
   }
 

@@ -19,6 +19,7 @@
 export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'agent-preset/selected',
   'agent/inbox/spliced',
+  'agent/model-selected',
   'approval/asked',
   'approval/decided',
   'approval/policy',
@@ -33,6 +34,9 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'feedback/record',
   'goal/change',
   'harness/native-event',
+  'harness/remote-session',
+  'harness/runtime-edge',
+  'harness/runtime-node',
   'harness/selected',
   'hook/invoked',
   'hook/result',

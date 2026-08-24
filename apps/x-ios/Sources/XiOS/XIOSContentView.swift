@@ -3,29 +3,61 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum MobileOpenFishDemoMode {
+    static let isEnabled = ProcessInfo.processInfo.arguments.contains { $0 == "--openfish-demo" || $0.hasPrefix("--openfish-demo-") }
+    static let showsLoading = ProcessInfo.processInfo.arguments.contains("--openfish-demo-loading")
+    static let showsOffline = ProcessInfo.processInfo.arguments.contains("--openfish-demo-offline")
+    static let showsRecoverable = ProcessInfo.processInfo.arguments.contains("--openfish-demo-recoverable")
+    static let showsFatal = ProcessInfo.processInfo.arguments.contains("--openfish-demo-fatal")
+    static let showsEmpty = ProcessInfo.processInfo.arguments.contains("--openfish-demo-empty")
+    static let showsHarnessSetup = ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-catalog")
+    static let showsInteractions = ProcessInfo.processInfo.arguments.contains("--openfish-demo-interactions")
+
+    @MainActor
+    static func store() -> MobileOpenCodexStore {
+        if showsLoading { return .visualLoadingFixture() }
+        if showsOffline { return .visualOfflineFixture() }
+        if showsRecoverable { return .visualRecoverableFixture() }
+        if showsFatal { return .visualFatalFixture() }
+        if showsEmpty { return .visualEmptyFixture() }
+        if showsHarnessSetup { return .visualHarnessSetupFixture() }
+        if showsInteractions { return .visualInteractionFixture() }
+        return .visualFixture()
+    }
+}
+
 public struct OpenCodexIOSView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: MobileOpenCodexStore
     private let shouldBoot: Bool
+    private let runsVoiceHardwareSelfTest: Bool
+    private let runsLifecycleHardwareSelfTest: Bool
     @State private var importsPresented = false
     @State private var searchText = ""
     @State private var expandedWorkspaceIDs: Set<String> = []
     @State private var otherTasksExpanded = false
     @State private var archivedTasksExpanded = false
     @State private var choseInitialWorkspace = false
-    @State private var selectedComputer = "all"
     @State private var showsActivity = false
     @State private var inspectedHomeHarness: MobileHarness?
 
     public init() {
-        let demo = ProcessInfo.processInfo.arguments.contains("--openfish-demo")
-        _store = StateObject(wrappedValue: demo ? .visualFixture() : MobileOpenCodexStore())
-        shouldBoot = !demo
+        let demo = MobileOpenFishDemoMode.isEnabled
+        let arguments = ProcessInfo.processInfo.arguments
+        let runsVoiceHardwareSelfTest = arguments.contains("--openfish-voice-autotest")
+        let runsLifecycleHardwareSelfTest = arguments.contains("--openfish-lifecycle-autotest")
+        let isolatedVoiceSmoke = arguments.contains("--openfish-voice-smoke") || runsVoiceHardwareSelfTest
+        _store = StateObject(wrappedValue: demo ? MobileOpenFishDemoMode.store() : isolatedVoiceSmoke ? .visualFixture() : MobileOpenCodexStore())
+        shouldBoot = !demo && !isolatedVoiceSmoke
+        self.runsVoiceHardwareSelfTest = runsVoiceHardwareSelfTest
+        self.runsLifecycleHardwareSelfTest = runsLifecycleHardwareSelfTest
     }
 
     init(store: MobileOpenCodexStore, shouldBoot: Bool) {
         _store = StateObject(wrappedValue: store)
         self.shouldBoot = shouldBoot
+        runsVoiceHardwareSelfTest = false
+        runsLifecycleHardwareSelfTest = false
     }
 
     public var body: some View {
@@ -38,13 +70,22 @@ public struct OpenCodexIOSView: View {
                 )
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                    MobileComputerFilterBar(
-                        store: store,
-                        selection: $selectedComputer
-                    )
+                    if store.hostPresentationState.blocksTaskList {
+                        MobileHostAvailabilityView(store: store, state: store.hostPresentationState)
+                    } else {
+                    MobileHostStatusRow(store: store)
+
+                    if case let .cached(issue) = store.hostPresentationState {
+                        MobileCachedHostBanner(store: store, issue: issue)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                    }
 
                     if let harness = homeHarness, !showsActivity {
-                        MobileCurrentHarnessCard(harness: harness) { inspectedHomeHarness = harness }
+                        MobileCurrentHarnessCard(
+                            harness: harness,
+                            displayName: mobileHarnessDisplayName(harness, among: store.harnesses)
+                        ) { inspectedHomeHarness = harness }
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
                             .padding(.bottom, 4)
@@ -52,9 +93,9 @@ public struct OpenCodexIOSView: View {
 
                     if store.workspaces.isEmpty && store.sessions.isEmpty {
                         ContentUnavailableView(
-                            "No remote tasks",
-                            systemImage: "desktopcomputer",
-                            description: Text("Connect a computer or add a project to get started.")
+                            "No tasks yet",
+                            systemImage: "square.and.pencil",
+                            description: Text("Start with a project or choose No Project. The selected Harness will run on your Mac Host.")
                         )
                         .frame(maxWidth: .infinity)
                         .padding(.top, 90)
@@ -165,6 +206,7 @@ public struct OpenCodexIOSView: View {
                         }
                     }
                 }
+                }
                     }
                     }
                     .padding(.bottom, 8)
@@ -192,7 +234,7 @@ public struct OpenCodexIOSView: View {
                     .presentationDetents([.medium, .large])
             }
             .sheet(item: $inspectedHomeHarness) { harness in
-                MobileHarnessDetailView(store: store, harness: harness) {
+                MobileHarnessDetailView(store: store, harness: harness, initialLens: "Architecture") {
                     Task { await store.selectDefaultHarness(harness) }
                     inspectedHomeHarness = nil
                 }
@@ -204,7 +246,7 @@ public struct OpenCodexIOSView: View {
                 MobileVoiceConversationView(store: store)
             }
             .fullScreenCover(isPresented: Binding(
-                get: { store.nativeCapabilities != nil && store.selectedHarnessId.isEmpty && !store.harnesses.isEmpty },
+                get: { store.hasLiveBaseline && store.selectedHarnessId.isEmpty },
                 set: { _ in }
             )) {
                 MobileHarnessOnboardingView(store: store)
@@ -219,6 +261,14 @@ public struct OpenCodexIOSView: View {
             }
             .task {
                 if shouldBoot { await store.boot() }
+#if DEBUG
+                if runsVoiceHardwareSelfTest {
+                    await store.voice.runPhysicalHardwareSmokeTest()
+                }
+                if runsLifecycleHardwareSelfTest {
+                    await store.runPhysicalLifecycleSmokeTest()
+                }
+#endif
                 chooseInitialWorkspaceIfNeeded()
             }
             .onChange(of: store.workspaces) { _, _ in chooseInitialWorkspaceIfNeeded() }
@@ -394,39 +444,210 @@ public struct XIOSContentView: View {
     public var body: some View { OpenCodexIOSView() }
 }
 
+private func mobileHarnessDisplayName(_ harness: MobileHarness, among catalog: [MobileHarness]) -> String {
+    let hasCollision = catalog.contains {
+        $0.id != harness.id
+            && $0.name.localizedCaseInsensitiveCompare(harness.name) == .orderedSame
+    }
+    return hasCollision ? "\(harness.name) · \(harness.protocolName.uppercased())" : harness.name
+}
+
+private func mobileHarnessRequiresMacDriver(_ harness: MobileHarness) -> Bool {
+    harness.driverBundle != nil
+        && (harness.driver.authorization == "required"
+            || !harness.driver.loaded
+            || harness.installation.status != "installed"
+            || harness.installation.installedVersion != harness.installation.availableVersion)
+}
+
+private func mobileHarnessRequiresMacCodeConsent(_ harness: MobileHarness) -> Bool {
+    !harness.verified
+        && harness.source != "user"
+        && (harness.installation.status != "installed"
+            || harness.installation.installedVersion != harness.installation.availableVersion)
+}
+
+private func mobileHarnessRequiresMacSetup(_ harness: MobileHarness) -> Bool {
+    mobileHarnessRequiresMacDriver(harness) || mobileHarnessRequiresMacCodeConsent(harness)
+}
+
 private struct MobileCurrentHarnessCard: View {
     let harness: MobileHarness
+    let displayName: String
     let inspect: () -> Void
 
     var body: some View {
         Button(action: inspect) {
             HStack(spacing: 12) {
                 Image(systemName: "square.3.layers.3d")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 38, height: 38)
-                    .background(Color.accentColor.opacity(0.13), in: RoundedRectangle(cornerRadius: 11))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Current Harness").font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 44, height: 44)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current Harness")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     HStack(spacing: 6) {
-                        Text(harness.name).font(.headline)
+                        Text(displayName).font(.subheadline.weight(.semibold))
                         if harness.verified { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue) }
                     }
-                    Text("\(harness.graph.nodes.count) components · \(harness.graph.level.capitalized) · \(harness.compatibility.status.capitalized)")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    Text("\(harness.graph.nodes.count) components · \(harness.graph.level.capitalized)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {
-                    Label("See how it works", systemImage: "point.3.connected.trianglepath.dotted")
+                    Label("How it works", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .padding(13)
+            .padding(14)
+            .frame(minHeight: 84)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Current Harness \(harness.name), see how this Harness works")
+        .accessibilityLabel("Current Harness \(displayName), see how this Harness works")
+        .accessibilityIdentifier("OpenFish.iOS.CurrentHarness")
+    }
+}
+
+private struct MobileHostStatusRow: View {
+    @ObservedObject var store: MobileOpenCodexStore
+
+    private var host: String {
+        store.isDemoMode ? "Demo Mac" : store.profile.baseURL.host ?? "Mac Host"
+    }
+
+    private var statusLabel: String {
+        switch store.hostPresentationState {
+        case .ready: "Connected"
+        case .cached: "Offline"
+        case .loading: "Connecting"
+        case .recoverable: "Reconnect"
+        case .fatal: "Incompatible"
+        }
+    }
+
+    var body: some View {
+        Button { store.showsConnection = true } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(store.hasLiveBaseline ? Color.green : Color.orange)
+                    .frame(width: 7, height: 7)
+                Image(systemName: "desktopcomputer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(host)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    if let problem = store.connectionProblem, store.connectionState != .connected {
+                        Text(problem)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Text(statusLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 42)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Host \(host), \(statusLabel)")
+    }
+}
+
+private struct MobileHostAvailabilityView: View {
+    @ObservedObject var store: MobileOpenCodexStore
+    let state: MobileHostPresentationState
+
+    private var copy: (title: String, message: String, icon: String, loading: Bool) {
+        switch state {
+        case .loading:
+            ("Connecting to your Mac", "OpenFish is checking the Host protocol and restoring your tasks.", "desktopcomputer", true)
+        case let .recoverable(issue):
+            (issue?.title ?? "Could not reach this Mac", issue?.message ?? "OpenFish will keep retrying. Check the Mac Host or pair with another Mac.", "wifi.exclamationmark", false)
+        case let .fatal(issue):
+            (issue.title, issue.message, "exclamationmark.octagon", false)
+        case .ready, .cached:
+            ("Connected", "Your tasks are available.", "checkmark.circle", false)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if copy.loading {
+                ProgressView()
+                    .controlSize(.large)
+                    .accessibilityLabel("Connecting to Mac Host")
+            } else {
+                Image(systemName: copy.icon)
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(copy.title)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+            Text(copy.message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            if !copy.loading {
+                Button("Retry now") { Task { await store.retryHostConnection() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+            }
+            Button("Connection settings") { store.showsConnection = true }
+                .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 28)
+        .padding(.top, 96)
+        .accessibilityIdentifier("OpenFish.Mobile.Host.Availability")
+    }
+}
+
+private struct MobileCachedHostBanner: View {
+    @ObservedObject var store: MobileOpenCodexStore
+    let issue: MobileHostIssue?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                issue?.kind == .incompatible ? "Cached tasks · incompatible Host" : "Cached tasks · reconnecting",
+                systemImage: issue?.kind == .incompatible ? "exclamationmark.octagon.fill" : "wifi.slash"
+            )
+            .font(.subheadline.weight(.semibold))
+            Text(issue?.message ?? "Read cached tasks now. Sending, approvals, and new tasks resume after the Host reconnects.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Retry") { Task { await store.retryHostConnection() } }
+                    .buttonStyle(.bordered)
+                Button("Connection") { store.showsConnection = true }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("OpenFish.Mobile.Host.Cached")
     }
 }
 
@@ -434,7 +655,8 @@ private struct MobileHarnessOnboardingView: View {
     @ObservedObject var store: MobileOpenCodexStore
     @State private var query = ""
     @State private var inspectedHarness: MobileHarness?
-    @State private var pendingCommunityHarness: MobileHarness?
+    @State private var inspectedHarnessLens = "Simple"
+    @State private var authSetup: MobileHarnessAuthSetup?
 
     private var filtered: [MobileHarness] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -455,21 +677,56 @@ private struct MobileHarnessOnboardingView: View {
                     Text("Choose how OpenFish works").font(.largeTitle.bold())
                     Text("Pick the execution system that owns models, tools, guardrails, and resumable sessions. The connected Mac installs it; existing tasks never change Harnesses.")
                         .foregroundStyle(.secondary)
+                    if store.harnesses.isEmpty {
+                        ContentUnavailableView(
+                            "Harness catalog unavailable",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text("Reconnect to the Mac Host and retry. Pack installation and credentials remain owned by that Host.")
+                        )
+                        Button("Retry from Mac Host") { Task { await store.refresh() } }
+                            .buttonStyle(.borderedProminent)
+                        Button("Connection settings") { store.showsConnection = true }
+                    } else if filtered.isEmpty {
+                        ContentUnavailableView.search(text: query)
+                        Button("Clear search") { query = "" }
+                    }
                     ForEach(filtered) { harness in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(harness.name).font(.headline)
+                                Text(mobileHarnessDisplayName(harness, among: store.harnesses)).font(.headline)
                                 Text(harness.description ?? "No description provided.")
                                     .font(.subheadline).foregroundStyle(.secondary)
-                                Text("\(harness.graph.nodes.count) components · \(harness.compatibility.status) · \(harness.graph.level)")
+                                Text("v\(harness.version) · \(harness.installation.status.replacingOccurrences(of: "-", with: " ")) · \(harness.compatibility.classification.replacingOccurrences(of: "-", with: " "))")
                                     .font(.caption).foregroundStyle(.secondary)
+                                if let publication = harness.publication {
+                                    Text("Community · \(publication.status.replacingOccurrences(of: "-", with: " "))")
+                                        .font(.caption.weight(publication.status == "revoked" ? .semibold : .regular))
+                                        .foregroundStyle(publication.status == "revoked" ? Color.red : Color.secondary)
+                                }
                             }
                             Spacer()
-                            Button("How it works") { inspectedHarness = harness }
+                            Button("How it works") {
+                                inspectedHarnessLens = "Architecture"
+                                inspectedHarness = harness
+                            }
                                 .buttonStyle(.bordered)
-                            Button("Use") { requestUse(harness) }
+                            if store.harnessOperationId == harness.id {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .accessibilityLabel("Installing \(harness.name)")
+                            } else if mobileHarnessRequiresMacSetup(harness) {
+                                Button("Set up on Mac") {
+                                    inspectedHarnessLens = "Simple"
+                                    inspectedHarness = harness
+                                }
+                                    .buttonStyle(.bordered)
+                            } else {
+                                Button(harness.auth.status == "not-required" || harness.auth.status == "configured" ? "Use" : "Set up") {
+                                    requestUse(harness)
+                                }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(!harness.available)
+                                .disabled(store.harnessOperationId != nil || !harness.available)
+                            }
                         }
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -484,32 +741,183 @@ private struct MobileHarnessOnboardingView: View {
             .searchable(text: $query, prompt: "Find a Harness")
         }
         .sheet(item: $inspectedHarness) { harness in
-            MobileHarnessDetailView(store: store, harness: harness) {
+            MobileHarnessDetailView(store: store, harness: harness, initialLens: inspectedHarnessLens) {
                 requestUse(harness)
                 inspectedHarness = nil
             }
         }
-        .alert("Install an unverified Harness?", isPresented: Binding(
-            get: { pendingCommunityHarness != nil },
-            set: { if !$0 { pendingCommunityHarness = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
-            Button("Install and use") {
-                guard let harness = pendingCommunityHarness else { return }
-                pendingCommunityHarness = nil
-                Task { await store.selectDefaultHarness(harness) }
-            }
-        } message: {
-            Text("OpenFish validates the public Pack format and exact version, not the publisher's package code. Continue only if you trust it.")
+        .sheet(item: $authSetup) { setup in
+            MobileHarnessCredentialsView(
+                store: store,
+                harness: setup.harness,
+                makeDefault: true
+            )
         }
     }
 
     private func requestUse(_ harness: MobileHarness) {
-        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
-            pendingCommunityHarness = harness
+        if mobileHarnessRequiresMacSetup(harness) {
+            inspectedHarnessLens = "Simple"
+            inspectedHarness = harness
+        } else if harness.auth.status != "not-required" && harness.auth.status != "configured" {
+            authSetup = MobileHarnessAuthSetup(harness: harness)
         } else {
             Task { await store.selectDefaultHarness(harness) }
         }
+    }
+}
+
+private struct MobileHarnessAuthSetup: Identifiable {
+    let harness: MobileHarness
+    var id: String { harness.id }
+}
+
+private struct MobileHarnessCredentialsView: View {
+    @ObservedObject var store: MobileOpenCodexStore
+    let harness: MobileHarness
+    let makeDefault: Bool
+    let selectForDraft: Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedMethodId: String
+    @State private var saving = false
+
+    init(
+        store: MobileOpenCodexStore,
+        harness: MobileHarness,
+        makeDefault: Bool,
+        selectForDraft: Bool = false
+    ) {
+        self.store = store
+        self.harness = harness
+        self.makeDefault = makeDefault
+        self.selectForDraft = selectForDraft
+        _selectedMethodId = State(initialValue: harness.auth.selectedMethod ?? harness.auth.methods.first?.id ?? "")
+    }
+
+    private var currentHarness: MobileHarness {
+        store.harnesses.first(where: { $0.id == harness.id }) ?? harness
+    }
+
+    private var method: MobileHarness.Authentication.Method? {
+        currentHarness.auth.methods.first(where: { $0.id == selectedMethodId })
+            ?? currentHarness.auth.methods.first
+    }
+
+    private var canConfirmOnPhone: Bool {
+        guard let method else { return false }
+        return method.kind != "terminal" && method.fields.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Choose how \(currentHarness.name) authenticates. API keys and terminal sign-in never enter this iPhone; methods that need either one must be completed on the connected Mac.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Sign-in method") {
+                    if currentHarness.auth.methods.isEmpty {
+                        ContentUnavailableView(
+                            "No sign-in method advertised",
+                            systemImage: "key.slash",
+                            description: Text("Install or refresh this Harness on the connected Mac so its Driver can discover authentication.")
+                        )
+                    } else {
+                        Picker("Method", selection: $selectedMethodId) {
+                            ForEach(currentHarness.auth.methods) { method in
+                                Text(method.name).tag(method.id)
+                            }
+                        }
+                    }
+                }
+
+                if let method {
+                    if currentHarness.id == store.currentHarnessId,
+                       let runtimeAccount = store.sessionModels?.account {
+                        Section("Live task route") {
+                            LabeledContent("Account", value: runtimeAccount.label)
+                            LabeledContent(
+                                "Billing",
+                                value: runtimeAccount.billing.replacingOccurrences(of: "-", with: " ").capitalized
+                            )
+                            Text(runtimeAccount.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Section("Account and billing") {
+                        LabeledContent("Account", value: method.account?.label ?? method.name)
+                        LabeledContent(
+                            "Billing",
+                            value: method.account?.billing.replacingOccurrences(of: "-", with: " ").capitalized ?? "Not declared"
+                        )
+                        Text(method.account?.detail ?? "This Harness Pack has not declared who owns billing for this method.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if method.kind == "terminal" || !method.fields.isEmpty {
+                        Section {
+                            Label("Finish this sign-in in OpenFish on the connected Mac.", systemImage: "macbook.and.iphone")
+                                .font(.subheadline)
+                            if method.kind == "terminal" {
+                                Text("This method opens an interactive terminal owned by the Mac. Terminal input and authentication tokens are never proxied through the iPhone.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Required on Mac: \(method.fields.map(\.name).joined(separator: ", ")). OpenFish deliberately does not provide a mobile API-key form because the paired Host connection may use a trusted LAN transport.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button("Check Host status") { Task { await store.refresh() } }
+                        }
+                    } else {
+                        Section {
+                            Label("This method has no fields to enter on this iPhone.", systemImage: "checkmark.shield")
+                                .font(.subheadline)
+                            Text(method.kind == "agent"
+                                ? "Selecting it asks the connected Mac to verify the Harness-owned local account state. It does not sign you in on this iPhone or grant model quota."
+                                : "The connected Mac still verifies that the Harness can use this method before a task starts.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Configure Harness")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Confirm") {
+                        guard let method else { return }
+                        saving = true
+                        Task {
+                            let saved = await store.configureHarness(
+                                currentHarness,
+                                method: method,
+                                makeDefault: makeDefault
+                            )
+                            saving = false
+                            if saved {
+                                if selectForDraft {
+                                    await store.chooseHarness(
+                                        currentHarness,
+                                        force: true
+                                    )
+                                }
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(!canConfirmOnPhone || saving || store.harnessOperationId != nil)
+                }
+            }
+        }
+        .interactiveDismissDisabled(saving)
     }
 }
 
@@ -518,12 +926,39 @@ private struct MobileHarnessDetailView: View {
     let harness: MobileHarness
     let use: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var lens = "Simple"
+    @State private var lens: String
     @State private var selectedNodeId: String?
+    @State private var architecturePresentation = "Flow"
+    @State private var handoffCopied = false
+
+    init(
+        store: MobileOpenCodexStore,
+        harness: MobileHarness,
+        initialLens: String = "Simple",
+        use: @escaping () -> Void
+    ) {
+        self.store = store
+        self.harness = harness
+        self.use = use
+        _lens = State(initialValue: initialLens)
+    }
+
+    private var currentHarness: MobileHarness {
+        store.harnesses.first(where: { $0.id == harness.id }) ?? harness
+    }
+
+    private var matchingRuntime: MobileHarnessRuntimeProjection? {
+        guard store.currentHarness?.id == harness.id,
+              store.currentHarness?.version == harness.version,
+              let runtime = store.currentHarnessRuntime,
+              runtime.harnessId == nil || runtime.harnessId == harness.id,
+              runtime.version == nil || runtime.version == harness.version else { return nil }
+        return runtime
+    }
 
     private var truthExplanation: String {
         switch harness.graph.level {
-        case "composable": return "This Pack declares editable nodes. Use Harness Studio on the Mac to change them."
+        case "composable": return "This Pack declares editable nodes. Use the Manifest Editor on the Mac to change them."
         case "observable": return "Read-only structure declared by the Pack. OpenFish does not invent private internals."
         default: return "Only the runtime boundary is public. The Harness keeps its private internals opaque."
         }
@@ -545,31 +980,81 @@ private struct MobileHarnessDetailView: View {
                     if let description = harness.description { Text(description).foregroundStyle(.secondary) }
                     Picker("Harness lens", selection: $lens) {
                         Text("Simple").tag("Simple")
-                        Text("Architecture").tag("Architecture")
-                        Text("Runtime").tag("Runtime")
+                        Text("How it works").tag("Architecture")
+                        Text("Live").tag("Runtime")
                         Text("Manifest").tag("Manifest")
                     }
                     .pickerStyle(.segmented)
 
                     if lens == "Simple" {
                         VStack(spacing: 10) {
-                            MobileLensFact(title: "Models & sign-in", value: harness.auth.status.replacingOccurrences(of: "-", with: " "), icon: "cpu")
-                            MobileLensFact(title: "Installation", value: harness.installation.status.replacingOccurrences(of: "-", with: " "), icon: "shippingbox")
-                            MobileLensFact(title: "Compatibility", value: harness.compatibility.status, icon: "checkmark.shield")
-                            MobileLensFact(title: "Driver contract", value: harness.driver.loaded ? "API v\(harness.driver.apiVersion) · \(harness.capabilities.filter { $0.status != "unsupported" }.count) capabilities" : "Driver not loaded", icon: "puzzlepiece.extension")
+                            MobileLensFact(
+                                title: "What changes",
+                                value: "\(currentHarness.description ?? "This Pack does not declare a usage summary.") New tasks can use it; existing tasks stay pinned to their original Harness and version.",
+                                icon: "arrow.triangle.branch"
+                            )
+                            MobileLensFact(title: "Models & sign-in", value: modelAndSignInSummary, icon: "cpu")
+                            MobileLensFact(title: "Install & updates", value: lifecycleSummary, icon: "shippingbox")
+                            MobileLensFact(
+                                title: "Trust & compatibility",
+                                value: "\(currentHarness.compatibility.classification.replacingOccurrences(of: "-", with: " ")) · \(currentHarness.installation.integrity.status.replacingOccurrences(of: "-", with: " ")) · \(driverAuthorizationSummary)",
+                                icon: "checkmark.shield"
+                            )
+                            if let publication = currentHarness.publication {
+                                MobileLensFact(
+                                    title: "Community publication",
+                                    value: "\(publication.status.replacingOccurrences(of: "-", with: " ")) · \(publication.detail)\(publication.revokedReason.map { " Reason: \($0)" } ?? "")",
+                                    icon: publication.status == "revoked" ? "exclamationmark.shield.fill" : publication.status == "published" ? "checkmark.seal.fill" : "doc.badge.clock"
+                                )
+                                if let review = publication.reviewUrl, let url = URL(string: review) {
+                                    Link("Open community review", destination: url)
+                                        .font(.footnote.weight(.semibold))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            MobileLensFact(title: "Permission boundary", value: permissionSummary, icon: "hand.raised")
+                            if currentHarness.installation.status != "builtin" {
+                                Label(
+                                    "Update, rollback, uninstall, and removal are managed on the connected Mac so a phone cannot silently replace task runtimes.",
+                                    systemImage: "macbook.and.iphone"
+                                )
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if let bundle = currentHarness.driverBundle, mobileHarnessRequiresMacDriver(currentHarness) {
+                                Label(
+                                    "This Harness needs \(bundle.package) from \(bundle.spec). OpenFish on the Mac must show the code-execution warning, install the exact Driver, and restart its verified Host before the iPhone can use it.",
+                                    systemImage: "macbook.and.iphone"
+                                )
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if mobileHarnessRequiresMacCodeConsent(currentHarness) {
+                                Label(
+                                    "This exact third-party Harness version has not been verified. Review and admit its code in OpenFish on the Host Mac; a paired iPhone cannot grant Host code execution.",
+                                    systemImage: "lock.desktopcomputer"
+                                )
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     } else if lens == "Manifest" {
                         ContentUnavailableView(
                             "Manifest Editor is on your Mac",
                             systemImage: "point.3.connected.trianglepath.dotted",
-                            description: Text("Create, validate, import, preflight, and prepare credential-free Harness Packs on the connected Mac. Registry submission remains an explicit review step; this iPhone is a safe read-only architecture and approval controller.")
+                            description: Text("Create, validate, import, preflight, and submit credential-free Harness Packs to the reviewed community catalog on the connected Mac. This iPhone remains a safe read-only architecture and approval controller.")
                         )
                         .frame(minHeight: 250)
                     } else if lens == "Runtime" {
                         VStack(alignment: .leading, spacing: 12) {
-                            MobileHarnessGraphPreview(graph: harness.graph, runtime: store.currentHarnessRuntime)
-                                .frame(height: max(190, CGFloat((harness.graph.nodes.count + 1) / 2) * 76 + 24))
-                            if let runtime = store.currentHarnessRuntime, !runtime.nodes.isEmpty {
+                            MobileHarnessArchitectureFlow(
+                                graph: harness.graph, runtime: matchingRuntime,
+                                selectedNodeId: selectedNodeId, onSelect: { selectedNodeId = $0 }
+                            )
+                            if let runtime = matchingRuntime, !runtime.nodes.isEmpty {
                                 ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
                                     if let activity = runtime.nodes[nodeID] {
                                         MobileLensFact(
@@ -577,6 +1062,18 @@ private struct MobileHarnessDetailView: View {
                                             value: "\(activity.status) · \(activity.activity)",
                                             icon: activity.status == "failed" ? "exclamationmark.triangle" : "waveform.path.ecg"
                                         )
+                                    }
+                                }
+                                if let edges = runtime.edges, !edges.isEmpty {
+                                    Text("Observed flows").font(.headline).padding(.top, 4)
+                                    ForEach(edges.keys.sorted(), id: \.self) { edgeID in
+                                        if let edge = edges[edgeID] {
+                                            MobileLensFact(
+                                                title: "\(edge.from) → \(edge.to)",
+                                                value: "\(edge.status) · \(edge.activity)",
+                                                icon: edge.status == "failed" ? "exclamationmark.triangle" : "arrow.right"
+                                            )
+                                        }
                                     }
                                 }
                             } else {
@@ -591,8 +1088,20 @@ private struct MobileHarnessDetailView: View {
                                 Text(harness.graph.level.capitalized).font(.caption.weight(.semibold))
                             }
                             .font(.caption.weight(.semibold))
-                            MobileHarnessGraphPreview(graph: harness.graph)
-                                .frame(height: max(190, CGFloat((harness.graph.nodes.count + 1) / 2) * 76 + 24))
+                            Picker("Architecture presentation", selection: $architecturePresentation) {
+                                Text("Operational lens").tag("Flow")
+                                Text("Full map").tag("Map")
+                            }
+                            .pickerStyle(.segmented)
+                            if architecturePresentation == "Flow" {
+                                MobileHarnessArchitectureFlow(
+                                    graph: harness.graph, selectedNodeId: selectedNodeId,
+                                    onSelect: { selectedNodeId = $0 }
+                                )
+                            } else {
+                                MobileHarnessGraphPreview(graph: harness.graph)
+                                    .frame(height: max(240, min(560, CGFloat(harness.graph.nodes.count) * 72 + 20)))
+                            }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
                                     ForEach(harness.graph.nodes) { node in
@@ -612,6 +1121,42 @@ private struct MobileHarnessDetailView: View {
                                     }
                                     Text(node.responsibility ?? "This Pack has not supplied a responsibility statement.")
                                         .font(.footnote).foregroundStyle(.secondary)
+                                    if let inputs = node.inputs, !inputs.isEmpty {
+                                        MobileArchitectureValues(title: "Receives", values: inputs, icon: "arrow.down.left")
+                                    }
+                                    if let outputs = node.outputs, !outputs.isEmpty {
+                                        MobileArchitectureValues(title: "Produces", values: outputs, icon: "arrow.up.right")
+                                    }
+                                    if let ports = node.ports, !ports.isEmpty {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text("Typed ports").font(.caption.weight(.semibold))
+                                            ForEach(ports) { port in
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: port.direction == "input" ? "arrow.right.circle" : "arrow.left.circle")
+                                                    Text(port.name).font(.caption)
+                                                    Spacer()
+                                                    Text(port.dataType).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let fields = node.configSchema?.fields, !fields.isEmpty {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text("Executable controls").font(.caption.weight(.semibold))
+                                            ForEach(fields) { field in
+                                                HStack(alignment: .firstTextBaseline) {
+                                                    VStack(alignment: .leading, spacing: 1) {
+                                                        Text(field.name).font(.caption)
+                                                        Text("\(field.binding.kind) · \(field.binding.target)")
+                                                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                                    }
+                                                    Spacer()
+                                                    Text(mobileConfigValue(node.config?[field.id]))
+                                                        .font(.caption2.weight(.medium)).lineLimit(1)
+                                                }
+                                            }
+                                        }
+                                    }
                                     if let evidence = node.evidence {
                                         ForEach(evidence) { item in
                                             Label(item.kind.replacingOccurrences(of: "-", with: " ").capitalized, systemImage: "doc.text.magnifyingglass")
@@ -625,6 +1170,21 @@ private struct MobileHarnessDetailView: View {
                                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                             }
                             Text(truthExplanation).font(.footnote).foregroundStyle(.secondary)
+                            Text(currentHarness.driver.loaded
+                                ? "Driver API v\(currentHarness.driver.apiVersion) negotiated · \(driverAuthorizationSummary) · \(currentHarness.capabilities.filter { $0.status != "unsupported" }.count) advertised capabilities"
+                                : "The required Driver is not loaded on the connected Mac.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if harness.source == "user" {
+                                Button {
+                                    UIPasteboard.general.string = harness.id
+                                    handoffCopied = true
+                                } label: {
+                                    Label(handoffCopied ? "Pack ID copied" : "Continue in Manifest Editor on Mac", systemImage: "macbook.and.iphone")
+                                }
+                                .buttonStyle(.bordered)
+                                Text("This Pack already lives on the connected Host. Open Settings → Harnesses → Manifest on that Mac and choose \(harness.name). No manifest or credential is transferred through the clipboard; only its public Pack ID is copied.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Negotiated capabilities").font(.headline)
                                 ForEach(harness.capabilities) { capability in
@@ -645,11 +1205,37 @@ private struct MobileHarnessDetailView: View {
                             .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                         }
                     }
-                    Button("Install and use for new tasks", action: use)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                    if store.harnessOperationId == harness.id {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Installing and checking \(harness.name)…")
+                        }
                         .frame(maxWidth: .infinity)
-                        .disabled(!harness.available)
+                        .padding(.vertical, 10)
+                        .accessibilityElement(children: .combine)
+                    } else {
+                        Button(harnessActionTitle) {
+                            use()
+                        }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity)
+                            .disabled(
+                                store.harnessOperationId != nil || !currentHarness.available
+                                    || currentHarness.isDefault || (requiresSetup && !canConfigureOnPhone)
+                                    || mobileHarnessRequiresMacSetup(currentHarness)
+                            )
+                    }
+                    if requiresSetup {
+                        Label(
+                            canConfigureOnPhone
+                                ? "The connected Mac verifies this sign-in choice. No credential value is returned to this iPhone."
+                                : "Finish authentication on the connected Mac. Harness-owned terminal input never moves to this iPhone.",
+                            systemImage: canConfigureOnPhone ? "lock.shield" : "macbook.and.iphone"
+                        )
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 // A Pack may advertise arbitrarily long capability ids, evidence
                 // URLs, or component titles. Constrain the content to the phone
@@ -663,10 +1249,295 @@ private struct MobileHarnessDetailView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
         .onAppear { selectedNodeId = harness.graph.nodes.first?.id }
+        .accessibilityIdentifier("OpenFish.iOS.HarnessDetail")
     }
 
     private var selectedNode: MobileHarness.GraphNode? {
         harness.graph.nodes.first(where: { $0.id == selectedNodeId }) ?? harness.graph.nodes.first
+    }
+
+    private var driverAuthorizationSummary: String {
+        switch currentHarness.driver.authorization {
+        case "authorized": return "exact Driver source authorized"
+        case "required": return "exact Driver source needs Mac authorization"
+        default: return "built-in Driver"
+        }
+    }
+
+    private var harnessActionTitle: String {
+        if currentHarness.isDefault { return "Default for new tasks" }
+        if mobileHarnessRequiresMacDriver(currentHarness) { return "Install Driver on Mac first" }
+        if mobileHarnessRequiresMacCodeConsent(currentHarness) { return "Review code on Mac first" }
+        if requiresSetup { return canConfigureOnPhone ? "Set up sign-in" : "Set up on Mac" }
+        if currentHarness.installation.status == "builtin" || currentHarness.installation.status == "installed" {
+            return "Use for new tasks"
+        }
+        return "Install and use for new tasks"
+    }
+
+    private var requiresSetup: Bool {
+        currentHarness.auth.status != "not-required" && currentHarness.auth.status != "configured"
+    }
+
+    private var canConfigureOnPhone: Bool {
+        currentHarness.auth.methods.contains { $0.kind != "terminal" && $0.fields.isEmpty }
+    }
+
+    private var modelAndSignInSummary: String {
+        if let selected = currentHarness.auth.selectedMethod {
+            let method = currentHarness.auth.methods.first(where: { $0.id == selected })
+            return method?.account?.label ?? method?.name ?? selected
+        }
+        if currentHarness.auth.status != "not-required" {
+            return currentHarness.auth.status.replacingOccurrences(of: "-", with: " ")
+        }
+        return currentHarness.modelConfiguration?.detail
+            ?? currentHarness.account?.label
+            ?? "Model and account contract not declared by this Pack"
+    }
+
+    private var lifecycleSummary: String {
+        if currentHarness.installation.status == "builtin" {
+            return "Bundled inside this OpenFish build. Updates and rollback follow the Mac app; it cannot be removed separately."
+        }
+        if currentHarness.installation.status == "installed" {
+            let active = currentHarness.installation.installedVersion ?? currentHarness.version
+            var parts = ["Installed exact version \(active)"]
+            let available = currentHarness.installation.availableVersion
+            if available != active {
+                parts.append("\(available) available on the Mac")
+            }
+            if !currentHarness.installation.previousVersions.isEmpty {
+                parts.append("rollback available")
+            }
+            return parts.joined(separator: " · ")
+        }
+        return "The connected Mac will install exact version \(currentHarness.installation.availableVersion) into OpenFish's private runtime after confirmation."
+    }
+
+    private var permissionSummary: String {
+        let tools = currentHarness.capabilities.first(where: { $0.id == "interaction.tools" })?.status
+        let approvals = currentHarness.capabilities.first(where: { $0.id == "interaction.approvals" })?.status
+        if tools == "unsupported" { return "This Driver does not advertise tool actions." }
+        if approvals == "supported" || approvals == "runtime" {
+            return "The Harness owns tool behavior; OpenFish mirrors advertised approval requests from the Mac."
+        }
+        return "The Harness owns tool behavior and does not advertise an approval flow. Review it on the Mac before use."
+    }
+}
+
+private struct MobileArchitectureValues: View {
+    let title: String
+    let values: [String]
+    let icon: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: icon).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold))
+                Text(values.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private func mobileConfigValue(_ value: MobileJSONValue?) -> String {
+    guard let value else { return "Not set" }
+    if let text = value.stringValue { return text }
+    if let flag = value.boolValue { return flag ? "On" : "Off" }
+    return "Configured"
+}
+
+private struct MobileHarnessArchitecturePhase: Identifiable {
+    let id: String
+    let title: String
+    let summary: String
+    let icon: String
+    let nodes: [MobileHarness.GraphNode]
+}
+
+private struct MobileHarnessArchitectureFlow: View {
+    let graph: MobileHarness.Graph
+    var runtime: MobileHarnessRuntimeProjection? = nil
+    var selectedNodeId: String? = nil
+    var onSelect: ((String) -> Void)? = nil
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Operational architecture").font(.subheadline.weight(.semibold))
+                Text("Stages come from the Pack's exact connections, including branches and cycles. OpenFish does not infer private categories.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 2)
+
+            ForEach(phases) { phase in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 9) {
+                        Image(systemName: phase.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(phase.title).font(.subheadline.weight(.semibold))
+                            Text(phase.summary).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    ForEach(phase.nodes) { node in
+                        Button { onSelect?(node.id) } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Circle()
+                                    .fill(runtimeColor(node.id))
+                                    .frame(width: 8, height: 8)
+                                    .padding(.top, 5)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Text(node.title).font(.subheadline.weight(.semibold))
+                                        Spacer(minLength: 0)
+                                        if node.editable {
+                                            Image(systemName: "slider.horizontal.3")
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let observed = runtime?.nodes[node.id] {
+                                            Text(observed.status.capitalized)
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(runtimeColor(node.id))
+                                        }
+                                    }
+                                    Text(node.responsibility ?? "Responsibility not declared by this Pack.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.leading)
+                                    Text(relationshipSummary(node.id))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(2)
+                                    if let observed = runtime?.nodes[node.id] {
+                                        Text(observed.activity)
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(runtimeColor(node.id))
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                            .padding(11)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                selectedNodeId == node.id ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(
+                                selectedNodeId == node.id ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.12)
+                            ))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(node.title), \(phase.title), \(node.responsibility ?? node.kind)")
+                    }
+                }
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 15))
+            }
+        }
+    }
+
+    private var phases: [MobileHarnessArchitecturePhase] {
+        guard !graph.nodes.isEmpty else { return [] }
+        let order = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
+        var assigned = Set<String>()
+        var groups: [[MobileHarness.GraphNode]] = []
+        for node in graph.nodes where !assigned.contains(node.id) {
+            let group = graph.nodes.filter { candidate in
+                canReach(node.id, candidate.id) && canReach(candidate.id, node.id)
+            }
+            assigned.formUnion(group.map(\.id))
+            groups.append(group.sorted { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) })
+        }
+        let groupByNode = Dictionary(uniqueKeysWithValues: groups.enumerated().flatMap { index, nodes in
+            nodes.map { ($0.id, index) }
+        })
+        var outgoing = Dictionary(uniqueKeysWithValues: groups.indices.map { ($0, Set<Int>()) })
+        var indegree = Dictionary(uniqueKeysWithValues: groups.indices.map { ($0, 0) })
+        for edge in graph.edges {
+            guard let source = groupByNode[edge.from], let target = groupByNode[edge.to], source != target,
+                  outgoing[source]?.insert(target).inserted == true else { continue }
+            indegree[target, default: 0] += 1
+        }
+        var remaining = Set(groups.indices)
+        var layers: [[Int]] = []
+        while !remaining.isEmpty {
+            var ready = remaining.filter { indegree[$0, default: 0] == 0 }
+                .sorted { firstNodeOrder(groups[$0], order: order) < firstNodeOrder(groups[$1], order: order) }
+            if ready.isEmpty, let fallback = remaining.min(by: {
+                firstNodeOrder(groups[$0], order: order) < firstNodeOrder(groups[$1], order: order)
+            }) { ready = [fallback] }
+            layers.append(ready)
+            for index in ready {
+                remaining.remove(index)
+                for target in outgoing[index] ?? [] { indegree[target, default: 0] -= 1 }
+            }
+        }
+        return layers.enumerated().map { index, groupIndices in
+            let nodes = groupIndices.flatMap { groups[$0] }.sorted { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+            let containsCycle = groupIndices.contains { groups[$0].count > 1 }
+            let title = layers.count == 1 ? "Harness boundary"
+                : index == 0 ? "Entry stage"
+                : index == layers.count - 1 ? "Outcome stage"
+                : containsCycle ? "Runtime loop" : "Stage \(index + 1)"
+            let summary = containsCycle ? "Pack-declared cycle · \(nodes.count) components"
+                : groupIndices.count > 1 ? "Parallel paths · \(nodes.count) components"
+                : "\(nodes.count) Pack-declared component\(nodes.count == 1 ? "" : "s")"
+            return MobileHarnessArchitecturePhase(
+                id: groupIndices.map(String.init).joined(separator: "-"), title: title, summary: summary,
+                icon: containsCycle ? "arrow.triangle.2.circlepath"
+                    : index == 0 ? "arrow.right"
+                    : index == layers.count - 1 ? "arrow.turn.down.right" : "point.3.connected.trianglepath.dotted",
+                nodes: nodes
+            )
+        }
+    }
+
+    private func canReach(_ source: String, _ target: String) -> Bool {
+        if source == target { return true }
+        var visited = Set([source])
+        var pending = [source]
+        while let current = pending.popLast() {
+            for next in graph.edges.lazy.filter({ $0.from == current }).map(\.to) where !visited.contains(next) {
+                if next == target { return true }
+                visited.insert(next)
+                pending.append(next)
+            }
+        }
+        return false
+    }
+
+    private func firstNodeOrder(_ nodes: [MobileHarness.GraphNode], order: [String: Int]) -> Int {
+        nodes.compactMap { order[$0.id] }.min() ?? .max
+    }
+
+    private func relationshipSummary(_ nodeID: String) -> String {
+        let names = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0.title) })
+        let incoming = graph.edges.filter { $0.to == nodeID }.map { edge in
+            let source = names[edge.from] ?? edge.from
+            return edge.label.map { "\(source) [\($0)]" } ?? source
+        }
+        let outgoing = graph.edges.filter { $0.from == nodeID }.map { edge in
+            let target = names[edge.to] ?? edge.to
+            return edge.label.map { "\(target) [\($0)]" } ?? target
+        }
+        return "\(incoming.isEmpty ? "entry" : "from \(incoming.joined(separator: ", "))") · \(outgoing.isEmpty ? "outcome" : "to \(outgoing.joined(separator: ", "))")"
+    }
+
+    private func runtimeColor(_ nodeId: String) -> Color {
+        switch runtime?.nodes[nodeId]?.status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
+        }
     }
 }
 
@@ -675,11 +1546,11 @@ private struct MobileLensFact: View {
     let value: String
     let icon: String
     var body: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
-            Spacer()
-            Text(value.capitalized).font(.subheadline).foregroundStyle(.secondary)
+            Text(value).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 13))
     }
@@ -695,29 +1566,67 @@ private struct MobileHarnessGraphPreview: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let columns = graph.nodes.count <= 1 ? 1 : 2
-            let cellWidth = (proxy.size.width - 44) / CGFloat(columns)
-            let points = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { index, node in
-                let column = index % columns
-                let row = index / columns
-                return (node.id, CGPoint(x: 18 + cellWidth / 2 + CGFloat(column) * (cellWidth + 8), y: 42 + CGFloat(row) * 76))
-            })
+            let points = layout(in: proxy.size)
             ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.secondary.opacity(0.055))
                 ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
                     if let from = points[edge.from], let to = points[edge.to] {
-                        Path { path in path.move(to: from); path.addLine(to: to) }
-                            .stroke(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        let endpoints = edgeEndpoints(from: from, to: to)
+                        let liveEdge = runtimeEdge(edge)
+                        Path { path in
+                            path.move(to: endpoints.start)
+                            path.addLine(to: endpoints.end)
+                        }
+                        .stroke(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.45 : 0.95), style: StrokeStyle(
+                            lineWidth: liveEdge == nil ? 1.35 : 2.4, lineCap: .round, lineJoin: .round
+                        ))
+                        Image(systemName: "arrowtriangle.right.fill")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.65 : 0.95))
+                            .rotationEffect(.radians(atan2(
+                                endpoints.end.y - endpoints.start.y,
+                                endpoints.end.x - endpoints.start.x
+                            )))
+                            .position(endpoints.end)
+                        if let label = edge.label {
+                            Text(label)
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 5)
+                                .frame(height: 17)
+                                .background(.regularMaterial, in: Capsule())
+                                .position(
+                                    x: (endpoints.start.x + endpoints.end.x) / 2,
+                                    y: (endpoints.start.y + endpoints.end.y) / 2 - 10
+                                )
+                        }
                     }
                 }
                 ForEach(graph.nodes) { node in
-                    VStack(spacing: 2) {
-                        Image(systemName: node.kind.contains("runtime") ? "cpu" : "square.stack.3d.up")
-                        Text(node.title).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
-                        Text(node.kind).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+                    HStack(spacing: 9) {
+                        Circle()
+                            .fill(runtimeColor(node.id))
+                            .frame(width: 8, height: 8)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(node.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Text(node.kind)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: cellWidth, height: 56)
-                    .background(runtimeColor(node.id).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(runtimeColor(node.id).opacity(runtime?.nodes[node.id] == nil ? 0.25 : 0.9), lineWidth: runtime?.nodes[node.id] == nil ? 1 : 2))
+                    .padding(.horizontal, 12)
+                    .frame(width: min(250, proxy.size.width - 72), height: 56)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(
+                        runtimeColor(node.id).opacity(runtime?.nodes[node.id] == nil ? 0.25 : 0.9),
+                        lineWidth: runtime?.nodes[node.id] == nil ? 1 : 2
+                    ))
                     .position(points[node.id] ?? .zero)
                 }
             }
@@ -736,7 +1645,6 @@ private struct MobileHarnessGraphPreview: View {
                         }
                 )
             )
-            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             .clipped()
             .overlay(alignment: .topTrailing) {
                 if scale != 1 || offset != .zero {
@@ -756,6 +1664,71 @@ private struct MobileHarnessGraphPreview: View {
         .accessibilityLabel("\(graph.level) Harness architecture with \(graph.nodes.count) nodes")
     }
 
+    private func layout(in size: CGSize) -> [String: CGPoint] {
+        guard !graph.nodes.isEmpty else { return [:] }
+        let authored = graph.nodes.compactMap { node -> (String, MobileHarness.GraphNode.Position)? in
+            node.position.map { (node.id, $0) }
+        }
+        if authored.count == graph.nodes.count {
+            let xs = authored.map { $0.1.x }
+            let ys = authored.map { $0.1.y }
+            let minX = xs.min() ?? 0, maxX = xs.max() ?? 0
+            let minY = ys.min() ?? 0, maxY = ys.max() ?? 0
+            let xInset: CGFloat = min(128, max(58, size.width * 0.20))
+            let yInset: CGFloat = 40
+            return Dictionary(uniqueKeysWithValues: authored.map { id, point in
+                let x = maxX == minX ? size.width / 2
+                    : xInset + CGFloat((point.x - minX) / (maxX - minX)) * max(1, size.width - xInset * 2)
+                let y = maxY == minY ? size.height / 2
+                    : yInset + CGFloat((point.y - minY) / (maxY - minY)) * max(1, size.height - yInset * 2)
+                return (id, CGPoint(x: x, y: y))
+            })
+        }
+
+        var level = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, 0) })
+        let order = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
+        for _ in 0..<max(1, graph.nodes.count - 1) {
+            var changed = false
+            for edge in graph.edges where (order[edge.from] ?? 0) < (order[edge.to] ?? 0) {
+                let candidate = min(graph.nodes.count - 1, (level[edge.from] ?? 0) + 1)
+                if candidate > (level[edge.to] ?? 0) {
+                    level[edge.to] = candidate
+                    changed = true
+                }
+            }
+            if !changed { break }
+        }
+        let levels = Array(Set(level.values)).sorted()
+        let normalized = Dictionary(uniqueKeysWithValues: levels.enumerated().map { ($0.element, $0.offset) })
+        let rows = Dictionary(grouping: graph.nodes) { normalized[level[$0.id] ?? 0] ?? 0 }
+        let maxRow = rows.keys.max() ?? 0
+        var result: [String: CGPoint] = [:]
+        for row in 0...maxRow {
+            let nodes = rows[row] ?? []
+            let step = nodes.count <= 1 ? 0 : max(116, (size.width - 136) / CGFloat(nodes.count - 1))
+            let width = step * CGFloat(max(0, nodes.count - 1))
+            let start = nodes.count <= 1 ? size.width / 2 : (size.width - width) / 2
+            for (column, node) in nodes.enumerated() {
+                result[node.id] = CGPoint(
+                    x: start + CGFloat(column) * step,
+                    y: 42 + CGFloat(row) * max(78, (size.height - 84) / CGFloat(max(1, maxRow)))
+                )
+            }
+        }
+        return result
+    }
+
+    private func edgeEndpoints(from: CGPoint, to: CGPoint) -> (start: CGPoint, end: CGPoint) {
+        let dx = to.x - from.x, dy = to.y - from.y
+        let distance = max(1, hypot(dx, dy))
+        let inset: CGFloat = abs(dx) >= abs(dy) ? 124 : 31
+        let ux = dx / distance, uy = dy / distance
+        return (
+            CGPoint(x: from.x + ux * inset, y: from.y + uy * inset),
+            CGPoint(x: to.x - ux * inset, y: to.y - uy * inset)
+        )
+    }
+
     private func runtimeColor(_ nodeId: String) -> Color {
         switch runtime?.nodes[nodeId]?.status {
         case "active": return .blue
@@ -765,6 +1738,23 @@ private struct MobileHarnessGraphPreview: View {
         default: return .secondary
         }
     }
+
+    private func runtimeEdge(_ edge: MobileHarness.GraphEdge) -> MobileHarnessRuntimeProjection.Edge? {
+        runtime?.edges?.values.first {
+            $0.from == edge.from && $0.to == edge.to && $0.fromPort == edge.fromPort && $0.toPort == edge.toPort
+        }
+    }
+
+    private func edgeColor(_ status: String?) -> Color {
+        switch status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
+        }
+    }
+
 }
 
 private struct MobileRemoteHeader: View {
@@ -811,9 +1801,11 @@ private struct MobileRemoteHeader: View {
                 } label: {
                     Label("Add project", systemImage: "folder.badge.plus")
                 }
+                .disabled(!store.canStartNewTask)
                 Button { importsPresented = true } label: {
                     Label("Import tasks", systemImage: "square.and.arrow.down")
                 }
+                .disabled(!store.canStartNewTask)
                 Button { store.showsConnection = true } label: {
                     Label("Connection settings", systemImage: "gearshape")
                 }
@@ -1016,6 +2008,7 @@ private struct MobileRemoteBottomBar: View {
             }
             .accessibilityLabel("Start voice conversation")
             .buttonStyle(.plain)
+            .disabled(!store.canStartNewTask)
 
             NavigationLink {
                 MobileConversationView(store: store, sessionId: nil, newWorkspaceId: workspaceID)
@@ -1028,6 +2021,7 @@ private struct MobileRemoteBottomBar: View {
             }
             .accessibilityLabel("New task")
             .buttonStyle(.plain)
+            .disabled(!store.canStartNewTask)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -1127,7 +2121,7 @@ private struct MobileConversationView: View {
                         VStack(spacing: 8) {
                             Text("Start a task")
                                 .font(.title3.weight(.semibold))
-                            Text("OpenFish will work in \(store.selectedWorkspace?.title ?? "the selected project") on your connected computer.")
+                            Text(workspaceExplanation)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -1155,7 +2149,7 @@ private struct MobileConversationView: View {
                 if let goal = store.currentGoal?.goal {
                     MobileGoalBar(store: store, goal: goal)
                 }
-                MobileComposer(store: store)
+                MobileComposer(store: store, isNewTask: sessionId == nil)
             }
             .background(.ultraThinMaterial)
         }
@@ -1190,6 +2184,7 @@ private struct MobileConversationView: View {
                         renaming: $renaming
                     )
                 } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("More task actions")
             }
         }
         .task {
@@ -1217,6 +2212,13 @@ private struct MobileConversationView: View {
         } message: {
             Text(dangerousPermission?.description ?? "OpenFish may run commands and change files outside the workspace sandbox.")
         }
+    }
+
+    private var workspaceExplanation: String {
+        if let workspace = store.selectedWorkspace {
+            return "OpenFish will work in \(workspace.title) on your connected computer."
+        }
+        return "OpenFish will use its managed No Project workspace on your connected computer."
     }
 }
 
@@ -1300,12 +2302,12 @@ private struct MobileConversationOptionsMenu: View {
     @Binding var renaming: Bool
 
     var body: some View {
-        if store.harnessCan("configuration.models") { MobileModelSelectionMenu(store: store) }
-        if store.harnessCan("configuration.reasoning") { MobileReasoningSelectionMenu(store: store) }
+        MobileModelSelectionMenu(store: store)
+        MobileReasoningSelectionMenu(store: store)
         MobileHarnessConfigMenu(store: store)
         if store.selectedSession == nil {
             Menu("Project") {
-                Button("No project") { store.newTask(in: nil) }
+                Button("No Project") { store.newTask(in: nil) }
                 ForEach(store.orderedWorkspaces) { workspace in
                     Button {
                         store.newTask(in: workspace.workspaceId)
@@ -1333,12 +2335,17 @@ private struct MobileConversationOptionsMenu: View {
         }
         if store.canChooseHarness {
             Menu("Harness") {
-                ForEach(store.harnesses) { harness in
+                ForEach(store.harnesses.filter {
+                    $0.installation.status == "builtin" || $0.installation.status == "installed"
+                }) { harness in
                     Button {
                         Task { await store.chooseHarness(harness) }
                     } label: {
-                        if harness.id == store.currentHarnessId { Label(harness.name, systemImage: "checkmark") }
-                        else { Text(harness.name) }
+                        if harness.id == store.currentHarnessId {
+                            Label(mobileHarnessDisplayName(harness, among: store.harnesses), systemImage: "checkmark")
+                        } else {
+                            Text(mobileHarnessDisplayName(harness, among: store.harnesses))
+                        }
                     }
                 }
             }
@@ -1358,6 +2365,7 @@ private struct MobileConversationOptionsMenu: View {
                 renaming = true
             }
             Button("Fork task") { Task { await store.forkCurrent() } }
+                .disabled(!store.harnessCan("session.fork"))
             Button("Archive task") { Task { await store.setArchived(selected.sessionId, archived: true) } }
         }
         Button("Prepare export") { Task { await store.prepareExport() } }
@@ -1391,20 +2399,41 @@ private struct MobilePermissionSelectionButton: View {
 private struct MobileModelSelectionMenu: View {
     @ObservedObject var store: MobileOpenCodexStore
 
+    private func providerName(_ model: MobileCatalogModel) -> String {
+        model.providerName ?? "Provider not declared"
+    }
+
     var body: some View {
         if let models = store.sessionModels, !models.groups.isEmpty {
             Menu(store.currentModelName) {
                 ForEach(models.groups) { group in
                     Section(group.name) {
-                        ForEach(group.models) { model in
-                            MobileModelSelectionRow(store: store, groupID: group.id, model: model)
+                        if group.id == "harness" {
+                            let providers = Dictionary(grouping: group.models, by: providerName)
+                            ForEach(providers.keys.sorted(), id: \.self) { provider in
+                                Menu(provider) {
+                                    ForEach(providers[provider] ?? []) { model in
+                                        MobileModelSelectionRow(store: store, groupID: group.id, model: model)
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(group.models) { model in
+                                MobileModelSelectionRow(store: store, groupID: group.id, model: model)
+                            }
                         }
                     }
                 }
             }
         } else {
-            Menu("Models unavailable") {
-                Text(store.errorMessage ?? "This Harness has not advertised model choices yet.")
+            Menu(store.isLoadingSessionModels ? "Checking models…" : "Models unavailable") {
+                if store.isLoadingSessionModels {
+                    Text("Waiting for the active Harness to advertise its model catalog.")
+                } else if let error = store.sessionModelsError {
+                    Text(error)
+                } else {
+                    Text("This Harness has not advertised model choices yet.")
+                }
                 Button("Refresh") { Task { await store.refreshCurrentModels() } }
             }
         }
@@ -1433,6 +2462,156 @@ private struct MobileModelSelectionRow: View {
                 Text(model.name)
             }
         }
+        .disabled(store.isChangingModel || store.isChangingHarnessConfig)
+    }
+}
+
+private struct MobileModelChoice: Identifiable {
+    let groupID: String
+    let providerName: String
+    let model: MobileCatalogModel
+    var id: String { "\(groupID):\(model.id)" }
+}
+
+private struct MobileModelSelectionSheet: View {
+    @ObservedObject var store: MobileOpenCodexStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var attemptedLoad = false
+
+    private var choices: [MobileModelChoice] {
+        (store.sessionModels?.groups ?? []).flatMap { group in
+            group.models.map { model in
+                let provider = group.id == "harness"
+                    ? (model.providerName ?? "Provider not declared")
+                    : group.name
+                return MobileModelChoice(groupID: group.id, providerName: provider, model: model)
+            }
+        }
+    }
+
+    private var filtered: [MobileModelChoice] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return choices }
+        return choices.filter {
+            $0.model.name.localizedCaseInsensitiveContains(needle)
+                || $0.model.id.localizedCaseInsensitiveContains(needle)
+                || $0.providerName.localizedCaseInsensitiveContains(needle)
+        }
+    }
+
+    private var grouped: [(provider: String, choices: [MobileModelChoice])] {
+        Dictionary(grouping: filtered, by: \.providerName)
+            .map { (provider: $0.key, choices: $0.value) }
+            .sorted { $0.provider.localizedStandardCompare($1.provider) == .orderedAscending }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if (!attemptedLoad || store.isLoadingSessionModels), choices.isEmpty {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Loading model choices…")
+                                Text("Waiting for the active Harness to advertise its catalog.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else if let error = store.sessionModelsError, choices.isEmpty {
+                    ContentUnavailableView {
+                        Label("Could not load models", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Try again") {
+                            attemptedLoad = false
+                            Task {
+                                await store.refreshCurrentModels()
+                                attemptedLoad = true
+                            }
+                        }
+                    }
+                } else if choices.isEmpty {
+                    ContentUnavailableView {
+                        Label("No models advertised", systemImage: "shippingbox")
+                    } description: {
+                        Text("This Harness has not provided model choices for the current task yet.")
+                    } actions: {
+                        Button("Refresh") {
+                            attemptedLoad = false
+                            Task {
+                                await store.refreshCurrentModels()
+                                attemptedLoad = true
+                            }
+                        }
+                    }
+                } else if grouped.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    ForEach(grouped, id: \.provider) { group in
+                        Section(group.provider) {
+                            ForEach(group.choices) { choice in
+                                Button {
+                                    Task {
+                                        let selected = await store.chooseModel(
+                                            provider: choice.groupID,
+                                            model: choice.model,
+                                            effort: choice.model.reasoning?.defaultEffort
+                                        )
+                                        if selected { dismiss() }
+                                    }
+                                } label: {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Image(systemName: isSelected(choice) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(isSelected(choice) ? Color.accentColor : Color.secondary.opacity(0.45))
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(choice.model.name).foregroundStyle(.primary)
+                                            Text(choice.model.id).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                        }
+                                    }
+                                }
+                                .disabled(store.isChangingModel || store.isChangingHarnessConfig)
+                            }
+                        }
+                    }
+                    Section {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(store.currentHarness?.modelConfiguration?.owner == "harness"
+                                ? "This list is advertised by the Harness. A listed model can still require provider credentials configured inside that Harness."
+                                : "This list comes from the connected Mac Host and reflects its current model routes.")
+                            if let account = store.sessionModels?.account {
+                                Text("Account · \(account.label) · \(account.billing.replacingOccurrences(of: "-", with: " ").capitalized)")
+                                    .fontWeight(.medium)
+                                Text(account.detail)
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Choose a model")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "Model or provider")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .task {
+            if store.sessionModels == nil {
+                await store.refreshCurrentModels()
+            }
+            attemptedLoad = true
+        }
+    }
+
+    private func isSelected(_ choice: MobileModelChoice) -> Bool {
+        store.sessionModels?.current.provider == choice.groupID
+            && store.sessionModels?.current.model == choice.model.id
     }
 }
 
@@ -1458,6 +2637,7 @@ private struct MobileReasoningSelectionMenu: View {
                 }
             }
         }
+        .disabled(store.isChangingModel || store.isChangingHarnessConfig)
     }
 }
 
@@ -1501,6 +2681,7 @@ private struct MobileHarnessConfigMenu: View {
             } label: {
                 Label("Harness options", systemImage: "slider.horizontal.3")
             }
+            .disabled(store.isChangingHarnessConfig || store.isChangingModel)
         }
     }
 }
@@ -1527,7 +2708,7 @@ private struct MobileTaskInspectorView: View {
                         "Access",
                         value: store.currentPermissions?.options.first(where: {
                             $0.value == store.currentPermissions?.currentValue
-                        })?.name ?? "DSH default"
+                        })?.name ?? "Harness default"
                     )
                     LabeledContent("Agent", value: store.selectedSession?.agentPreset ?? "Composition default")
                 }
@@ -1557,7 +2738,7 @@ private struct MobileTaskInspectorView: View {
                             Task { await store.mutateGoal("clear") }
                         }
                     } else {
-                        Text("No persistent goal is attached to this DSH task.")
+                        Text("No persistent goal is attached to this task.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Create goal") {
@@ -1574,7 +2755,7 @@ private struct MobileTaskInspectorView: View {
                         set: { enabled in Task { await store.setPlanEnabled(enabled) } }
                     ))
                     if store.currentPlan?.pending == true {
-                        Label("DSH is applying the change", systemImage: "clock")
+                        Label("The Host is applying the change", systemImage: "clock")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1630,7 +2811,7 @@ private struct MobileTaskInspectorView: View {
                     NavigationLink {
                         MobileCommandsView(store: store, dismissInspector: { dismiss() })
                     } label: {
-                        LabeledContent("Commands", value: "\(store.commands.count)")
+                        LabeledContent("Commands", value: "\(store.visibleCommands.count)")
                     }
                 }
 
@@ -1643,7 +2824,7 @@ private struct MobileTaskInspectorView: View {
                             .textSelection(.enabled)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("DSH session").font(.caption).foregroundStyle(.secondary)
+                        Text("OpenFish task ID").font(.caption).foregroundStyle(.secondary)
                         Text(store.selectedSessionId ?? "—")
                             .font(.caption2.monospaced())
                             .textSelection(.enabled)
@@ -1713,7 +2894,7 @@ private struct MobileCommandsView: View {
     let dismissInspector: () -> Void
 
     var body: some View {
-        List(Array(store.commands.enumerated()), id: \.offset) { _, command in
+        List(Array(store.visibleCommands.enumerated()), id: \.offset) { _, command in
             if let name = command["name"]?.stringValue {
                 Button {
                     store.draft = "/\(name) "
@@ -1732,7 +2913,7 @@ private struct MobileCommandsView: View {
         }
         .navigationTitle("Commands")
         .overlay {
-            if store.commands.isEmpty {
+            if store.visibleCommands.isEmpty {
                 ContentUnavailableView("No commands", systemImage: "command")
             }
         }
@@ -2108,6 +3289,7 @@ private struct MobileQuestionCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.bordered)
+                    .accessibilityLabel(option.label)
                 }
                 TextField("Type another answer", text: Binding(
                     get: { custom[question.id] ?? "" },
@@ -2145,15 +3327,33 @@ private struct MobileQuestionCard: View {
 private struct MobileComposer: View {
     @ObservedObject var store: MobileOpenCodexStore
     @ObservedObject private var voice: MobileLocalVoice
+    let isNewTask: Bool
+    @Environment(\.openURL) private var openURL
     @State private var photoItems: [PhotosPickerItem] = []
 
-    init(store: MobileOpenCodexStore) {
+    init(store: MobileOpenCodexStore, isNewTask: Bool) {
         self.store = store
+        self.isNewTask = isNewTask
         voice = store.voice
     }
 
     var body: some View {
         VStack(spacing: 8) {
+            if let error = voice.errorMessage {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            }
             if !store.pendingImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
@@ -2170,12 +3370,20 @@ private struct MobileComposer: View {
                         }
                     }
                 }
+                if !store.canAttachImages {
+                    Label("The active Harness cannot receive images. Remove them or switch Harness before sending.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             HStack(alignment: .bottom, spacing: 8) {
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 8, matching: .images) {
                     Image(systemName: "plus")
                         .frame(width: 32, height: 36)
                 }
+                .disabled(!store.canAttachImages)
+                .opacity(store.canAttachImages ? 1 : 0.35)
                 TextField("Tell OpenFish what to do", text: $store.draft, axis: .vertical)
                     .lineLimit(1...6)
                     .textFieldStyle(.plain)
@@ -2204,6 +3412,7 @@ private struct MobileComposer: View {
                         .foregroundStyle(Color(uiColor: .systemBackground))
                     }
                     .disabled(!store.canSend)
+                    .accessibilityLabel(store.isSending ? "Sending" : "Send message")
                 }
             }
             .padding(.horizontal, 10)
@@ -2213,7 +3422,7 @@ private struct MobileComposer: View {
                 RoundedRectangle(cornerRadius: 22)
                     .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
             }
-            MobileComposerControls(store: store)
+            MobileComposerControls(store: store, isNewTask: isNewTask)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -2232,64 +3441,186 @@ private struct MobileComposer: View {
 
 private struct MobileComposerControls: View {
     @ObservedObject var store: MobileOpenCodexStore
+    let isNewTask: Bool
     @State private var dangerousPermission: MobilePermissionOption?
+    @State private var showingModelPicker = false
+    @State private var showingWorkspacePicker = false
+    @State private var authSetup: MobileHarnessAuthSetup?
+
+    private var installedHarnesses: [MobileHarness] {
+        store.harnesses.filter {
+            $0.installation.status == "builtin" || $0.installation.status == "installed"
+        }
+    }
+
+    private var catalogHarnesses: [MobileHarness] {
+        store.harnesses.filter {
+            $0.installation.status != "builtin" && $0.installation.status != "installed"
+        }
+    }
+
+    private var accountLabel: String {
+        if let runtime = store.sessionModels?.account { return runtime.label }
+        guard let harness = store.currentHarness else { return "Account unavailable" }
+        if let selected = harness.auth.selectedMethod,
+           let method = harness.auth.methods.first(where: { $0.id == selected }) {
+            return method.account?.label ?? method.name
+        }
+        return harness.account?.label
+            ?? (harness.auth.status == "not-required" ? "Billing not declared" : "Sign-in required")
+    }
+
+    @ViewBuilder
+    private func harnessButton(_ harness: MobileHarness) -> some View {
+        Button {
+            if mobileHarnessRequiresMacSetup(harness) {
+                store.explainRequiredMacSetup(for: harness)
+            } else if harness.auth.status != "not-required" && harness.auth.status != "configured" {
+                authSetup = MobileHarnessAuthSetup(harness: harness)
+            } else {
+                Task { await store.chooseHarness(harness) }
+            }
+        } label: {
+            if harness.id == store.currentHarnessId {
+                Label(mobileHarnessDisplayName(harness, among: store.harnesses), systemImage: "checkmark")
+            } else if mobileHarnessRequiresMacSetup(harness) {
+                Label("\(mobileHarnessDisplayName(harness, among: store.harnesses)) · Set up on Mac", systemImage: "macbook")
+            } else {
+                Text(mobileHarnessDisplayName(harness, among: store.harnesses))
+            }
+        }
+        .disabled((!harness.available && !mobileHarnessRequiresMacSetup(harness)) || store.harnessOperationId != nil)
+    }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if store.selectedSession == nil {
-                    Menu {
-                        Button("No project") { store.newTask(in: nil) }
-                        ForEach(store.orderedWorkspaces) { workspace in
-                            Button(workspace.title) { store.newTask(in: workspace.workspaceId) }
-                        }
-                    } label: {
-                        Label(store.selectedWorkspace?.title ?? "Project", systemImage: "folder")
+        HStack(spacing: 10) {
+            if isNewTask || store.canChooseWorkspace {
+                Button { showingWorkspacePicker = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                        Text(store.selectedWorkspace?.title ?? "No Project")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
                     }
+                    .frame(width: 96, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                if let permissions = store.currentPermissions {
-                    Menu {
-                        ForEach(permissions.options.filter { $0.value != "custom" }) { option in
-                            MobilePermissionSelectionButton(
-                                store: store,
-                                option: option,
-                                selected: option.value == permissions.currentValue,
-                                dangerousPermission: $dangerousPermission
-                            )
-                        }
-                    } label: {
-                        Label(
-                            permissions.options.first(where: { $0.value == permissions.currentValue })?.name ?? "Access",
-                            systemImage: "shield"
-                        )
-                    }
-                }
-                if store.harnessCan("configuration.models") { MobileModelSelectionMenu(store: store) }
-                if store.harnessCan("configuration.reasoning") { MobileReasoningSelectionMenu(store: store) }
-                MobileHarnessConfigMenu(store: store)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(3)
+                .accessibilityIdentifier("OpenFish.iOS.WorkspacePicker")
+                .buttonStyle(.plain)
+            }
+
+            Menu {
                 if store.canChooseHarness {
-                    Menu {
-                        ForEach(store.harnesses) { harness in
-                            Button(harness.name) { Task { await store.chooseHarness(harness) } }
+                    Menu("Harness · \(store.currentHarness.map { mobileHarnessDisplayName($0, among: store.harnesses) } ?? store.currentHarnessId)") {
+                        Menu("Installed") {
+                            ForEach(installedHarnesses) { harness in
+                                harnessButton(harness)
+                            }
                         }
-                    } label: {
-                        Label(store.harnesses.first(where: { $0.id == store.currentHarnessId })?.name ?? store.currentHarnessId, systemImage: "cpu")
+                        if !catalogHarnesses.isEmpty {
+                            Menu("Catalog") {
+                                ForEach(catalogHarnesses) { harness in
+                                    harnessButton(harness)
+                                }
+                            }
+                        }
                     }
                 }
+                if store.canChooseHarness,
+                   let harness = store.currentHarness,
+                   !harness.auth.methods.isEmpty {
+                    Button("Account · \(accountLabel)") {
+                        authSetup = MobileHarnessAuthSetup(harness: harness)
+                    }
+                }
+                // Keep the entry stable while an ACP process is starting or refreshing
+                // capabilities; the picker itself explains loading and unsupported states.
+                Button(
+                    store.isLoadingSessionModels
+                        ? "Choose model · Checking…"
+                        : store.sessionModelsError == nil
+                            ? "Choose model · \(store.currentModelName)"
+                            : "Choose model · Needs attention"
+                ) { showingModelPicker = true }
+                Menu("Reasoning · \(store.currentReasoningName ?? "Auto")") {
+                    if store.currentReasoningOptions.isEmpty {
+                        Text("This Harness and model did not advertise a reasoning control.")
+                        Button("Refresh") { Task { await store.refreshCurrentModels() } }
+                    } else {
+                        ForEach(store.currentReasoningOptions) { effort in
+                            Button {
+                                Task { await store.chooseReasoningEffort(effort.id) }
+                            } label: {
+                                if store.sessionModels?.current.reasoningEffort == effort.id {
+                                    Label(effort.name, systemImage: "checkmark")
+                                } else {
+                                    Text(effort.name)
+                                }
+                            }
+                        }
+                    }
+                }
+                MobileHarnessConfigMenu(store: store)
                 if store.canChooseAgentPreset, let catalog = store.agentPresets {
-                    Menu {
+                    Menu("Agent preset") {
                         ForEach(catalog.presets) { preset in
                             Button(preset.name ?? preset.id) { Task { await store.chooseAgentPreset(preset) } }
                                 .disabled(preset.broken != nil)
                         }
-                    } label: {
-                        Label(store.currentAgentPreset ?? "Agent", systemImage: "person.crop.circle.badge.gearshape")
                     }
                 }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "square.3.layers.3d")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(store.currentHarness.map { mobileHarnessDisplayName($0, among: store.harnesses) } ?? store.currentHarnessId) · \(store.currentModelLabel)")
+                            .lineLimit(1)
+                        Text("\(store.currentReasoningName ?? "Reasoning Auto") · \(accountLabel)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .layoutPriority(1)
+            .accessibilityIdentifier("OpenFish.iOS.HarnessModelPicker")
+
+            Spacer(minLength: 0)
+
+            if let permissions = store.currentPermissions {
+                Menu {
+                    ForEach(permissions.options.filter { $0.value != "custom" }) { option in
+                        MobilePermissionSelectionButton(
+                            store: store,
+                            option: option,
+                            selected: option.value == permissions.currentValue,
+                            dangerousPermission: $dangerousPermission
+                        )
+                    }
+                } label: {
+                    Label(
+                        permissions.options.first(where: { $0.value == permissions.currentValue })?.name ?? "Access",
+                        systemImage: "shield"
+                    )
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                }
+                .accessibilityLabel("Permission \(permissions.options.first(where: { $0.value == permissions.currentValue })?.name ?? "Access")")
+            }
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .sheet(isPresented: $showingModelPicker) {
+            MobileModelSelectionSheet(store: store)
+        }
+        .sheet(isPresented: $showingWorkspacePicker) {
+            MobileWorkspaceSelectionSheet(store: store)
         }
         .alert("Enable Full Access?", isPresented: Binding(
             get: { dangerousPermission != nil },
@@ -2304,6 +3635,57 @@ private struct MobileComposerControls: View {
         } message: {
             Text(dangerousPermission?.description ?? "OpenFish may run commands and change files outside the workspace sandbox.")
         }
+        .sheet(item: $authSetup) { setup in
+            MobileHarnessCredentialsView(
+                store: store,
+                harness: setup.harness,
+                makeDefault: false,
+                selectForDraft: true
+            )
+        }
+    }
+}
+
+private struct MobileWorkspaceSelectionSheet: View {
+    @ObservedObject var store: MobileOpenCodexStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    workspaceButton(title: "No Project", workspaceID: nil)
+                } footer: {
+                    Text("OpenFish uses a managed working directory instead of Desktop or the Host launch folder.")
+                }
+                Section("Projects") {
+                    ForEach(store.orderedWorkspaces) { workspace in
+                        workspaceButton(title: workspace.title, workspaceID: workspace.workspaceId)
+                    }
+                }
+            }
+            .navigationTitle("Choose workspace")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+    }
+
+    private func workspaceButton(title: String, workspaceID: String?) -> some View {
+        Button {
+            store.changeNewTaskWorkspace(to: workspaceID)
+            dismiss()
+        } label: {
+            HStack {
+                Label(title, systemImage: workspaceID == nil ? "tray" : "folder")
+                Spacer()
+                if store.selectedWorkspaceId == workspaceID {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .foregroundStyle(.primary)
     }
 }
 
@@ -2330,7 +3712,7 @@ private struct MobileVoiceConversationView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Voice with OpenFish").font(.headline)
-                        Text("Local audio · DSH task").font(.caption).foregroundStyle(.secondary)
+                        Text("Apple on-device mode · final text only").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button {
@@ -2362,13 +3744,15 @@ private struct MobileVoiceConversationView: View {
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(store.voiceConversationStatus)
+                .accessibilityIdentifier("voice-status")
+                .accessibilityValue(voice.isListening ? "microphone active" : "microphone inactive")
 
                 Text(store.voiceConversationStatus)
                     .font(.title2.bold())
                     .padding(.top, 24)
 
                 Text(store.voiceConversationTranscript.isEmpty
-                    ? "Speak naturally. OpenFish sends only finalized text to the authoritative DSH task."
+                    ? "Speak naturally. OpenFish sends only finalized text to the current Harness task."
                     : store.voiceConversationTranscript)
                     .font(.body)
                     .foregroundStyle(.secondary)
@@ -2410,10 +3794,8 @@ private struct MobileConnectionView: View {
     @ObservedObject private var voice: MobileLocalVoice
     @State private var host = ""
     @State private var code = ""
-    @State private var credentialRef = "DEEPSEEK_API_KEY"
-    @State private var credentialValue = ""
     @State private var inspectedHarness: MobileHarness?
-    @State private var pendingCommunityHarness: MobileHarness?
+    @State private var authSetup: MobileHarnessAuthSetup?
     @Environment(\.dismiss) private var dismiss
 
     init(store: MobileOpenCodexStore) {
@@ -2424,8 +3806,8 @@ private struct MobileConnectionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("DSH Host") {
-                    TextField("http://mac-or-tailscale-ip:3080", text: $host)
+                Section("OpenFish Host") {
+                    TextField("https://mac-name.local:3081", text: $host)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                     TextField("One-time pairing code", text: $code)
@@ -2437,27 +3819,8 @@ private struct MobileConnectionView: View {
                 }
 
                 Section("Models") {
-                    TextField("Credential reference", text: $credentialRef)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    SecureField("Credential value", text: $credentialValue)
-                    HStack {
-                        Button("Save") {
-                            let ref = credentialRef
-                            let value = credentialValue
-                            credentialValue = ""
-                            Task { await store.setCredential(ref: ref, value: value) }
-                        }
-                        .disabled(
-                            credentialRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                || credentialValue.isEmpty
-                        )
-                        Button("Remove", role: .destructive) {
-                            Task { await store.unsetCredential(ref: credentialRef) }
-                        }
-                        .disabled(credentialRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    Text("Credentials are write-only in DSH and are never returned to this iPhone.")
+                    Label("Configure provider API keys on the connected Mac.", systemImage: "macbook.and.iphone")
+                    Text("The iPhone receives only the provider/model catalog needed to choose a task identity. It cannot read, write, or remove Host credentials.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     ForEach(store.providers) { provider in
@@ -2483,17 +3846,37 @@ private struct MobileConnectionView: View {
                     ForEach(store.harnesses) { harness in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(harness.name)
+                                Text(mobileHarnessDisplayName(harness, among: store.harnesses))
                                 if let description = harness.description {
                                     Text(description).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let bundle = harness.driverBundle, mobileHarnessRequiresMacDriver(harness) {
+                                    Text("Mac setup required · \(bundle.package) · \(bundle.spec)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                        .lineLimit(2)
+                                }
+                                if mobileHarnessRequiresMacCodeConsent(harness) {
+                                    Text("Mac review required · unverified exact code version")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
                                 }
                             }
                             Spacer()
                             Button("Details") { inspectedHarness = harness }
-                            if harness.isDefault { Image(systemName: "checkmark") }
-                            else {
-                                Button("Use") { requestUse(harness) }
-                                    .disabled(!harness.available)
+                            if store.harnessOperationId == harness.id {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .accessibilityLabel("Installing \(harness.name)")
+                            } else if harness.isDefault {
+                                Image(systemName: "checkmark")
+                            } else if mobileHarnessRequiresMacSetup(harness) {
+                                Button("Set up on Mac") { inspectedHarness = harness }
+                            } else {
+                                Button(harness.auth.status == "not-required" || harness.auth.status == "configured" ? "Use" : "Set up") {
+                                    requestUse(harness)
+                                }
+                                .disabled(store.harnessOperationId != nil || !harness.available)
                             }
                         }
                     }
@@ -2520,7 +3903,16 @@ private struct MobileConnectionView: View {
                         if voice.isSpeaking { voice.stopSpeaking() }
                         else { voice.speak("OpenFish voice is running locally on this iPhone.") }
                     }
-                    Text("The apple-local Provider keeps microphone audio on this iPhone. Only finalized text crosses the authenticated DSH session API.")
+                    Text("The apple-local Provider keeps microphone audio on this iPhone. Only finalized text is submitted to the current Harness task.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Notifications") {
+                    Button("Enable task notifications") {
+                        Task { await store.enableNotifications() }
+                    }
+                    Text("OpenFish asks only when you choose to enable notifications. You can change the result later in iPhone Settings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -2548,49 +3940,35 @@ private struct MobileConnectionView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("This is the live DSH Loader inventory; the iPhone does not own a second plugin registry.")
+                    Text("This is the live DSH Loader inventory from the OpenFish Host; the iPhone does not own a second plugin registry.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Host configuration") {
-                    ForEach(store.settingsCatalog?.namespaces ?? []) { namespace in
-                        NavigationLink(namespace.ns) {
-                            MobileSettingsNamespaceEditor(store: store, namespace: namespace)
-                        }
-                    }
-                    if store.settingsCatalog?.namespaces.isEmpty != false {
-                        Text("No writable namespaces are exposed by this Host.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("Edit Harness, provider, plugin, and secret configuration on the connected Mac.", systemImage: "lock.desktopcomputer")
+                    Text("Remote devices intentionally cannot inspect or mutate the Host configuration plane. Task controls and their pinned identities remain available here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Section("Paired devices") {
-                    if store.pairedDevices.isEmpty {
-                        Text("No paired devices are visible to this credential.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(store.pairedDevices) { device in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(device.name)
-                                Text("\(device.surface) · last seen \(relativeDate(device.lastSeenAt))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Revoke", role: .destructive) {
-                                Task { await store.revoke(device) }
-                            }
-                            .buttonStyle(.borderless)
+                Section("This iPhone") {
+                    Label(
+                        store.profile.isLocal ? "Local development connection" : "Paired with this OpenFish Host",
+                        systemImage: store.profile.isLocal ? "iphone.and.arrow.forward" : "checkmark.shield.fill"
+                    )
+                    Text("For privacy, a remote device cannot enumerate or revoke other paired devices. Manage the full device list on the Host Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !store.profile.isLocal {
+                        Button("Unpair this iPhone", role: .destructive) {
+                            Task { await store.unpairThisDevice() }
                         }
                     }
                 }
 
                 Section("Architecture") {
-                    Text("LAN and Tailscale connect directly to the same DSH Host. The device token lives only in this iPhone's Keychain; sessions, settings, plugins, providers, and logs remain authoritative in DSH.")
+                    Text("LAN and Tailscale connect directly to the same OpenFish Host. The device token lives only in this iPhone's Keychain; sessions, settings, plugins, providers, and logs remain authoritative on that Host.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -2604,7 +3982,7 @@ private struct MobileConnectionView: View {
                 }
             }
             .onAppear { host = store.profile.baseURL.absoluteString }
-            .task { await store.loadSettings() }
+            .task { await store.loadHostInventory() }
         }
         .sheet(item: $inspectedHarness) { harness in
             MobileHarnessDetailView(store: store, harness: harness) {
@@ -2612,74 +3990,22 @@ private struct MobileConnectionView: View {
                 inspectedHarness = nil
             }
         }
-        .alert("Install an unverified Harness?", isPresented: Binding(
-            get: { pendingCommunityHarness != nil },
-            set: { if !$0 { pendingCommunityHarness = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { pendingCommunityHarness = nil }
-            Button("Install and use") {
-                guard let harness = pendingCommunityHarness else { return }
-                pendingCommunityHarness = nil
-                Task { await store.selectDefaultHarness(harness) }
-            }
-        } message: {
-            Text("Community catalog inclusion is not a security audit. Continue only if you trust the Pack publisher and package.")
+        .sheet(item: $authSetup) { setup in
+            MobileHarnessCredentialsView(
+                store: store,
+                harness: setup.harness,
+                makeDefault: true
+            )
         }
     }
 
     private func requestUse(_ harness: MobileHarness) {
-        if !harness.verified && harness.source != "user" && harness.installation.status != "installed" {
-            pendingCommunityHarness = harness
+        if mobileHarnessRequiresMacSetup(harness) {
+            inspectedHarness = harness
+        } else if harness.auth.status != "not-required" && harness.auth.status != "configured" {
+            authSetup = MobileHarnessAuthSetup(harness: harness)
         } else {
             Task { await store.selectDefaultHarness(harness) }
-        }
-    }
-}
-
-private struct MobileSettingsNamespaceEditor: View {
-    @ObservedObject var store: MobileOpenCodexStore
-    let namespace: MobileSettingsNamespace
-    @State private var text = "{}"
-
-    private var current: MobileSettingsNamespace {
-        store.settingsCatalog?.namespaces.first(where: { $0.ns == namespace.ns }) ?? namespace
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                TextEditor(text: $text)
-                    .font(.caption.monospaced())
-                    .frame(minHeight: 260)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            } header: {
-                Text("User override JSON")
-            } footer: {
-                Text("Applies \(current.applies) · revision \(current.revision). DSH validates and atomically replaces this namespace.")
-            }
-
-            if !current.secrets.isEmpty {
-                Section("Secret references") {
-                    ForEach(Array(current.secrets.enumerated()), id: \.offset) { _, secret in
-                        LabeledContent(secret.path.joined(separator: "."), value: secret.set ? "Set" : "Not set")
-                    }
-                }
-            }
-
-            Section {
-                Button("Save configuration") {
-                    Task { await store.replaceSettings(current, json: text) }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .navigationTitle(namespace.ns)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { text = (current.user ?? .object([:])).prettyJSON }
-        .onChange(of: store.settingsCatalog) { _, catalog in
-            guard let updated = catalog?.namespaces.first(where: { $0.ns == namespace.ns }) else { return }
-            text = (updated.user ?? .object([:])).prettyJSON
         }
     }
 }

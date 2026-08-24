@@ -228,6 +228,16 @@ export abstract class SessionPersistence extends Service {
   abstract list(signal?: AbortSignal): Promise<SessionHeader[]>
 
   /**
+   * Permanently remove one detached session. Providers predating this optional
+   * lifecycle capability reject explicitly rather than claiming success.
+   * @param _id - detached session identity requested by the caller.
+   * @returns a rejected promise unless the provider overrides this capability.
+   */
+  delete(_id: SessionId): Promise<boolean> {
+    return Promise.reject(new Error(`${this.name} does not support session deletion`))
+  }
+
+  /**
    * List materialized sessions with cheap per-log change tokens.
    *
    * Repeated observations of an unchanged log return the same revision. A

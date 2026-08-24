@@ -19,6 +19,12 @@ import { isLoopbackHostname } from './loopback-hostname.ts'
 /** The request facts the fence reads from either HTTP representation. */
 interface ApiTrustRequest {
   headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+  /** Peer address supplied by a transport bridge after accepting the socket. */
+  remoteAddress?: string
+  /** Node HTTP requests expose the peer on their socket. */
+  socket?: { readonly remoteAddress?: string | undefined; readonly encrypted?: boolean }
+  /** Transport-authenticated TLS state for fetch-shaped carriers. */
+  secure?: boolean
 }
 
 function header(
@@ -123,4 +129,34 @@ export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: read
   } catch {
     return false
   }
+}
+
+/**
+ * Decide whether a request truly came from this machine.
+ *
+ * A loopback-looking `Host` header is not sufficient: any LAN client can send
+ * `Host: localhost`. Privileged configuration and device-management routes
+ * bind both the HTTP authority and the accepted socket peer to loopback.
+ * @param request - accepted carrier facts and HTTP headers to validate.
+ * @returns true only when both the authority and socket peer are loopback.
+ */
+export function isLoopbackApiRequest(request: ApiTrustRequest): boolean {
+  if (!isTrustedApiRequest(request, [])) return false
+  const address = request.remoteAddress ?? request.socket?.remoteAddress
+  if (address === undefined) return false
+  if (address === '::1') return true
+  const ipv4 = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address
+  const parts = ipv4.split('.')
+  return parts.length === 4
+    && parts[0] === '127'
+    && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+}
+
+/**
+ * Whether the accepted carrier is actually TLS, never inferred from headers or URL text.
+ * @param request - accepted carrier facts to inspect.
+ * @returns true only when the server or socket reports encryption.
+ */
+export function isSecureApiRequest(request: ApiTrustRequest): boolean {
+  return request.secure === true || request.socket?.encrypted === true
 }

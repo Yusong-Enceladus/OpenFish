@@ -35,10 +35,18 @@ interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Optional TLS-only all-interfaces listener for native remote clients. */
+  remoteTlsHost?: '' | '0.0.0.0'
+  /** Remote TLS port; zero requests an OS-assigned port. */
+  remoteTlsPort?: number
+  /** PEM certificate path for the remote TLS listener. */
+  remoteTlsCertificatePath?: string
+  /** PEM private-key path for the remote TLS listener. */
+  remoteTlsPrivateKeyPath?: string
 }
 ```
 
-`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure); there is no TLS, auth, or origin policy, so a non-loopback bind exposes the server to that network. The dist location is an assembly fact of the frontend plugin that claims the seat.
+`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate plain-HTTP exposure). Native remote clients use the separate optional TLS-only listener: it binds only to all interfaces, requires explicit certificate and private-key paths, rejects unsafe key permissions, and does not weaken the browser listener's default loopback posture. Authentication and origin policy remain responsibilities of the routes layered on the carrier. The dist location is an assembly fact of the frontend plugin that claims the seat.
 
 ## The service
 
@@ -104,7 +112,7 @@ tapIndex(transform: (html: string) => string): () => void
 applyIndexTaps(html: string): string
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:90`](../../packages/host/webserver/src/index.ts)
 
 <a id="ctxxnative--xnative"></a>
 
@@ -171,5 +179,5 @@ devices(): Promise<NativeDeviceView[]>
 revoke(deviceId: string): Promise<boolean>
 ```
 
-Source: [`packages/bundle/x-native/src/index.ts:191`](../../packages/bundle/x-native/src/index.ts)
+Source: [`packages/bundle/x-native/src/index.ts:195`](../../packages/bundle/x-native/src/index.ts)
 <!-- END GENERATED cordis-surface -->

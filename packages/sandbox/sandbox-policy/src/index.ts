@@ -83,6 +83,27 @@ export interface SandboxPolicyRequest {
 }
 
 /**
+ * Optional live-process authority controller implemented by Agents whose
+ * execution boundary is fixed when a resident subprocess starts. Ordinary DSH
+ * tools resolve policy per operation and do not need this controller; an
+ * external Harness must replace its process before the session log may claim a
+ * different sandbox mode.
+ */
+export interface SandboxAuthorityController {
+  /** Sandbox mode enforced by the currently running process. */
+  readonly mode: SandboxMode
+  /** Replace the resident execution boundary, preserving the remote session. */
+  reconfigure(mode: SandboxMode): Promise<void>
+}
+
+declare module '@deepseek-ai/dsh-agent' {
+  interface Agent {
+    /** Present only when sandbox authority is fixed for a resident process. */
+    readonly sandboxAuthority?: SandboxAuthorityController
+  }
+}
+
+/**
  * The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment
  * default mode, fallback workspace root, and current request-time policy
  * section. Tool layers call {@link resolve} for each execution so a session's

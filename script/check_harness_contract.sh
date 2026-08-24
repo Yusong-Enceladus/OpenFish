@@ -13,10 +13,15 @@ pnpm exec vitest run \
   packages/harness/harness/tests/conformance.spec.ts \
   packages/harness/harness/tests/projection.spec.ts \
   packages/harness/harness/tests/service.spec.ts \
+  packages/harness/harness/tests/loader-composition.spec.ts \
   packages/harness/harness-acp/tests/launch.spec.ts \
+  packages/harness/harness-acp/tests/codex-app-server.e2e.spec.ts \
+  packages/harness/harness-acp/tests/unknown-acp.e2e.spec.ts \
   packages/host/apiproxy/tests/api-proxy-agent-preset.spec.ts \
   packages/host/apiproxy/tests/api-proxy-harnesses.spec.ts \
+  packages/host/apiproxy/tests/api-proxy-fork.spec.ts \
   packages/host/apiproxy/tests/api-proxy-models.spec.ts \
   packages/host/apiproxy/tests/api-proxy-workspace.spec.ts \
+  packages/host/apiproxy/tests/harness-community-github.spec.ts \
   packages/host/apiproxy/tests/fetch-carrier.spec.ts \
   packages/subagent/subagent-acp/tests/subagent-acp.spec.ts

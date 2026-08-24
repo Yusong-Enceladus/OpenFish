@@ -25,6 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.17.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: sudo apt-get update && sudo apt-get install -y ripgrep jq
       - name: Verify publishable source tree
         run: ./script/check_openfish_source_release.sh
@@ -81,6 +87,14 @@ jobs:
         run: |
           xcrun notarytool store-credentials openfish-ci --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
           echo "OPENFISH_NOTARY_PROFILE=openfish-ci" >> "$GITHUB_ENV"
+      - name: Review public screenshots with Vision OCR
+        run: xcrun swift script/check_openfish_public_assets_ocr.swift
+      - name: Exercise native Mac product states
+        if: matrix.arch == 'arm64'
+        run: |
+          xcodebuild test -project apps/x-macos/XMac.xcodeproj -scheme XMac \
+            -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath .build/openfish-macos-ui-tests CODE_SIGNING_ALLOWED=NO
       - name: Build distributable
         run: ./script/build_openfish_release.sh '${{ matrix.arch }}'
       - uses: actions/upload-artifact@v4
@@ -94,6 +108,11 @@ jobs:
       OPENFISH_IOS_BUNDLE_ID: ${{ vars.OPENFISH_IOS_BUNDLE_ID || 'app.openfish.ios' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Exercise iPhone product states and voice lifecycle
+        run: |
+          xcodebuild test -project apps/x-ios/OpenCodexIOS.xcodeproj -scheme OpenFishIOS \
+            -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+            -derivedDataPath .build/openfish-ios-ui-tests CODE_SIGNING_ALLOWED=NO
       - name: Build iPhone client
         run: |
           xcodebuild -project apps/x-ios/OpenCodexIOS.xcodeproj -scheme OpenFishIOS \

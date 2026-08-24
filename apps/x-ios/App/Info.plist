@@ -28,11 +28,11 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenFish connects directly to your DSH Host on LAN or Tailscale.</string>
+	<string>OpenFish connects directly to your OpenFish Host on LAN or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenFish uses the microphone only for on-device dictation.</string>
+	<string>OpenFish records audio only while you use dictation and requests Apple’s on-device speech recognition.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>OpenFish converts speech to text on this iPhone without a cloud fallback.</string>
+	<string>OpenFish requests Apple’s on-device recognition mode and does not provide its own cloud fallback.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

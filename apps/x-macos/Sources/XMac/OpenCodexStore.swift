@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import AppKit
 
+private struct OpenFishDemoHarnessCatalog: Decodable {
+    let version: Int
+    let items: [HarnessCatalogEntry]
+}
+
 private func isOpenFishCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     let nsError = error as NSError
@@ -28,6 +33,25 @@ struct ActiveSubagent: Equatable, Sendable {
     let label: String
 }
 
+enum OpenFishHostIssueKind: String, Equatable, Sendable {
+    case recoverable
+    case incompatible
+}
+
+struct OpenFishHostIssue: Equatable, Sendable {
+    let kind: OpenFishHostIssueKind
+    let title: String
+    let message: String
+}
+
+enum OpenFishHostPresentationState: Equatable, Sendable {
+    case loading
+    case ready
+    case cached(OpenFishHostIssue?)
+    case recoverable(OpenFishHostIssue?)
+    case fatal(OpenFishHostIssue)
+}
+
 @MainActor
 final class OpenCodexStore: ObservableObject {
     let voice = LocalVoiceService()
@@ -37,9 +61,12 @@ final class OpenCodexStore: ObservableObject {
     @Published private(set) var sessions: [SessionSummary] = []
     @Published private(set) var archivedSessionIds: Set<String> = []
     @Published private(set) var connectionState: DshConnectionState = .connecting
+    @Published private(set) var hostIssue: OpenFishHostIssue?
     @Published private(set) var hostDescription: HostDescription?
     @Published private(set) var sessionModels: SessionModels?
     @Published private(set) var isLoadingSessionModels = false
+    @Published private(set) var isChangingModel = false
+    @Published private(set) var isChangingHarnessConfig = false
     @Published private(set) var sessionModelsError: String?
     @Published private(set) var nativeCapabilities: NativeBootstrapCapabilities?
     @Published private(set) var pendingApprovals: [String: PendingApproval] = [:]
@@ -71,6 +98,8 @@ final class OpenCodexStore: ObservableObject {
     @Published private(set) var isLoadingSettings = false
     @Published private(set) var isImporting = false
     @Published private(set) var isLoadingOlder = false
+    @Published private(set) var attachmentData: [String: Data] = [:]
+    @Published private(set) var failedAttachmentKeys: Set<String> = []
     @Published private(set) var lastImportSummary: String?
     @Published private(set) var isSubmitting = false
     @Published private(set) var isChangingPermission = false
@@ -92,6 +121,7 @@ final class OpenCodexStore: ObservableObject {
     @Published var errorBanner: String?
     @Published var isInspectorPresented = false
     @Published var isSettingsPresented = false
+    @Published var isModelBrowserPresented = false
     @Published var isWorkspaceBrowserPresented = false
     @Published var isVoiceConversationPresented = false
     @Published private(set) var voiceConversationStatus = "Ready"
@@ -103,7 +133,9 @@ final class OpenCodexStore: ObservableObject {
     private let idleGuard = IdleGuard()
     private var recordsBySession: [String: [SessionEventRecord]] = [:]
     private var historyHasMoreBySession: [String: Bool] = [:]
+    private var loadingAttachmentKeys: Set<String> = []
     private var projectionsBySession: [String: [String: ProjectionCell]] = [:]
+    private var harnessesBySession: [String: HarnessCatalogEntry] = [:]
     private var connectionTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
     private var projectionCacheTask: Task<Void, Never>?
@@ -123,13 +155,23 @@ final class OpenCodexStore: ObservableObject {
         let profile = baseURL.map { NativeConnectionProfile(baseURL: $0, bearerToken: bearerToken) }
             ?? NativeConnectionProfile.restored()
         connectionProfile = profile
-        api = DshApiClient(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
-        connection = DshLiveConnection(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
+        api = DshApiClient(
+            baseURL: profile.baseURL,
+            bearerToken: profile.bearerToken,
+            tlsFingerprint: profile.tlsFingerprint
+        )
+        connection = DshLiveConnection(
+            baseURL: profile.baseURL,
+            bearerToken: profile.bearerToken,
+            tlsFingerprint: profile.tlsFingerprint
+        )
     }
 
     /// Deterministic, network-isolated state for screenshots and product demos.
     static func visualFixture() -> OpenCodexStore {
-        let store = OpenCodexStore(baseURL: NativeConnectionProfile.local.baseURL)
+        // Use a non-network URL scheme so an accidentally reachable code path
+        // still cannot contact the resident Host or a model provider.
+        let store = OpenCodexStore(baseURL: URL(string: "openfish-demo://fixture")!)
         let now = Date().timeIntervalSince1970 * 1_000
         let workspace = WorkspaceView(
             workspaceId: "workspace-aurora",
@@ -207,19 +249,20 @@ final class OpenCodexStore: ObservableObject {
             reason: "Allow OpenFish to update the local sync contract fixture?"
         )
         store.hostDescription = HostDescription(
-            version: "demo", cwd: workspace.path, provider: "openai-codex",
+            version: "demo", cwd: workspace.path, provider: "openai",
             model: "gpt-5.6-sol", attachedSessions: 1, canOpenPath: true
         )
         store.sessionModels = SessionModels(
-            current: ModelSelection(provider: "openai-codex", model: "gpt-5.6-sol", reasoningEffort: "medium"),
+            current: ModelSelection(provider: "openai", model: "gpt-5.6-sol", reasoningEffort: "medium"),
             routable: true,
             groups: [
                 ModelProviderGroup(
-                    id: "openai-codex",
-                    name: "ChatGPT",
+                    id: "openai",
+                    name: "OpenAI",
                     models: [
                         CatalogModel(
                             id: "gpt-5.6-sol", name: "GPT-5.6-Sol", description: "Demo model",
+                            providerId: "openai", providerName: "OpenAI",
                             reasoning: ModelReasoning(
                                 efforts: [
                                     ModelReasoningEffort(id: "low", name: "Low", description: nil),
@@ -232,46 +275,22 @@ final class OpenCodexStore: ObservableObject {
                     ]
                 ),
             ],
-            failures: []
+            failures: [],
+            account: HarnessCatalogEntry.AccountDescriptor(
+                label: "ChatGPT · Pro",
+                billing: "subscription",
+                detail: "Demo data: the official Codex app-server reported a ChatGPT Pro route. OpenFish retained neither email nor credentials."
+            )
         )
-        store.harnesses = [HarnessCatalogEntry(
-            id: "codex-acp", isDefault: true, name: "Codex", version: "demo", description: "Codex through the OpenFish ACP bridge",
-            publisher: "OpenAI", license: nil, repository: "https://github.com/openai/codex", icon: nil,
-            verified: true, protocolName: "acp", source: "acp-registry",
-            distribution: HarnessDistribution(
-                kind: "npx", package: "@zed-industries/codex-acp@0.10.0", archive: nil,
-                sha256: nil, command: nil, args: [], env: [:]
-            ),
-            graph: HarnessGraph(
-                level: "observable", manifestVersion: 1, boundary: "Codex ACP agent process",
-                evidence: [.init(kind: "source-derived", source: "https://github.com/openai/codex", version: "demo")],
-                nodes: Self.demoArchitectureNodes(names: [
-                    ("acp", "protocol-adapter", "ACP interface", "Translates client sessions and permissions for Codex."),
-                    ("session", "agent-session", "Thread & turn", "Owns the current thread, turn, and streamed items."),
-                    ("context", "context-runtime", "Context", "Builds model input from instructions, history, and environment."),
-                    ("model", "model-client", "Model client", "Streams inference through the selected Codex account and model."),
-                    ("tools", "tool-runtime", "Tools", "Dispatches enabled coding and computer tools."),
-                    ("sandbox", "execution-boundary", "Sandbox", "Constrains filesystem and network effects."),
-                    ("approvals", "permission-policy", "Approvals", "Stops boundary-crossing operations for review."),
-                    ("persistence", "session-storage", "Persistence", "Retains resumable thread identity and state."),
-                ], source: "https://github.com/openai/codex", version: "demo"),
-                edges: Self.demoArchitectureEdges(ids: ["acp", "session", "context", "model", "tools", "approvals", "sandbox", "persistence"])
-            ),
-            available: true, unavailableReason: nil,
-            installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
-            auth: .init(methods: [], selectedMethod: "chat-gpt", status: "configured", missingFields: []),
-            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in"),
-            capabilities: Self.visualCapabilities(protocolName: "acp", graphLevel: "observable"),
-            driver: .init(apiVersion: 1, protocol: "acp", loaded: true)
-        )]
+        store.harnesses = Self.generatedVisualHarnesses().filter { $0.id == "codex" }
         store.sessions = store.sessions.map { session in
             SessionSummary(
-                sessionId: session.sessionId, harnessId: "codex-acp", updatedAt: session.updatedAt,
+                sessionId: session.sessionId, harnessId: "codex", updatedAt: session.updatedAt,
                 running: session.running, blank: session.blank, parentSessionId: session.parentSessionId,
                 origin: session.origin, cwd: session.cwd, agentPreset: nil, projections: session.projections
             )
         }
-        store.selectedHarnessId = "codex-acp"
+        store.selectedHarnessId = "codex"
         store.selectedWorkspaceId = workspace.workspaceId
         store.selectedSessionId = "session-live"
         store.connectionState = .connected
@@ -289,7 +308,7 @@ final class OpenCodexStore: ObservableObject {
         store.draftSessionId = draftId
         store.sessions.append(SessionSummary(
             sessionId: draftId,
-            harnessId: "codex-acp",
+            harnessId: "codex",
             updatedAt: Date().timeIntervalSince1970 * 1_000,
             running: false,
             blank: true,
@@ -307,65 +326,7 @@ final class OpenCodexStore: ObservableObject {
 
     static func visualHarnessOnboardingFixture() -> OpenCodexStore {
         let store = visualFixture()
-        let dsh = HarnessCatalogEntry(
-            id: "dsh", isDefault: false, name: "DeepSeek Harness", version: "builtin",
-            description: "Native plugin runtime with tools, permissions, and durable sessions.",
-            publisher: "DeepSeek", license: "MIT", repository: "https://github.com/deepseek-ai/deepseek-harness", icon: nil,
-            verified: true, protocolName: "dsh", source: "builtin", distribution: nil,
-            graph: HarnessGraph(
-                level: "observable", manifestVersion: 1, boundary: "DeepSeek Harness process",
-                evidence: [.init(kind: "source-derived", source: "docs/architecture.md", version: "builtin")],
-                nodes: Self.demoArchitectureNodes(names: [
-                    ("context", "context-runtime", "Context", "Builds model-visible context."),
-                    ("loop", "agent-loop", "Agent loop", "Coordinates inference and tools."),
-                    ("models", "model-router", "Models", "Routes configured model providers."),
-                    ("tools", "tool-runtime", "Tools", "Validates and executes active tools."),
-                    ("approvals", "permission-policy", "Approvals", "Controls sensitive operations."),
-                    ("sandbox", "execution-boundary", "Execution", "Bounds process and filesystem effects."),
-                    ("session", "session-storage", "Persistence", "Stores resumable session events."),
-                    ("extensions", "extension-runtime", "Extensions", "Loads versioned runtime extensions and skills."),
-                ], source: "docs/architecture.md", version: "builtin"),
-                edges: Self.demoArchitectureEdges(ids: ["context", "loop", "models", "tools", "approvals", "sandbox", "session", "extensions"])
-            ),
-            available: true, unavailableReason: nil,
-            installation: .init(status: "builtin", installedVersion: "builtin", availableVersion: "builtin", previousVersions: [], error: nil),
-            auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
-            compatibility: .init(status: "compatible", checkedAt: nil, message: "Built in"),
-            capabilities: Self.visualCapabilities(protocolName: "dsh", graphLevel: "observable"),
-            driver: .init(apiVersion: 1, protocol: "dsh", loaded: true)
-        )
-        let omp = HarnessCatalogEntry(
-            id: "oh-my-pi", isDefault: false, name: "Oh My Pi", version: "17.4.0",
-            description: "Community coding Harness with a native ACP mode and advanced tools.",
-            publisher: "Oh My Pi contributors", license: "MIT", repository: "https://github.com/can1357/oh-my-pi", icon: nil,
-            verified: false, protocolName: "acp", source: "builtin",
-            distribution: HarnessDistribution(
-                kind: "bunx", package: "@oh-my-pi/pi-coding-agent@17.4.0", archive: nil,
-                sha256: nil, command: nil, args: ["acp"], env: [:]
-            ),
-            graph: HarnessGraph(
-                level: "observable", manifestVersion: 1, boundary: "Oh My Pi agent process",
-                evidence: [.init(kind: "source-derived", source: "https://github.com/can1357/oh-my-pi", version: "17.4.0")],
-                nodes: Self.demoArchitectureNodes(names: [
-                    ("resources", "context-loader", "Resources", "Discovers context, skills, and configuration."),
-                    ("session", "agent-session", "Agent session", "Owns the agent loop and lifecycle."),
-                    ("models", "model-registry", "Models", "Combines bundled, configured, and discovered providers."),
-                    ("tools", "tool-registry", "Tools", "Selects built-in and discoverable tools."),
-                    ("permissions", "permission-policy", "Permissions", "Controls guarded tool effects."),
-                    ("execution", "execution-runtime", "Execution", "Runs coding tools and shells."),
-                    ("extensions", "extension-runtime", "Extensions", "Adds tools, providers, and events."),
-                    ("persistence", "session-storage", "Persistence", "Stores branches and resumable state."),
-                ], source: "https://github.com/can1357/oh-my-pi", version: "17.4.0"),
-                edges: Self.demoArchitectureEdges(ids: ["resources", "session", "models", "tools", "permissions", "execution", "extensions", "persistence"])
-            ),
-            available: true, unavailableReason: nil,
-            installation: .init(status: "not-installed", installedVersion: nil, availableVersion: "17.4.0", previousVersions: [], error: nil),
-            auth: .init(methods: [], selectedMethod: nil, status: "not-required", missingFields: []),
-            compatibility: .init(status: "ready", checkedAt: nil, message: "Ready to install"),
-            capabilities: Self.visualCapabilities(protocolName: "acp", graphLevel: "observable"),
-            driver: .init(apiVersion: 1, protocol: "acp", loaded: true)
-        )
-        store.harnesses = [dsh] + store.harnesses + [omp]
+        store.harnesses = Self.generatedVisualHarnesses()
         store.selectedSessionId = nil
         store.selectedHarnessId = ""
         store.needsHarnessOnboarding = true
@@ -373,53 +334,79 @@ final class OpenCodexStore: ObservableObject {
         return store
     }
 
-    private static func visualCapabilities(protocolName: String, graphLevel: String) -> [HarnessCatalogEntry.Capability] {
-        let external = protocolName != "dsh"
-        return [
-            .init(id: "lifecycle.install", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
-            .init(id: "lifecycle.update", status: external ? "supported" : "runtime", source: "driver", detail: nil),
-            .init(id: "lifecycle.rollback", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
-            .init(id: "lifecycle.uninstall", status: external ? "supported" : "unsupported", source: "driver", detail: nil),
-            .init(id: "session.create", status: "supported", source: "driver", detail: nil),
-            .init(id: "session.resume", status: "supported", source: "driver", detail: nil),
-            .init(id: "session.cancel", status: "supported", source: "driver", detail: nil),
-            .init(id: "session.fork", status: external ? "runtime" : "supported", source: "runtime", detail: nil),
-            .init(id: "session.archive", status: "supported", source: "driver", detail: nil),
-            .init(id: "workspace.project", status: "supported", source: "driver", detail: nil),
-            .init(id: "workspace.no-project", status: "supported", source: "driver", detail: nil),
-            .init(id: "configuration.models", status: "runtime", source: "runtime", detail: "Discovered from the running Harness."),
-            .init(id: "configuration.reasoning", status: "runtime", source: "runtime", detail: "Shown only when the model advertises it."),
-            .init(id: "configuration.auth", status: "runtime", source: "runtime", detail: nil),
-            .init(id: "interaction.tools", status: "supported", source: "driver", detail: nil),
-            .init(id: "interaction.approvals", status: "supported", source: "driver", detail: nil),
-            .init(id: "interaction.questions", status: external ? "unsupported" : "supported", source: "driver", detail: nil),
-            .init(id: "interaction.files", status: external ? "unsupported" : "supported", source: "driver", detail: nil),
-            .init(id: "interaction.events", status: "supported", source: "driver", detail: nil),
-            .init(id: "architecture.manifest", status: "supported", source: "pack", detail: nil),
-            .init(id: "architecture.runtime-observation", status: "runtime", source: "runtime", detail: "Evidence appears while the task runs."),
-            .init(id: "architecture.edit", status: graphLevel == "composable" ? "supported" : "unsupported", source: "pack", detail: nil),
-            .init(id: "diagnostics.preflight", status: "supported", source: "driver", detail: nil),
-            .init(id: "builder.manifest", status: "supported", source: "pack", detail: nil),
-            .init(id: "builder.test", status: "supported", source: "driver", detail: nil),
-            .init(id: "builder.publish", status: "unsupported", source: "pack", detail: nil),
-        ]
+    static func visualLoadingFixture() -> OpenCodexStore {
+        let store = OpenCodexStore(baseURL: URL(string: "openfish-demo://fixture")!)
+        store.connectionState = .connecting
+        store.hasBooted = true
+        store.isSynchronizingBaseline = true
+        store.isDemoMode = true
+        return store
     }
 
-    private static func demoArchitectureNodes(
-        names: [(String, String, String, String)], source: String, version: String
-    ) -> [HarnessGraphNode] {
-        names.map { id, kind, title, responsibility in
-            HarnessGraphNode(
-                id: id, kind: kind, title: title, editable: false,
-                responsibility: responsibility,
-                evidence: [HarnessGraphEvidence(kind: "source-derived", source: source, version: version)],
-                config: nil
-            )
+    static func visualRecoverableFixture() -> OpenCodexStore {
+        let store = visualLoadingFixture()
+        store.connectionState = .reconnecting(attempt: 3)
+        store.isSynchronizingBaseline = false
+        store.hostIssue = .init(
+            kind: .recoverable,
+            title: "OpenFish could not finish connecting",
+            message: "The demo Host is temporarily unavailable. Retry the connection or choose another Host."
+        )
+        return store
+    }
+
+    static func visualFatalFixture() -> OpenCodexStore {
+        let store = visualLoadingFixture()
+        store.connectionState = .connected
+        store.isSynchronizingBaseline = false
+        store.hostIssue = .init(
+            kind: .incompatible,
+            title: "This Host is not compatible",
+            message: "The demo Host does not implement the OpenFish native bootstrap protocol required by this app."
+        )
+        return store
+    }
+
+    static func visualOfflineFixture() -> OpenCodexStore {
+        let store = visualFixture()
+        store.connectionState = .reconnecting(attempt: 2)
+        store.nativeCapabilities = nil
+        store.hostIssue = .init(
+            kind: .recoverable,
+            title: "Reconnecting to the Host",
+            message: "Cached tasks remain readable while sending and approvals wait for the Host."
+        )
+        return store
+    }
+
+    static func visualEmptyFixture() -> OpenCodexStore {
+        let store = visualFixture()
+        store.workspaces = []
+        store.sessions = []
+        store.archivedSessionIds = []
+        store.recordsBySession = [:]
+        store.projectionsBySession = [:]
+        store.selectedWorkspaceId = nil
+        store.selectedSessionId = nil
+        store.draftSessionId = nil
+        return store
+    }
+
+    private static func generatedVisualHarnesses() -> [HarnessCatalogEntry] {
+        #if SWIFT_PACKAGE
+        let bundle = Bundle.module
+        #else
+        let bundle = Bundle.main
+        #endif
+        guard let url = bundle.url(forResource: "openfish-demo-harnesses", withExtension: "json") else {
+            preconditionFailure("The generated OpenFish Demo Harness catalog is missing from the app bundle")
         }
-    }
-
-    private static func demoArchitectureEdges(ids: [String]) -> [HarnessGraphEdge] {
-        zip(ids, ids.dropFirst()).map { HarnessGraphEdge(from: $0.0, to: $0.1) }
+        do {
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            return try JSONDecoder().decode(OpenFishDemoHarnessCatalog.self, from: data).items
+        } catch {
+            preconditionFailure("The generated OpenFish Demo Harness catalog is invalid: \(error)")
+        }
     }
 
     var currentSession: SessionSummary? {
@@ -436,27 +423,73 @@ final class OpenCodexStore: ObservableObject {
 
     var currentAgentPreset: String? { controlSession?.agentPreset }
     var currentHarnessId: String { controlSession?.harnessId ?? draftHarnessId ?? selectedHarnessId }
-    var currentHarness: HarnessCatalogEntry? { harnesses.first { $0.id == currentHarnessId } }
+    var currentHarnessAuthMethod: String? { controlSession?.harnessAuthMethod }
+    var controlHarnessVersionLabel: String {
+        controlSession?.harnessVersion
+            ?? currentHarness?.installation.installedVersion
+            ?? currentHarness?.version
+            ?? "version pending"
+    }
+    var currentHarness: HarnessCatalogEntry? {
+        if let controlSessionId, let pinned = harnessesBySession[controlSessionId] { return pinned }
+        return harnesses.first { $0.id == currentHarnessId }
+    }
     func harnessCapability(_ id: String) -> String? {
-        currentHarness?.capabilities.first(where: { $0.id == id })?.status
+        if let snapshot = controlSession?.harnessCapabilities {
+            return snapshot.contains(id) ? "supported" : "unsupported"
+        }
+        return currentHarness?.capabilities.first(where: { $0.id == id })?.status
     }
     func harnessCan(_ id: String) -> Bool { harnessCapability(id) != "unsupported" && harnessCapability(id) != nil }
+    func canFork(_ session: SessionSummary) -> Bool {
+        if let snapshot = session.harnessCapabilities { return snapshot.contains("session.fork") }
+        let harnessId = session.harnessId ?? "dsh"
+        let harness = harnessesBySession[session.sessionId] ?? harnesses.first(where: { $0.id == harnessId })
+        return harness?.capabilities.first(where: { $0.id == "session.fork" })?.status != "unsupported"
+            && harness?.capabilities.contains(where: { $0.id == "session.fork" }) == true
+    }
     var defaultHarness: HarnessCatalogEntry? { harnesses.first(where: \.isDefault) }
-    var canChooseHarness: Bool { selectedSessionId == nil && controlSession?.blank == true }
-    var canChooseAgentPreset: Bool { controlSession?.blank == true && currentHarnessId == "dsh" }
+    var canChooseHarness: Bool { selectedSessionId == nil && (controlSession?.blank ?? true) }
+    var canChooseAgentPreset: Bool { controlSession?.blank == true && harnessCan("configuration.agent-presets") }
+
+    private func isRunnableDefault(_ harness: HarnessCatalogEntry) -> Bool {
+        let installed = harness.installation.status == "builtin" || harness.installation.status == "installed"
+        let authenticated = harness.auth.status == "not-required" || harness.auth.status == "configured"
+        return harness.available && installed && authenticated
+    }
 
     var currentWorkspace: WorkspaceView? {
+        if let sessionId = selectedSessionId {
+            return workspaces.first { $0.sessionIds.contains(sessionId) }
+        }
         if let selectedWorkspaceId,
            let workspace = workspaces.first(where: { $0.workspaceId == selectedWorkspaceId }) {
             return workspace
         }
-        guard let sessionId = selectedSessionId else { return nil }
-        return workspaces.first { $0.sessionIds.contains(sessionId) }
+        return nil
     }
 
     var conversation: [ConversationItem] {
         guard let conversationSessionId else { return [] }
         return ConversationProjector.project(recordsBySession[conversationSessionId] ?? [])
+    }
+
+    var visibleCommands: [JSONValue] {
+        var native: [JSONValue] = []
+        if let id = conversationSessionId {
+            for record in (recordsBySession[id] ?? []).sorted(by: { $0.event.seq < $1.event.seq }) {
+                guard record.event.type == "harness/native-event",
+                      let event = record.event.data["event"],
+                      event["sessionUpdate"]?.stringValue == "available_commands_update" else { continue }
+                native = event["availableCommands"]?.arrayValue ?? []
+            }
+        }
+        guard !native.isEmpty else { return commands }
+        let nativeNames = Set(native.compactMap { $0["name"]?.stringValue })
+        return commands.filter { row in
+            guard let name = row["name"]?.stringValue else { return true }
+            return !nativeNames.contains(name)
+        } + native
     }
 
     var conversationSessionId: String? {
@@ -466,6 +499,31 @@ final class OpenCodexStore: ObservableObject {
     var canLoadOlder: Bool {
         guard let id = conversationSessionId else { return false }
         return historyHasMoreBySession[id] == true && !isLoadingOlder
+    }
+
+    func cachedAttachment(sessionId: String, attachmentId: String) -> Data? {
+        attachmentData[attachmentCacheKey(sessionId: sessionId, attachmentId: attachmentId)]
+    }
+
+    func attachmentFailed(sessionId: String, attachmentId: String) -> Bool {
+        failedAttachmentKeys.contains(attachmentCacheKey(sessionId: sessionId, attachmentId: attachmentId))
+    }
+
+    func loadAttachment(sessionId: String, attachmentId: String, retry: Bool = false) async {
+        let key = attachmentCacheKey(sessionId: sessionId, attachmentId: attachmentId)
+        guard attachmentData[key] == nil, loadingAttachmentKeys.insert(key).inserted else { return }
+        if retry { failedAttachmentKeys.remove(key) }
+        defer { loadingAttachmentKeys.remove(key) }
+        do {
+            attachmentData[key] = try await api.attachmentData(sessionId: sessionId, attachmentId: attachmentId)
+            failedAttachmentKeys.remove(key)
+        } catch {
+            failedAttachmentKeys.insert(key)
+        }
+    }
+
+    private func attachmentCacheKey(sessionId: String, attachmentId: String) -> String {
+        "\(sessionId):\(attachmentId)"
     }
 
     var selectedApprovals: [PendingApproval] {
@@ -484,6 +542,9 @@ final class OpenCodexStore: ObservableObject {
                let model = group.models.first(where: { $0.id == models.current.model }) {
                 return model.name
             }
+        }
+        if models.current.provider == "harness", models.groups.isEmpty {
+            return "Harness-managed model"
         }
         return models.current.model
     }
@@ -514,6 +575,8 @@ final class OpenCodexStore: ObservableObject {
         guard let effort = sessionModels?.current.reasoningEffort else { return nil }
         return currentReasoningOptions.first(where: { $0.id == effort })?.name ?? effort
     }
+
+    var canAttachImages: Bool { harnessCan("interaction.files") }
 
     var currentPermissions: PermissionSelect? {
         guard let controlSessionId,
@@ -578,7 +641,31 @@ final class OpenCodexStore: ObservableObject {
     }
 
     var canSend: Bool {
-        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty) && !isSubmitting
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingImages.isEmpty)
+            && (pendingImages.isEmpty || canAttachImages)
+            && (activeSubagent != nil || sessionModels?.routable == true)
+            && canStartNewTask
+            && !isSubmitting
+    }
+
+    var hostPresentationState: OpenFishHostPresentationState {
+        let hasCachedProjection = !workspaces.isEmpty || !sessions.isEmpty
+        let liveBaseline = connectionState == .connected
+            && hasBaseline
+            && !isSynchronizingBaseline
+            && (nativeCapabilities != nil || isDemoMode)
+        if liveBaseline { return .ready }
+        if hasCachedProjection { return .cached(hostIssue) }
+        if let hostIssue {
+            return hostIssue.kind == .incompatible ? .fatal(hostIssue) : .recoverable(hostIssue)
+        }
+        if case .reconnecting = connectionState { return .recoverable(nil) }
+        return .loading
+    }
+
+    var canStartNewTask: Bool {
+        if case .ready = hostPresentationState { return true }
+        return false
     }
 
     func boot() async {
@@ -592,6 +679,17 @@ final class OpenCodexStore: ObservableObject {
     }
 
     private func startConnection() async {
+        guard !connectionProfile.requiresPairing else {
+            connectionState = .reconnecting(attempt: 0)
+            hasBaseline = false
+            isSynchronizingBaseline = false
+            hostIssue = OpenFishHostIssue(
+                kind: .recoverable,
+                title: "Pair this Mac",
+                message: "Enter a fresh one-time code from the OpenFish Host. The resulting device credential stays in this Mac's Keychain."
+            )
+            return
+        }
         let stream = connection.updates
         connectionTask = Task { [weak self] in
             for await update in stream {
@@ -617,30 +715,38 @@ final class OpenCodexStore: ObservableObject {
 
     func connect(host: String, pairingCode: String?) async {
         guard let baseURL = NativeConnectionProfile.normalizedURL(host) else {
-            errorBanner = "Enter a valid http:// or https:// DSH Host address."
+            errorBanner = "Enter the Host's https:// address. Plain HTTP is allowed only for this Mac's loopback Host."
             return
         }
         do {
             let trimmedCode = pairingCode?.trimmingCharacters(in: .whitespacesAndNewlines)
             let token: String?
+            let tlsFingerprint: String?
             if let trimmedCode, !trimmedCode.isEmpty {
-                let bootstrap = DshBootstrapClient(baseURL: baseURL)
-                let receipt = try await bootstrap.pair(
+                let bootstrap = DshBootstrapClient(baseURL: baseURL, permitsBootstrapTrust: true)
+                let result = try await bootstrap.pair(
                     deviceName: Host.current().localizedName ?? "Mac",
                     code: trimmedCode
                 )
-                token = receipt.token
+                token = result.receipt.token
+                tlsFingerprint = result.tlsFingerprint
             } else if baseURL == NativeConnectionProfile.local.baseURL {
                 token = nil
+                tlsFingerprint = nil
             } else {
                 token = NativeCredentialStore.token(for: baseURL)
+                tlsFingerprint = NativeCredentialStore.fingerprint(for: baseURL)
             }
-            let profile = NativeConnectionProfile(baseURL: baseURL, bearerToken: token)
+            let profile = NativeConnectionProfile(
+                baseURL: baseURL,
+                bearerToken: token,
+                tlsFingerprint: tlsFingerprint
+            )
             try profile.persist()
             await reconfigure(profile)
             errorBanner = nil
         } catch {
-            errorBanner = "Could not pair with this DSH Host: \(error)"
+            errorBanner = "Could not pair with this OpenFish Host: \(error)"
         }
     }
 
@@ -653,51 +759,89 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
+    func retryHostConnection() async {
+        guard !isDemoMode else { return }
+        guard !connectionProfile.requiresPairing else {
+            isSettingsPresented = true
+            return
+        }
+        hostIssue = nil
+        syncTask?.cancel()
+        connectionTask?.cancel()
+        await connection.stop()
+        connectionState = .connecting
+        isSynchronizingBaseline = true
+        await startConnection()
+    }
+
     private func reconfigure(_ profile: NativeConnectionProfile) async {
         stopVoiceConversation()
         syncTask?.cancel()
         connectionTask?.cancel()
         projectionCacheTask?.cancel()
         draftPreparationTask?.cancel()
+        // An explicit Host switch is the ownership boundary for a prepared
+        // draft. Delete it while the old authenticated client is still live.
+        // If that fails, keep its host-keyed snapshot so returning to the Host
+        // can retry the exact id instead of leaking an invisible provider task.
+        if let abandonedDraft = draftSessionId {
+            do {
+                try await api.discardSession(abandonedDraft)
+                draftSessionId = nil
+                draftHarnessId = nil
+            } catch {
+                // The old Host cache retains the exact pending identity.
+            }
+        }
         await projectionCache.save(projectionCacheSnapshot())
         await connection.stop()
         connectionProfile = profile
-        api = DshApiClient(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
-        connection = DshLiveConnection(baseURL: profile.baseURL, bearerToken: profile.bearerToken)
+        api = DshApiClient(
+            baseURL: profile.baseURL,
+            bearerToken: profile.bearerToken,
+            tlsFingerprint: profile.tlsFingerprint
+        )
+        connection = DshLiveConnection(
+            baseURL: profile.baseURL,
+            bearerToken: profile.bearerToken,
+            tlsFingerprint: profile.tlsFingerprint
+        )
         connectionState = .connecting
+        hostIssue = nil
         hasBaseline = false
         isSynchronizingBaseline = true
         bufferedEnvelopes.removeAll(keepingCapacity: false)
-        pendingApprovals.removeAll(keepingCapacity: false)
-        pendingQuestions.removeAll(keepingCapacity: false)
-        queuedItems.removeAll(keepingCapacity: false)
-        backgroundJobs.removeAll(keepingCapacity: false)
-        workspaces = []
-        sessions = []
-        recordsBySession = [:]
-        historyHasMoreBySession = [:]
-        projectionsBySession = [:]
-        nativeCapabilities = nil
-        sessionModels = nil
+        purgeHostProjection()
         isLoadingSessionModels = false
-        sessionModelsError = nil
-        draftSessionId = nil
-        draftHarnessId = nil
-        selectedSessionId = nil
-        activeSubagent = nil
         if let cached = await projectionCache.load(matching: profile.baseURL) {
             restoreProjectionCache(cached)
         }
         await startConnection()
     }
 
-    func beginNewTask(in workspaceId: String? = nil) {
+    func beginNewTask(in workspaceId: String? = nil, harnessId requestedHarnessId: String? = nil) {
+        guard canStartNewTask else { return }
+        if isDemoMode {
+            selectedWorkspaceId = workspaceId
+            selectedSessionId = nil
+            draftHarnessId = requestedHarnessId ?? selectedHarnessId
+            draftSessionId = "demo-draft"
+            activeSubagent = nil
+            draft = ""
+            pendingImages = []
+            errorBanner = nil
+            return
+        }
         draftPreparationTask?.cancel()
         draftPreparationGeneration += 1
         let generation = draftPreparationGeneration
         let abandonedDraft = draftSessionId
+        let harnessId = requestedHarnessId ?? selectedHarnessId
         draftSessionId = nil
-        draftHarnessId = nil
+        // A draft is an immutable Harness choice, even when it currently
+        // matches the shared default. Persist the exact id so a later default
+        // change cannot silently retarget a crash-recovered task.
+        draftHarnessId = harnessId
         selectedSessionId = nil
         activeSubagent = nil
         selectedWorkspaceId = workspaceId
@@ -706,13 +850,13 @@ final class OpenCodexStore: ObservableObject {
         draft = ""
         pendingImages = []
         UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
+        scheduleProjectionCache()
         if let abandonedDraft {
             Task { [weak self] in
                 guard let self else { return }
-                _ = try? await self.api.archiveSession(abandonedDraft)
+                try? await self.api.discardSession(abandonedDraft)
             }
         }
-        let harnessId = selectedHarnessId
         guard !harnessId.isEmpty else {
             isLoadingSessionModels = false
             needsHarnessOnboarding = true
@@ -729,7 +873,8 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func changeNewTaskWorkspace(to workspaceId: String?) {
-        beginNewTask(in: workspaceId)
+        let harnessId = currentHarnessId
+        beginNewTask(in: workspaceId, harnessId: harnessId)
     }
 
     private func prepareNewTaskControls(generation: Int, workspaceId: String?, harnessId: String) async {
@@ -737,18 +882,33 @@ final class OpenCodexStore: ObservableObject {
               generation == draftPreparationGeneration,
               selectedSessionId == nil,
               draftSessionId == nil else { return }
+        // The client chooses the durable id before crossing the network. Host
+        // retries are idempotent, so cancellation or a lost HTTP response can
+        // never create an unaddressable blank provider task.
+        let requestedSessionId = UUID().uuidString.lowercased()
+        draftSessionId = requestedSessionId
+        scheduleProjectionCache()
         do {
-            let sessionId = try await api.createSession(workspaceId: workspaceId, harnessId: harnessId)
+            let sessionId = try await api.createSession(
+                workspaceId: workspaceId,
+                harnessId: harnessId,
+                sessionId: requestedSessionId
+            )
+            guard sessionId == requestedSessionId else {
+                throw DshApiError.host(
+                    "session-identity-mismatch",
+                    "The Host returned a different id for the prepared task."
+                )
+            }
             guard !Task.isCancelled,
                   generation == draftPreparationGeneration,
                   selectedWorkspaceId == workspaceId,
                   (draftHarnessId ?? selectedHarnessId) == harnessId,
                   selectedSessionId == nil,
-                  draftSessionId == nil else {
-                _ = try? await api.archiveSession(sessionId)
+                  draftSessionId == requestedSessionId else {
+                try? await api.discardSession(sessionId)
                 return
             }
-            draftSessionId = sessionId
             await refreshSessions()
             async let history: Void = loadHistory(sessionId: sessionId)
             async let models: Void = loadModels(sessionId: sessionId)
@@ -761,10 +921,18 @@ final class OpenCodexStore: ObservableObject {
             isLoadingSessionModels = false
             sessionModelsError = String(describing: error)
             errorBanner = "Could not prepare a new task: \(error)"
+            scheduleProjectionCache()
         }
     }
 
     func selectSession(_ sessionId: String) async {
+        if isDemoMode {
+            guard sessions.contains(where: { $0.sessionId == sessionId }) else { return }
+            selectedSessionId = sessionId
+            activeSubagent = nil
+            selectedWorkspaceId = workspaces.first(where: { $0.sessionIds.contains(sessionId) })?.workspaceId
+            return
+        }
         // A task can be opened immediately after creation (or from a deep link)
         // before the live baseline has announced it. Refresh once instead of
         // silently ignoring the selection and leaving all session controls empty.
@@ -783,7 +951,8 @@ final class OpenCodexStore: ObservableObject {
         }
         if let abandonedDraft = draftSessionId, abandonedDraft != sessionId {
             draftSessionId = nil
-            _ = try? await api.archiveSession(abandonedDraft)
+            draftHarnessId = nil
+            try? await api.discardSession(abandonedDraft)
         }
         selectedSessionId = sessionId
         activeSubagent = nil
@@ -792,9 +961,7 @@ final class OpenCodexStore: ObservableObject {
         sessionModels = nil
         sessionModelsError = nil
         isLoadingSessionModels = true
-        if let workspace = workspaces.first(where: { $0.sessionIds.contains(sessionId) }) {
-            selectedWorkspaceId = workspace.workspaceId
-        }
+        selectedWorkspaceId = workspaces.first(where: { $0.sessionIds.contains(sessionId) })?.workspaceId
         UserDefaults.standard.set(sessionId, forKey: "OpenCodex.lastSessionId")
         async let history: Void = loadHistory(sessionId: sessionId)
         async let models: Void = loadModels(sessionId: sessionId)
@@ -831,6 +998,23 @@ final class OpenCodexStore: ObservableObject {
     func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!text.isEmpty || !pendingImages.isEmpty), !isSubmitting else { return }
+        if isDemoMode {
+            draft = ""
+            pendingImages = []
+            errorBanner = "Demo State is read-only and never sends prompts to a Host or provider."
+            return
+        }
+        guard pendingImages.isEmpty || canAttachImages else {
+            errorBanner = "\(currentHarness?.name ?? "This Harness") does not accept image input through its current Driver. Remove the images or choose a Harness that advertises file input."
+            return
+        }
+        guard activeSubagent != nil || sessionModels?.routable == true else {
+            errorBanner = sessionModels == nil
+                ? "OpenFish is still checking this Harness's model and account. Wait or retry model discovery."
+                : "The selected model cannot run. Choose a configured model before sending."
+            isModelBrowserPresented = true
+            return
+        }
         guard activeSubagent != nil || selectedSessionId != nil || draftSessionId != nil
                 || draftHarnessId != nil || !selectedHarnessId.isEmpty else {
             needsHarnessOnboarding = true
@@ -841,6 +1025,8 @@ final class OpenCodexStore: ObservableObject {
         draft = ""
         let submittedImages = pendingImages
         pendingImages = []
+        let firstTurnHarnessId = draftHarnessId ?? selectedHarnessId
+        var firstTurnSessionId: String?
 
         do {
             if let activeSubagent {
@@ -864,11 +1050,25 @@ final class OpenCodexStore: ObservableObject {
                 sessionId = selectedSessionId
             } else if let draftSessionId {
                 sessionId = draftSessionId
+                firstTurnSessionId = sessionId
                 self.draftSessionId = nil
+                self.draftHarnessId = nil
                 self.selectedSessionId = sessionId
                 UserDefaults.standard.set(sessionId, forKey: "OpenCodex.lastSessionId")
             } else {
-                sessionId = try await api.createSession(workspaceId: selectedWorkspaceId, harnessId: draftHarnessId ?? selectedHarnessId)
+                let requestedSessionId = UUID().uuidString.lowercased()
+                sessionId = try await api.createSession(
+                    workspaceId: selectedWorkspaceId,
+                    harnessId: draftHarnessId ?? selectedHarnessId,
+                    sessionId: requestedSessionId
+                )
+                guard sessionId == requestedSessionId else {
+                    throw DshApiError.host(
+                        "session-identity-mismatch",
+                        "The Host returned a different id for the task."
+                    )
+                }
+                firstTurnSessionId = sessionId
                 self.selectedSessionId = sessionId
                 UserDefaults.standard.set(sessionId, forKey: "OpenCodex.lastSessionId")
                 await refreshSessions()
@@ -888,11 +1088,36 @@ final class OpenCodexStore: ObservableObject {
             }
             await loadModels(sessionId: sessionId)
         } catch {
+            if let firstTurnSessionId {
+                await reconcileFailedFirstTurn(
+                    sessionId: firstTurnSessionId,
+                    harnessId: firstTurnHarnessId
+                )
+            }
             draft = text
             pendingImages = submittedImages
             errorBanner = "Could not send this task: \(error)"
         }
         isSubmitting = false
+    }
+
+    private func reconcileFailedFirstTurn(sessionId: String, harnessId: String) async {
+        do {
+            let authoritative = try await api.sessions()
+            mergeSessionBaseline(authoritative)
+            guard let summary = authoritative.first(where: { $0.sessionId == sessionId }),
+                  summary.blank,
+                  summary.origin != "subagent",
+                  !archivedSessionIds.contains(sessionId) else { return }
+            selectedSessionId = nil
+            draftSessionId = sessionId
+            draftHarnessId = summary.harnessId ?? harnessId
+            UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
+            scheduleProjectionCache()
+        } catch {
+            // Unknown admission state is deliberately kept as a selected task;
+            // recovery will classify it from the next authoritative baseline.
+        }
     }
 
     func cancelCurrentTask() async {
@@ -906,6 +1131,10 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func answer(_ approval: PendingApproval, allow: Bool) async {
+        if isDemoMode {
+            pendingApprovals[approval.approvalId] = nil
+            return
+        }
         do {
             let receipt = try await api.respond(to: approval, outcome: allow ? "allowed-once" : "rejected")
             guard receipt.accepted else {
@@ -917,8 +1146,28 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
-    func chooseModel(provider: String, model: CatalogModel, effort: String? = nil) async {
-        guard let selectedSessionId = controlSessionId else { return }
+    @discardableResult
+    func chooseModel(provider: String, model: CatalogModel, effort: String? = nil) async -> Bool {
+        guard let selectedSessionId = controlSessionId, !isChangingModel else { return false }
+        isChangingModel = true
+        defer { isChangingModel = false }
+        if isDemoMode {
+            if let catalog = sessionModels {
+                sessionModels = SessionModels(
+                    current: ModelSelection(
+                        provider: provider,
+                        model: model.id,
+                        reasoningEffort: effort ?? model.reasoning?.defaultEffort
+                    ),
+                    routable: catalog.routable,
+                    groups: catalog.groups,
+                    failures: catalog.failures,
+                    account: catalog.account,
+                    harnessOptions: catalog.harnessOptions
+                )
+            }
+            return true
+        }
         do {
             let selected = try await api.selectModel(
                 sessionId: selectedSessionId,
@@ -930,6 +1179,7 @@ final class OpenCodexStore: ObservableObject {
                     routable: catalog.routable,
                     groups: catalog.groups,
                     failures: catalog.failures,
+                    account: catalog.account,
                     harnessOptions: catalog.harnessOptions
                 )
             }
@@ -938,8 +1188,14 @@ final class OpenCodexStore: ObservableObject {
             // instead of retaining the pre-selection directory.
             await loadModels(sessionId: selectedSessionId)
             errorBanner = nil
+            return true
         } catch {
+            // A protocol may switch the model before rejecting a newly
+            // discovered reasoning value. Pull the live catalog even on
+            // failure so the picker never keeps showing stale state.
+            await loadModels(sessionId: selectedSessionId)
             errorBanner = "Could not switch models: \(error)"
+            return false
         }
     }
 
@@ -950,7 +1206,9 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func chooseHarnessConfig(_ option: HarnessConfigOption, value: JSONValue) async {
-        guard let sessionId = controlSessionId else { return }
+        guard let sessionId = controlSessionId, !isChangingHarnessConfig else { return }
+        isChangingHarnessConfig = true
+        defer { isChangingHarnessConfig = false }
         do {
             let options = try await api.setHarnessConfig(sessionId: sessionId, configId: option.id, value: value)
             if let catalog = sessionModels {
@@ -959,6 +1217,7 @@ final class OpenCodexStore: ObservableObject {
                     routable: catalog.routable,
                     groups: catalog.groups,
                     failures: catalog.failures,
+                    account: catalog.account,
                     harnessOptions: options
                 )
             }
@@ -967,6 +1226,7 @@ final class OpenCodexStore: ObservableObject {
             await loadModels(sessionId: sessionId)
             errorBanner = nil
         } catch {
+            await loadModels(sessionId: sessionId)
             errorBanner = "Could not change \(option.name): \(error)"
         }
     }
@@ -974,6 +1234,12 @@ final class OpenCodexStore: ObservableObject {
     func retryCurrentModels() async {
         guard let sessionId = controlSessionId else {
             if selectedSessionId == nil { beginNewTask(in: selectedWorkspaceId) }
+            return
+        }
+        if selectedSessionId == nil,
+           draftSessionId == sessionId,
+           !sessions.contains(where: { $0.sessionId == sessionId }) {
+            _ = await resumePreparedDraftIfPossible()
             return
         }
         await loadModels(sessionId: sessionId)
@@ -1033,22 +1299,48 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
-    func chooseHarness(_ harness: HarnessCatalogEntry) {
-        guard canChooseHarness, harness.id != currentHarnessId else { return }
-        Task { await chooseHarnessForDraft(harness) }
+    func chooseHarness(
+        _ harness: HarnessCatalogEntry,
+        acceptUnverified: Bool = false,
+        acceptDriverBundle: Bool = false,
+        force: Bool = false
+    ) {
+        let samePinnedIdentity = harness.id == currentHarnessId
+            && harness.auth.selectedMethod == currentHarnessAuthMethod
+        guard canChooseHarness, force || !samePinnedIdentity else { return }
+        Task {
+            await chooseHarnessForDraft(
+                harness,
+                acceptUnverified: acceptUnverified,
+                acceptDriverBundle: acceptDriverBundle
+            )
+        }
     }
 
-    private func chooseHarnessForDraft(_ harness: HarnessCatalogEntry) async {
-        guard harnessOperationId == nil, harness.available else {
-            errorBanner = harness.unavailableReason ?? "This Harness is not available on this Mac."
-            return
-        }
+    private func chooseHarnessForDraft(
+        _ harness: HarnessCatalogEntry,
+        acceptUnverified: Bool,
+        acceptDriverBundle: Bool
+    ) async {
+        guard harnessOperationId == nil else { return }
         harnessOperationId = harness.id
         defer { harnessOperationId = nil }
         do {
-            let current = harnesses.first(where: { $0.id == harness.id }) ?? harness
+            let current = try await prepareHarnessDriverIfNeeded(
+                harness,
+                acceptCodeExecution: acceptDriverBundle
+            )
+            guard current.available else {
+                throw DshApiError.host(
+                    "harness-unavailable",
+                    current.unavailableReason ?? "This Harness is not available on this Mac."
+                )
+            }
             if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(action: "install", id: harness.id)
+                harnesses = try await api.mutateHarness(
+                    action: "install", id: harness.id,
+                    acceptUnverified: acceptUnverified ? true : nil
+                )
             }
             let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
@@ -1057,7 +1349,7 @@ final class OpenCodexStore: ObservableObject {
             }
             draftPreparationTask?.cancel()
             draftPreparationGeneration += 1
-            if let abandonedDraft = draftSessionId { _ = try? await api.archiveSession(abandonedDraft) }
+            if let abandonedDraft = draftSessionId { try? await api.discardSession(abandonedDraft) }
             draftSessionId = nil
             selectedSessionId = nil
             draftHarnessId = harness.id
@@ -1075,17 +1367,31 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
-    func selectDefaultHarness(_ harness: HarnessCatalogEntry, completesOnboarding: Bool = false) async {
+    func selectDefaultHarness(
+        _ harness: HarnessCatalogEntry,
+        completesOnboarding: Bool = false,
+        acceptUnverified: Bool = false,
+        acceptDriverBundle: Bool = false
+    ) async {
         guard harnessOperationId == nil else { return }
-        guard harness.available else {
-            errorBanner = harness.unavailableReason ?? "This Harness is not available on this Mac."
-            return
-        }
         harnessOperationId = harness.id
         defer { harnessOperationId = nil }
         do {
-            if harness.installation.status != "builtin" && harness.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(action: "install", id: harness.id)
+            let current = try await prepareHarnessDriverIfNeeded(
+                harness,
+                acceptCodeExecution: acceptDriverBundle
+            )
+            guard current.available else {
+                throw DshApiError.host(
+                    "harness-unavailable",
+                    current.unavailableReason ?? "This Harness is not available on this Mac."
+                )
+            }
+            if current.installation.status != "builtin" && current.installation.status != "installed" {
+                harnesses = try await api.mutateHarness(
+                    action: "install", id: harness.id,
+                    acceptUnverified: acceptUnverified ? true : nil
+                )
             }
             let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
@@ -1113,7 +1419,7 @@ final class OpenCodexStore: ObservableObject {
         do {
             harnesses = try await api.refreshHarnesses()
             harnessCatalogError = nil
-            if let sharedDefault = harnesses.first(where: { $0.isDefault }) {
+            if let sharedDefault = harnesses.first(where: { $0.isDefault && isRunnableDefault($0) }) {
                 selectedHarnessId = sharedDefault.id
                 UserDefaults.standard.set(sharedDefault.id, forKey: "OpenFish.defaultHarnessId")
             }
@@ -1156,12 +1462,43 @@ final class OpenCodexStore: ObservableObject {
     }
 
     @discardableResult
-    func mutateHarness(_ action: String, harness: HarnessCatalogEntry, authMethod: String? = nil) async -> Bool {
+    func mutateHarness(
+        _ action: String,
+        harness: HarnessCatalogEntry,
+        authMethod: String? = nil,
+        acceptUnverified: Bool = false,
+        acceptDriverBundle: Bool = false
+    ) async -> Bool {
         guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
         defer { harnessOperationId = nil }
         do {
-            harnesses = try await api.mutateHarness(action: action, id: harness.id, authMethod: authMethod)
+            let operationHarness: HarnessCatalogEntry
+            if action == "rollback", let previousVersion = harness.installation.previousVersions.first {
+                operationHarness = try await api.resolveHarness(
+                    id: harness.id,
+                    version: previousVersion,
+                    authMethod: harness.auth.selectedMethod
+                )
+            } else {
+                operationHarness = harness
+            }
+            if ["install", "update", "rollback", "probe", "default", "auth"].contains(action) {
+                let prepared = try await prepareHarnessDriverIfNeeded(
+                    operationHarness,
+                    acceptCodeExecution: acceptDriverBundle
+                )
+                guard prepared.available else {
+                    throw DshApiError.host(
+                        "harness-unavailable",
+                        prepared.unavailableReason ?? "This Harness is not available on this Mac."
+                    )
+                }
+            }
+            harnesses = try await api.mutateHarness(
+                action: action, id: harness.id, authMethod: authMethod,
+                acceptUnverified: acceptUnverified ? true : nil
+            )
             errorBanner = nil
             return true
         } catch {
@@ -1171,20 +1508,133 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
+    /// Resolve the exact retained Pack that a rollback would activate so the
+    /// consent sheet can name its real Driver source instead of the newer
+    /// catalog row.
+    func rollbackHarnessCandidate(_ harness: HarnessCatalogEntry) async -> HarnessCatalogEntry? {
+        guard let version = harness.installation.previousVersions.first else { return nil }
+        do {
+            return try await api.resolveHarness(
+                id: harness.id,
+                version: version,
+                authMethod: harness.auth.selectedMethod
+            )
+        } catch {
+            errorBanner = "Could not inspect the rollback target for \(harness.name): \(error)"
+            return nil
+        }
+    }
+
+    /// Reactivate the exact Driver source pinned by an existing task. This is
+    /// deliberately explicit because one protocol Driver is active per Host;
+    /// restoring an older task may replace the source used by newer tasks.
+    @discardableResult
+    func activatePinnedHarness(
+        _ harness: HarnessCatalogEntry,
+        acceptDriverBundle: Bool
+    ) async -> Bool {
+        guard harnessOperationId == nil else { return false }
+        harnessOperationId = harness.id
+        defer { harnessOperationId = nil }
+        do {
+            let prepared = try await prepareHarnessDriverIfNeeded(
+                harness,
+                acceptCodeExecution: acceptDriverBundle
+            )
+            guard prepared.available else {
+                throw DshApiError.host(
+                    "harness-unavailable",
+                    prepared.unavailableReason ?? "This exact Harness setup is unavailable."
+                )
+            }
+            if let sessionId = controlSessionId {
+                harnessesBySession[sessionId] = prepared
+            }
+            objectWillChange.send()
+            errorBanner = nil
+            return true
+        } catch {
+            errorBanner = "Could not restore \(harness.name) \(harness.version): \(error)"
+            return false
+        }
+    }
+
+    @discardableResult
+    func submitHarnessPublication(_ harness: HarnessCatalogEntry, githubToken: String?) async -> Bool {
+        guard harnessOperationId == nil else { return false }
+        harnessOperationId = harness.id
+        defer { harnessOperationId = nil }
+        do {
+            if let githubToken, !githubToken.isEmpty {
+                try await api.setCredential(ref: "OPENFISH_GITHUB_TOKEN", value: githubToken)
+            }
+            harnesses = try await api.mutateHarness(action: "submit-publication", id: harness.id)
+            errorBanner = nil
+            return true
+        } catch {
+            errorBanner = "Could not submit \(harness.name) for community review: \(error)"
+            harnesses = (try? await api.harnesses()) ?? harnesses
+            return false
+        }
+    }
+
+    @discardableResult
+    func submitHarnessRevocation(_ harness: HarnessCatalogEntry, reason: String, githubToken: String?) async -> Bool {
+        guard harnessOperationId == nil else { return false }
+        harnessOperationId = harness.id
+        defer { harnessOperationId = nil }
+        do {
+            if let githubToken, !githubToken.isEmpty {
+                try await api.setCredential(ref: "OPENFISH_GITHUB_TOKEN", value: githubToken)
+            }
+            harnesses = try await api.mutateHarness(action: "submit-revocation", id: harness.id, reason: reason)
+            errorBanner = nil
+            return true
+        } catch {
+            errorBanner = "Could not request revocation of \(harness.name) \(harness.version): \(error)"
+            harnesses = (try? await api.harnesses()) ?? harnesses
+            return false
+        }
+    }
+
+    func forgetHarnessPublicationAuthorization() async {
+        do {
+            try await api.unsetCredential(ref: "OPENFISH_GITHUB_TOKEN")
+            errorBanner = nil
+        } catch {
+            errorBanner = "Could not forget the saved GitHub authorization: \(error)"
+        }
+    }
+
     @discardableResult
     func configureHarness(
         _ harness: HarnessCatalogEntry,
         method: HarnessCatalogEntry.Authentication.Method,
         credentials: [String: String] = [:],
         makeDefault: Bool = false,
-        completesOnboarding: Bool = false
+        completesOnboarding: Bool = false,
+        acceptUnverified: Bool = false,
+        acceptDriverBundle: Bool = false
     ) async -> Bool {
         guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
         defer { harnessOperationId = nil }
         do {
-            if harness.installation.status != "builtin" && harness.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(action: "install", id: harness.id)
+            let current = try await prepareHarnessDriverIfNeeded(
+                harness,
+                acceptCodeExecution: acceptDriverBundle
+            )
+            guard current.available else {
+                throw DshApiError.host(
+                    "harness-unavailable",
+                    current.unavailableReason ?? "This Harness is not available on this Mac."
+                )
+            }
+            if current.installation.status != "builtin" && current.installation.status != "installed" {
+                harnesses = try await api.mutateHarness(
+                    action: "install", id: harness.id,
+                    acceptUnverified: acceptUnverified ? true : nil
+                )
             }
             for field in method.fields {
                 if let value = credentials[field.ref], !value.isEmpty {
@@ -1217,17 +1667,149 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
+    /// Materialize a Pack-declared protocol Driver before asking the Host to
+    /// install or run the Harness. The exact source is admitted by the bundled
+    /// Driver manager; OpenFish never guesses a package from a protocol name.
+    private func prepareHarnessDriverIfNeeded(
+        _ harness: HarnessCatalogEntry,
+        acceptCodeExecution: Bool
+    ) async throws -> HarnessCatalogEntry {
+        let current = harnesses.first(where: { $0.id == harness.id && $0.version == harness.version }) ?? harness
+        guard let bundle = current.driverBundle else { return current }
+        guard OpenFishDriverManager.isAvailable else {
+            throw DshApiError.host(
+                "driver-manager-unavailable",
+                "The packaged OpenFish Driver manager is missing. Reinstall the Mac app."
+            )
+        }
+
+        let inventory = try await OpenFishDriverManager.list()
+        let previous = inventory.bundles.first { $0.packageName == bundle.package && $0.active }
+        let exactBundleIsActive = previous?.requested == bundle.spec
+        if exactBundleIsActive && current.driver.loaded {
+            let rows = try await api.authorizeHarnessDriver(
+                id: current.id,
+                version: current.version,
+                package: bundle.package,
+                spec: bundle.spec
+            )
+            harnesses = rows
+            return try await api.resolveHarness(
+                id: current.id,
+                version: current.version,
+                authMethod: current.auth.selectedMethod
+            )
+        }
+
+        var changedBundle = false
+        if !exactBundleIsActive {
+            guard acceptCodeExecution else {
+                throw DshApiError.host(
+                    "driver-consent-required",
+                    "Confirm the exact Driver Bundle \(bundle.spec) before OpenFish runs its code."
+                )
+            }
+            _ = try await OpenFishDriverManager.install(
+                spec: bundle.spec,
+                expectedPackageName: bundle.package,
+                allowScripts: bundle.requiresInstallScripts
+            )
+            changedBundle = true
+        }
+
+        if !OpenFishHostRuntime.restartManagedHost() {
+            let recovery = changedBundle
+                ? await restoreDriverBundle(packageName: bundle.package, previous: previous)
+                : nil
+            throw DshApiError.host(
+                "driver-restart-required",
+                "The Driver was admitted, but the active Host is not owned by this OpenFish app. Restart that Host, then retry."
+                    + (recovery.map { " Automatic profile recovery also failed: \($0)" } ?? "")
+            )
+        }
+
+        var lastError: Error?
+        for _ in 0..<80 {
+            if Task.isCancelled { throw CancellationError() }
+            do {
+                let rows = try await api.harnesses()
+                harnesses = rows
+                if let prepared = rows.first(where: { $0.id == harness.id }), prepared.driver.loaded {
+                    let authorized = try await api.authorizeHarnessDriver(
+                        id: current.id,
+                        version: current.version,
+                        package: bundle.package,
+                        spec: bundle.spec
+                    )
+                    harnesses = authorized
+                    return try await api.resolveHarness(
+                        id: current.id,
+                        version: current.version,
+                        authMethod: current.auth.selectedMethod
+                    )
+                }
+            } catch {
+                lastError = error
+            }
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        let detail = lastError.map { String(describing: $0) }
+            ?? "The restarted Host did not register protocol \(bundle.package)."
+        let recovery = changedBundle
+            ? await restoreDriverBundle(packageName: bundle.package, previous: previous)
+            : nil
+        throw DshApiError.host(
+            "driver-not-loaded",
+            detail + (recovery.map { " Automatic profile recovery also failed: \($0)" }
+                ?? (changedBundle ? " The previous Driver profile was restored." : ""))
+        )
+    }
+
+    /// Undo a failed Driver activation before returning control to the user.
+    /// Reinstalling the previous exact source or removing a first install keeps
+    /// the Profile from pointing at code that never registered successfully.
+    private func restoreDriverBundle(
+        packageName: String,
+        previous: OpenFishDriverBundle?
+    ) async -> String? {
+        do {
+            if let previous {
+                guard let installScriptsAllowed = previous.installScriptsAllowed else {
+                    return "the older Driver predates script-consent tracking; reinstall its exact source manually"
+                }
+                _ = try await OpenFishDriverManager.install(
+                    spec: previous.requested,
+                    expectedPackageName: packageName,
+                    allowScripts: installScriptsAllowed
+                )
+            } else {
+                _ = try await OpenFishDriverManager.remove(packageName: packageName)
+            }
+            guard OpenFishHostRuntime.restartManagedHost() else {
+                return "the verified embedded Host could not be restarted"
+            }
+            return nil
+        } catch {
+            return String(describing: error)
+        }
+    }
+
     func saveCustomHarness(
         id: String, name: String, version: String, description: String, publisher: String,
         license: String, repository: String, protocolName: String,
+        driverPackage: String, driverSpec: String, driverRequiresInstallScripts: Bool,
         distributionKind: String, packageOrCommand: String, arguments: [String],
         distributionEnvironment: String,
         binaryCommand: String, sha256: String, graphLevel: String,
         graphBoundary: String, graphEvidenceSource: String,
         authMethodId: String, authMethodName: String, authKind: String,
         authFieldRef: String, authFieldName: String, authFieldEnv: String,
+        authAccountLabel: String, authBilling: String, authAccountDetail: String,
+        agentAuthMetaKey: String, agentAuthFieldProperty: String,
+        modelOwner: String, modelConfigurationRequired: Bool, modelConfigurationDetail: String,
         terminalAuthArguments: String, terminalAuthEnvironment: String,
-        nodes: [HarnessGraphNode], edges: [HarnessGraphEdge], positions: [String: CGPoint]
+        nodes: [HarnessGraphNode], edges: [HarnessGraphEdge], positions: [String: CGPoint],
+        existingPack: HarnessCatalogEntry? = nil
     ) async -> Bool {
         func environment(_ source: String) -> [String: JSONValue] {
             source.split(whereSeparator: \.isNewline).reduce(into: [:]) { result, line in
@@ -1235,6 +1817,39 @@ final class OpenCodexStore: ObservableObject {
                 guard parts.count == 2, !parts[0].isEmpty else { return }
                 result[parts[0]] = .string(parts[1])
             }
+        }
+        func encodedAuthMethod(_ method: HarnessCatalogEntry.Authentication.Method) -> JSONValue {
+            var value: [String: JSONValue] = [
+                "id": .string(method.id), "name": .string(method.name), "kind": .string(method.kind),
+                "fields": .array(method.fields.map { field in
+                    var item: [String: JSONValue] = [
+                        "ref": .string(field.ref), "name": .string(field.name),
+                        "required": .bool(field.required), "secret": .bool(field.secret),
+                    ]
+                    if let env = field.env { item["env"] = .string(env) }
+                    if let placeholder = field.placeholder { item["placeholder"] = .string(placeholder) }
+                    return .object(item)
+                }),
+            ]
+            if let account = method.account {
+                value["account"] = .object([
+                    "label": .string(account.label), "billing": .string(account.billing),
+                    "detail": .string(account.detail),
+                ])
+            }
+            if let agent = method.agent {
+                value["agent"] = .object([
+                    "metaKey": .string(agent.metaKey),
+                    "fieldMap": .object(agent.fieldMap.mapValues(JSONValue.string)),
+                ])
+            }
+            if let terminal = method.terminal {
+                value["terminal"] = .object([
+                    "args": .array(terminal.args.map(JSONValue.string)),
+                    "env": .object(terminal.env.mapValues(JSONValue.string)),
+                ])
+            }
+            return .object(value)
         }
         let launchEnvironment = JSONValue.object(environment(distributionEnvironment))
         let distribution: JSONValue
@@ -1253,15 +1868,50 @@ final class OpenCodexStore: ObservableObject {
         let graphNodes: [JSONValue] = nodes.map { node in
             let position = positions[node.id] ?? .zero
             var config = node.config ?? [:]
-            config["x"] = .number(position.x)
-            config["y"] = .number(position.y)
+            // v0 pre-alpha Packs stored editor layout in executable config.
+            // Migrate it out so Drivers see only fields they own.
+            config.removeValue(forKey: "x")
+            config.removeValue(forKey: "y")
             var value: [String: JSONValue] = [
                 "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
-                "config": .object(config),
+                "position": .object(["x": .number(position.x), "y": .number(position.y)]),
             ]
+            if !config.isEmpty { value["config"] = .object(config) }
             if let responsibility = node.responsibility, !responsibility.isEmpty { value["responsibility"] = .string(responsibility) }
             if let inputs = node.inputs { value["inputs"] = .array(inputs.map(JSONValue.string)) }
             if let outputs = node.outputs { value["outputs"] = .array(outputs.map(JSONValue.string)) }
+            if let ports = node.ports {
+                value["ports"] = .array(ports.map { port in
+                    var item: [String: JSONValue] = [
+                        "id": .string(port.id), "name": .string(port.name),
+                        "direction": .string(port.direction), "dataType": .string(port.dataType),
+                    ]
+                    if let required = port.required { item["required"] = .bool(required) }
+                    return .object(item)
+                })
+            }
+            if let observes = node.observes { value["observes"] = .array(observes.map(JSONValue.string)) }
+            if let schema = node.configSchema {
+                value["configSchema"] = .object([
+                    "version": .number(Double(schema.version)),
+                    "fields": .array(schema.fields.map { field in
+                        var item: [String: JSONValue] = [
+                            "id": .string(field.id), "name": .string(field.name), "type": .string(field.type),
+                            "required": .bool(field.required),
+                            "binding": .object(["kind": .string(field.binding.kind), "target": .string(field.binding.target)]),
+                        ]
+                        if let description = field.description { item["description"] = .string(description) }
+                        if let choices = field.choices {
+                            item["choices"] = .array(choices.map { choice in
+                                var choiceValue: [String: JSONValue] = ["id": .string(choice.id), "name": .string(choice.name)]
+                                if let description = choice.description { choiceValue["description"] = .string(description) }
+                                return .object(choiceValue)
+                            })
+                        }
+                        return .object(item)
+                    }),
+                ])
+            }
             let evidence = graphLevel == "opaque"
                 ? (node.evidence ?? [])
                 : [HarnessGraphEvidence(kind: "declared", source: graphEvidenceSource, version: version)]
@@ -1274,7 +1924,14 @@ final class OpenCodexStore: ObservableObject {
             }
             return .object(value)
         }
-        let graphEdges: [JSONValue] = edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }
+        let graphEdges: [JSONValue] = edges.map { edge in
+            var value: [String: JSONValue] = ["from": .string(edge.from), "to": .string(edge.to)]
+            if let fromPort = edge.fromPort { value["fromPort"] = .string(fromPort) }
+            if let toPort = edge.toPort { value["toPort"] = .string(toPort) }
+            if let label = edge.label, !label.isEmpty { value["label"] = .string(label) }
+            if let observes = edge.observes { value["observes"] = .array(observes.map(JSONValue.string)) }
+            return .object(value)
+        }
         var graphObject: [String: JSONValue] = [
             "level": .string(graphLevel), "manifestVersion": .number(1), "nodes": .array(graphNodes), "edges": .array(graphEdges),
         ]
@@ -1292,25 +1949,96 @@ final class OpenCodexStore: ObservableObject {
         if !description.isEmpty { packObject["description"] = .string(description) }
         if !license.isEmpty { packObject["license"] = .string(license) }
         if !repository.isEmpty { packObject["repository"] = .string(repository) }
+        if let icon = existingPack?.icon { packObject["icon"] = .string(icon) }
+        if !driverPackage.isEmpty || !driverSpec.isEmpty {
+            packObject["driverBundle"] = .object([
+                "apiVersion": .number(1), "package": .string(driverPackage), "spec": .string(driverSpec),
+                "requiresInstallScripts": .bool(driverRequiresInstallScripts),
+            ])
+        }
+        if !authAccountLabel.isEmpty, !authAccountDetail.isEmpty {
+            packObject["account"] = .object([
+                "label": .string(authAccountLabel), "billing": .string(authBilling),
+                "detail": .string(authAccountDetail),
+            ])
+        }
+        if !modelConfigurationDetail.isEmpty {
+            packObject["modelConfiguration"] = .object([
+                "owner": .string(modelOwner), "required": .bool(modelConfigurationRequired),
+                "detail": .string(modelConfigurationDetail),
+            ])
+        }
         if !authMethodId.isEmpty {
-            var fields: [JSONValue] = []
-            if authKind == "environment", !authFieldRef.isEmpty {
-                fields = [.object([
+            let existingPrimary = existingPack?.auth.methods.first
+            let editsExistingPrimary = existingPrimary?.id == authMethodId && existingPrimary?.kind == authKind
+            var fields: [JSONValue] = editsExistingPrimary
+                ? (existingPrimary?.fields.map { field in
+                    var item: [String: JSONValue] = [
+                        "ref": .string(field.ref), "name": .string(field.name),
+                        "required": .bool(field.required), "secret": .bool(field.secret),
+                    ]
+                    if let env = field.env { item["env"] = .string(env) }
+                    if let placeholder = field.placeholder { item["placeholder"] = .string(placeholder) }
+                    return .object(item)
+                } ?? [])
+                : []
+            if ["environment", "agent"].contains(authKind) {
+                // The visual form edits the first credential while preserving
+                // every additional credential declared by an imported Pack.
+                // Remove the old first field before inserting its edited form;
+                // otherwise changing a reference silently creates a second
+                // credential and leaves stale ACP field-map entries behind.
+                if editsExistingPrimary, let priorRef = existingPrimary?.fields.first?.ref {
+                    fields.removeAll { $0["ref"]?.stringValue == priorRef }
+                }
+                fields.removeAll { $0["ref"]?.stringValue == authFieldRef }
+            }
+            if ["environment", "agent"].contains(authKind), !authFieldRef.isEmpty {
+                var field: [String: JSONValue] = [
                     "ref": .string(authFieldRef), "name": .string(authFieldName.isEmpty ? authFieldRef : authFieldName),
-                    "env": .string(authFieldEnv.isEmpty ? authFieldRef : authFieldEnv), "required": .bool(true), "secret": .bool(true),
-                ])]
+                    "required": .bool(true), "secret": .bool(true),
+                ]
+                if authKind == "environment" {
+                    field["env"] = .string(authFieldEnv.isEmpty ? authFieldRef : authFieldEnv)
+                }
+                fields.insert(.object(field), at: 0)
             }
             var auth: [String: JSONValue] = [
                 "id": .string(authMethodId), "name": .string(authMethodName.isEmpty ? authMethodId : authMethodName),
                 "kind": .string(authKind), "fields": .array(fields),
             ]
+            if !authAccountLabel.isEmpty, !authAccountDetail.isEmpty {
+                auth["account"] = .object([
+                    "label": .string(authAccountLabel), "billing": .string(authBilling),
+                    "detail": .string(authAccountDetail),
+                ])
+            }
+            if authKind == "agent", !agentAuthMetaKey.isEmpty, !agentAuthFieldProperty.isEmpty, !authFieldRef.isEmpty {
+                var fieldMap = editsExistingPrimary
+                    ? (existingPrimary?.agent?.fieldMap ?? [:]) : [:]
+                if let priorRef = existingPrimary?.fields.first?.ref, priorRef != authFieldRef {
+                    fieldMap.removeValue(forKey: priorRef)
+                }
+                fieldMap[authFieldRef] = agentAuthFieldProperty
+                auth["agent"] = .object([
+                    "metaKey": .string(agentAuthMetaKey),
+                    "fieldMap": .object(fieldMap.mapValues(JSONValue.string)),
+                ])
+            }
             if authKind == "terminal" {
                 let loginArgs = terminalAuthArguments.split(whereSeparator: \.isNewline).map { JSONValue.string(String($0)) }
                 auth["terminal"] = .object([
                     "args": .array(loginArgs), "env": .object(environment(terminalAuthEnvironment)),
                 ])
             }
-            packObject["authMethods"] = .array([.object(auth)])
+            let additionalMethods = existingPack?.auth.methods.dropFirst().map(encodedAuthMethod) ?? []
+            packObject["authMethods"] = .array([.object(auth)] + additionalMethods)
+        } else if let existingMethods = existingPack?.auth.methods, !existingMethods.isEmpty {
+            // An empty optional form must never erase authentication methods
+            // that the compact editor cannot display. Imported advanced Packs
+            // round-trip losslessly; deletion requires an explicit manifest
+            // import instead of an accidental empty text field.
+            packObject["authMethods"] = .array(existingMethods.map(encodedAuthMethod))
         }
         let pack: JSONValue = .object(packObject)
         do {
@@ -1337,9 +2065,27 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
-    func exportHarness(_ harness: HarnessCatalogEntry, to url: URL, forPublication: Bool = false) -> Bool {
+    func exportHarness(_ harness: HarnessCatalogEntry, to url: URL, forPublication: Bool = false) async -> Bool {
         guard let distribution = harness.distribution else {
             errorBanner = "\(harness.name) does not expose a portable distribution to export."
+            return false
+        }
+        if forPublication && harness.source != "user" {
+            errorBanner = "Only a local user-authored Pack can be submitted for community publication."
+            return false
+        }
+        if forPublication && !harness.driver.loaded {
+            errorBanner = "Load a \(harness.protocolName) Driver before preparing this Pack for publication."
+            return false
+        }
+        if forPublication && (harness.installation.status != "installed"
+            || harness.installation.installedVersion != harness.version) {
+            errorBanner = "Install this exact Pack version before preparing a community submission."
+            return false
+        }
+        if forPublication && harness.compatibility.status != "ready"
+            && harness.compatibility.status != "compatible" {
+            errorBanner = "Run the prompt-free live preflight successfully before preparing a community submission. The provider may still create session state or charge a setup cost."
             return false
         }
         if forPublication && distribution.kind == "executable" {
@@ -1375,9 +2121,44 @@ final class OpenCodexStore: ObservableObject {
                 var value: [String: JSONValue] = [
                     "id": .string(node.id), "kind": .string(node.kind), "title": .string(node.title), "editable": .bool(node.editable),
                 ]
+                if let position = node.position {
+                    value["position"] = .object(["x": .number(position.x), "y": .number(position.y)])
+                }
                 if let responsibility = node.responsibility { value["responsibility"] = .string(responsibility) }
                 if let inputs = node.inputs { value["inputs"] = .array(inputs.map(JSONValue.string)) }
                 if let outputs = node.outputs { value["outputs"] = .array(outputs.map(JSONValue.string)) }
+                if let ports = node.ports {
+                    value["ports"] = .array(ports.map { port in
+                        var item: [String: JSONValue] = [
+                            "id": .string(port.id), "name": .string(port.name),
+                            "direction": .string(port.direction), "dataType": .string(port.dataType),
+                        ]
+                        if let required = port.required { item["required"] = .bool(required) }
+                        return .object(item)
+                    })
+                }
+                if let observes = node.observes { value["observes"] = .array(observes.map(JSONValue.string)) }
+                if let schema = node.configSchema {
+                    value["configSchema"] = .object([
+                        "version": .number(Double(schema.version)),
+                        "fields": .array(schema.fields.map { field in
+                            var item: [String: JSONValue] = [
+                                "id": .string(field.id), "name": .string(field.name), "type": .string(field.type),
+                                "required": .bool(field.required),
+                                "binding": .object(["kind": .string(field.binding.kind), "target": .string(field.binding.target)]),
+                            ]
+                            if let description = field.description { item["description"] = .string(description) }
+                            if let choices = field.choices {
+                                item["choices"] = .array(choices.map { choice in
+                                    var choiceValue: [String: JSONValue] = ["id": .string(choice.id), "name": .string(choice.name)]
+                                    if let description = choice.description { choiceValue["description"] = .string(description) }
+                                    return .object(choiceValue)
+                                })
+                            }
+                            return .object(item)
+                        }),
+                    ])
+                }
                 if let evidence = node.evidence {
                     value["evidence"] = .array(evidence.map { item in
                         var evidenceValue: [String: JSONValue] = ["kind": .string(item.kind), "source": .string(item.source)]
@@ -1388,7 +2169,14 @@ final class OpenCodexStore: ObservableObject {
                 if let config = node.config { value["config"] = .object(config) }
                 return .object(value)
             }),
-            "edges": .array(harness.graph.edges.map { .object(["from": .string($0.from), "to": .string($0.to)]) }),
+            "edges": .array(harness.graph.edges.map { edge in
+                var value: [String: JSONValue] = ["from": .string(edge.from), "to": .string(edge.to)]
+                if let fromPort = edge.fromPort { value["fromPort"] = .string(fromPort) }
+                if let toPort = edge.toPort { value["toPort"] = .string(toPort) }
+                if let label = edge.label { value["label"] = .string(label) }
+                if let observes = edge.observes { value["observes"] = .array(observes.map(JSONValue.string)) }
+                return .object(value)
+            }),
         ]
         if let manifestVersion = harness.graph.manifestVersion { graphObject["manifestVersion"] = .number(Double(manifestVersion)) }
         if let boundary = harness.graph.boundary { graphObject["boundary"] = .string(boundary) }
@@ -1401,16 +2189,36 @@ final class OpenCodexStore: ObservableObject {
         }
 
         var pack: [String: JSONValue] = [
-            "$schema": .string("https://openfish.dev/schemas/harness-pack-v0.json"),
+            "$schema": .string("https://raw.githubusercontent.com/Yusong-Enceladus/OpenFish/main/packages/harness/harness/schema/harness-pack-v0.schema.json"),
             "schemaVersion": .number(0), "id": .string(harness.id), "name": .string(harness.name),
             "version": .string(harness.version), "publisher": .string(harness.publisher),
-            "verified": .bool(false), "protocol": .string(harness.protocolName), "source": .string("user"),
+            "verified": .bool(false), "protocol": .string(harness.protocolName),
+            "source": .string(forPublication ? "openfish-community" : "user"),
             "distribution": .object(distributionObject),
             "graph": .object(graphObject),
         ]
         if let description = harness.description { pack["description"] = .string(description) }
         if let license = harness.license { pack["license"] = .string(license) }
         if let repository = harness.repository { pack["repository"] = .string(repository) }
+        if let account = harness.account {
+            pack["account"] = .object([
+                "label": .string(account.label), "billing": .string(account.billing),
+                "detail": .string(account.detail),
+            ])
+        }
+        if let modelConfiguration = harness.modelConfiguration {
+            pack["modelConfiguration"] = .object([
+                "owner": .string(modelConfiguration.owner), "required": .bool(modelConfiguration.required),
+                "detail": .string(modelConfiguration.detail),
+            ])
+        }
+        if let driverBundle = harness.driverBundle {
+            pack["driverBundle"] = .object([
+                "apiVersion": .number(Double(driverBundle.apiVersion)),
+                "package": .string(driverBundle.package), "spec": .string(driverBundle.spec),
+                "requiresInstallScripts": .bool(driverBundle.requiresInstallScripts),
+            ])
+        }
         if !harness.auth.methods.isEmpty {
             pack["authMethods"] = .array(harness.auth.methods.map { method in
                 var value: [String: JSONValue] = [
@@ -1431,13 +2239,101 @@ final class OpenCodexStore: ObservableObject {
                         "env": .object(terminal.env.mapValues(JSONValue.string)),
                     ])
                 }
+                if let agent = method.agent {
+                    value["agent"] = .object([
+                        "metaKey": .string(agent.metaKey),
+                        "fieldMap": .object(agent.fieldMap.mapValues(JSONValue.string)),
+                    ])
+                }
+                if let account = method.account {
+                    value["account"] = .object([
+                        "label": .string(account.label), "billing": .string(account.billing),
+                        "detail": .string(account.detail),
+                    ])
+                }
                 return .object(value)
             })
         }
         do {
+            if forPublication {
+                _ = try await api.mutateHarness(action: "validate-publication", pack: .object(pack))
+            }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             try encoder.encode(JSONValue.object(pack)).write(to: url, options: .atomic)
+            if forPublication {
+                #if arch(arm64)
+                let architecture = "arm64"
+                #elseif arch(x86_64)
+                let architecture = "x86_64"
+                #else
+                let architecture = "unknown"
+                #endif
+                let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+                let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
+                let capabilityRows = harness.capabilities.map { capability in
+                    JSONValue.object([
+                        "id": .string(capability.id), "status": .string(capability.status),
+                        "source": .string(capability.source),
+                        "detail": capability.detail.map(JSONValue.string) ?? .null,
+                    ])
+                }
+                let report: JSONValue = .object([
+                    "schemaVersion": .number(0),
+                    "generatedAt": .string(ISO8601DateFormatter().string(from: Date())),
+                    "openFish": .object(["version": .string(appVersion), "build": .string(appBuild)]),
+                    "platform": .object([
+                        "os": .string("macOS"),
+                        "version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
+                        "architecture": .string(architecture),
+                    ]),
+                    "harness": .object([
+                        "id": .string(harness.id), "version": .string(harness.version),
+                        "protocol": .string(harness.protocolName), "publisher": .string(harness.publisher),
+                    ]),
+                    "driver": .object([
+                        "apiVersion": .number(Double(harness.driver.apiVersion)),
+                        "protocol": .string(harness.driver.`protocol`), "loaded": .bool(harness.driver.loaded),
+                    ]),
+                    "installationIntegrity": .object([
+                        "status": .string(harness.installation.integrity.status),
+                        "source": .string(harness.installation.integrity.source),
+                        "detail": .string(harness.installation.integrity.detail),
+                    ]),
+                    "authenticationMethod": harness.auth.selectedMethod.map(JSONValue.string) ?? .null,
+                    "workspaceModes": .array(harness.capabilities.compactMap { capability in
+                        guard capability.status != "unsupported", ["workspace.project", "workspace.no-project"].contains(capability.id) else { return nil }
+                        return JSONValue.string(capability.id)
+                    }),
+                    "compatibility": .object([
+                        "status": .string(harness.compatibility.status),
+                        "checkedAt": harness.compatibility.checkedAt.map(JSONValue.string) ?? .null,
+                        "message": harness.compatibility.message.map(JSONValue.string) ?? .null,
+                    ]),
+                    "capabilities": .array(capabilityRows),
+                    "privacy": .object([
+                        "credentialValuesIncluded": .bool(false),
+                        "hostIdentityIncluded": .bool(false),
+                        "conversationContentIncluded": .bool(false),
+                    ]),
+                ])
+                let reportURL = url.deletingLastPathComponent().appendingPathComponent("\(harness.id).compatibility.json")
+                try encoder.encode(report).write(to: reportURL, options: .atomic)
+                let instructions = """
+                # OpenFish Harness submission: \(harness.id) \(harness.version)
+
+                Generated locally by OpenFish after public-manifest and Driver conformance validation.
+
+                1. Upload `\(url.lastPathComponent)` to `community/harnesses/packs/` in a fork of OpenFish.
+                2. Include `\(reportURL.lastPathComponent)` in the pull request description or as an attachment after reviewing it.
+                3. Run `pnpm run gen-openfish-community-catalog` and `pnpm run test:harness-contract`.
+                4. Open a pull request. Catalog discovery begins only after repository review and merge.
+
+                Community inclusion proves discoverability, not publisher trust or code safety.
+                """
+                let instructionsURL = url.deletingLastPathComponent().appendingPathComponent("\(harness.id).submission.md")
+                try Data(instructions.utf8).write(to: instructionsURL, options: .atomic)
+            }
             errorBanner = nil
             return true
         } catch {
@@ -1555,6 +2451,10 @@ final class OpenCodexStore: ObservableObject {
 
     func forkCurrentSession(atSeq: Int? = nil) async {
         guard let selectedSessionId else { return }
+        guard harnessCan("session.fork") else {
+            errorBanner = "\(currentHarness?.name ?? "This Harness") does not expose a real session fork. Start a new task so its remote history is not misrepresented."
+            return
+        }
         do {
             let child = try await api.forkSession(selectedSessionId, atSeq: atSeq)
             await refreshSessions()
@@ -1602,6 +2502,10 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func addImages(_ urls: [URL]) async {
+        guard canAttachImages else {
+            errorBanner = "\(currentHarness?.name ?? "This Harness") does not advertise image input through its current Driver."
+            return
+        }
         let existingBytes = pendingImages.reduce(0) { $0 + $1.byteCount }
         let limits = imageLimits
         if pendingImages.count + urls.count > limits.maxCount {
@@ -1666,6 +2570,10 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func answer(_ question: PendingQuestion, selections: [String: [String]], custom: [String: String]) async {
+        if isDemoMode {
+            pendingQuestions[question.rpcId] = nil
+            return
+        }
         let answers = question.questions.map { item in
             QuestionAnswerItem(
                 id: item.id,
@@ -1785,7 +2693,8 @@ final class OpenCodexStore: ObservableObject {
             plugins = pluginsValue
             let bootstrap = DshBootstrapClient(
                 baseURL: connectionProfile.baseURL,
-                bearerToken: connectionProfile.bearerToken
+                bearerToken: connectionProfile.bearerToken,
+                tlsFingerprint: connectionProfile.tlsFingerprint
             )
             pairedDevices = (try? await bootstrap.devices()) ?? []
             errorBanner = nil
@@ -1846,7 +2755,8 @@ final class OpenCodexStore: ObservableObject {
         do {
             let bootstrap = DshBootstrapClient(
                 baseURL: connectionProfile.baseURL,
-                bearerToken: connectionProfile.bearerToken
+                bearerToken: connectionProfile.bearerToken,
+                tlsFingerprint: connectionProfile.tlsFingerprint
             )
             pairingCode = try await bootstrap.createPairingCode()
             errorBanner = nil
@@ -1859,7 +2769,8 @@ final class OpenCodexStore: ObservableObject {
         do {
             let bootstrap = DshBootstrapClient(
                 baseURL: connectionProfile.baseURL,
-                bearerToken: connectionProfile.bearerToken
+                bearerToken: connectionProfile.bearerToken,
+                tlsFingerprint: connectionProfile.tlsFingerprint
             )
             _ = try await bootstrap.revoke(deviceId: device.deviceId)
             pairedDevices.removeAll { $0.deviceId == device.deviceId }
@@ -1947,7 +2858,10 @@ final class OpenCodexStore: ObservableObject {
         }
         let members: [SessionSummary]
         if let workspace {
-            let byId = Dictionary(uniqueKeysWithValues: visible.map { ($0.sessionId, $0) })
+            let byId = visible.reduce(into: [String: SessionSummary]()) { result, session in
+                if let current = result[session.sessionId], current.updatedAt > session.updatedAt { return }
+                result[session.sessionId] = session
+            }
             members = workspace.sessionIds.compactMap { byId[$0] }.sorted(by: sessionRecency)
         } else {
             let accounted = Set(workspaces.flatMap(\.sessionIds))
@@ -2033,6 +2947,10 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func toggleDictation() async {
+        guard !isDemoMode else {
+            errorBanner = "Microphone access is disabled in the network-isolated Demo State."
+            return
+        }
         let prefix = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         await voice.toggleListening { [weak self] transcript, _ in
             guard let self else { return }
@@ -2046,8 +2964,20 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func startVoiceConversation() async {
+        guard canStartNewTask else { return }
+        guard !isDemoMode else {
+            errorBanner = "Microphone access is disabled in the network-isolated Demo State."
+            return
+        }
         guard activeSubagent == nil else {
-            errorBanner = "Voice conversation is available on the parent DSH task."
+            errorBanner = "Voice conversation is available on the parent task."
+            return
+        }
+        guard sessionModels?.routable == true else {
+            errorBanner = sessionModels == nil
+                ? "OpenFish is still checking this Harness's model and account."
+                : "Choose a configured model before starting voice conversation."
+            isModelBrowserPresented = true
             return
         }
         isVoiceConversationPresented = true
@@ -2078,7 +3008,7 @@ final class OpenCodexStore: ObservableObject {
         await voice.startListening { [weak self] transcript, isFinal in
             guard let self, self.isVoiceConversationPresented else { return }
             self.voiceConversationTranscript = transcript
-            self.voiceConversationStatus = isFinal ? "Sending to DSH" : "Listening"
+            self.voiceConversationStatus = isFinal ? "Sending to the selected Harness" : "Listening"
             if isFinal {
                 Task { @MainActor [weak self] in
                     await self?.submitVoiceTranscript(transcript)
@@ -2101,12 +3031,33 @@ final class OpenCodexStore: ObservableObject {
             voiceConversationStatus = "Choose a default Harness first"
             return
         }
+        let firstTurnHarnessId = draftHarnessId ?? selectedHarnessId
+        var firstTurnSessionId: String?
         do {
             let sessionId: String
             if let selectedSessionId {
                 sessionId = selectedSessionId
+            } else if let draftSessionId {
+                sessionId = draftSessionId
+                firstTurnSessionId = sessionId
+                self.draftSessionId = nil
+                self.draftHarnessId = nil
+                self.selectedSessionId = sessionId
+                UserDefaults.standard.set(sessionId, forKey: "OpenCodex.lastSessionId")
             } else {
-                sessionId = try await api.createSession(workspaceId: selectedWorkspaceId, harnessId: draftHarnessId ?? selectedHarnessId)
+                let requestedSessionId = UUID().uuidString.lowercased()
+                sessionId = try await api.createSession(
+                    workspaceId: selectedWorkspaceId,
+                    harnessId: draftHarnessId ?? selectedHarnessId,
+                    sessionId: requestedSessionId
+                )
+                guard sessionId == requestedSessionId else {
+                    throw DshApiError.host(
+                        "session-identity-mismatch",
+                        "The Host returned a different id for the voice task."
+                    )
+                }
+                firstTurnSessionId = sessionId
                 self.selectedSessionId = sessionId
                 UserDefaults.standard.set(sessionId, forKey: "OpenCodex.lastSessionId")
                 await refreshSessions()
@@ -2123,6 +3074,12 @@ final class OpenCodexStore: ObservableObject {
             )
             errorBanner = nil
         } catch {
+            if let firstTurnSessionId {
+                await reconcileFailedFirstTurn(
+                    sessionId: firstTurnSessionId,
+                    harnessId: firstTurnHarnessId
+                )
+            }
             voiceConversationStatus = "Could not send"
             errorBanner = "Could not send the voice transcript: \(error)"
             try? await Task.sleep(for: .milliseconds(800))
@@ -2162,7 +3119,8 @@ final class OpenCodexStore: ObservableObject {
         do {
             let bootstrap = DshBootstrapClient(
                 baseURL: connectionProfile.baseURL,
-                bearerToken: connectionProfile.bearerToken
+                bearerToken: connectionProfile.bearerToken,
+                tlsFingerprint: connectionProfile.tlsFingerprint
             )
             async let handshake = bootstrap.handshake()
             async let capabilities = bootstrap.capabilities()
@@ -2203,7 +3161,7 @@ final class OpenCodexStore: ObservableObject {
                   }) == true else {
                 throw DshApiError.host(
                     "native-capability-incompatible",
-                    "This DSH Host is missing the OpenFish macOS or local-voice composition."
+                    "This OpenFish Host is missing the macOS or local-voice composition."
                 )
             }
             guard !Task.isCancelled else { return }
@@ -2215,17 +3173,20 @@ final class OpenCodexStore: ObservableObject {
             mergeSessionBaseline(sessionSnapshot)
             hasBaseline = true
             finishBaselineSynchronization()
+            hostIssue = nil
             errorBanner = nil
             agentPresets = try? await api.agentPresets()
             harnesses = (try? await api.harnesses()) ?? harnesses
-            if let sharedDefault = harnesses.first(where: { $0.isDefault }) {
+            if let sharedDefault = harnesses.first(where: { $0.isDefault && isRunnableDefault($0) }) {
                 selectedHarnessId = sharedDefault.id
                 UserDefaults.standard.set(sharedDefault.id, forKey: "OpenFish.defaultHarnessId")
                 needsHarnessOnboarding = false
             } else {
                 selectedHarnessId = ""
                 UserDefaults.standard.removeObject(forKey: "OpenFish.defaultHarnessId")
-                needsHarnessOnboarding = !harnesses.isEmpty
+                // An empty catalog may be a recoverable discovery failure. The
+                // onboarding surface owns refresh/retry and must stay visible.
+                needsHarnessOnboarding = true
             }
 
             if selectInitialSession {
@@ -2238,6 +3199,8 @@ final class OpenCodexStore: ObservableObject {
                     .first
                 if let candidate {
                     await selectSession(candidate.sessionId)
+                } else if await resumePreparedDraftIfPossible() {
+                    // The exact blank provider task survived the app restart.
                 } else {
                     beginNewTask(in: selectedWorkspaceId)
                 }
@@ -2245,14 +3208,29 @@ final class OpenCodexStore: ObservableObject {
                 async let history: Void = loadHistory(sessionId: selectedSessionId)
                 async let models: Void = loadModels(sessionId: selectedSessionId)
                 _ = await (history, models)
-            } else if draftSessionId == nil {
+            } else if !(await resumePreparedDraftIfPossible()) {
                 beginNewTask(in: selectedWorkspaceId)
             }
         } catch {
             guard !Task.isCancelled else { return }
             nativeCapabilities = nil
             finishBaselineSynchronization()
-            errorBanner = "OpenFish could not reach the DSH Host at \(connectionProfile.baseURL.absoluteString). \(error)"
+            let incompatible: Bool
+            let detail: String
+            if case let DshApiError.host(code, message) = error {
+                incompatible = code == "native-protocol-incompatible" || code == "native-capability-incompatible"
+                detail = message
+            } else {
+                incompatible = false
+                detail = String(describing: error)
+            }
+            hostIssue = OpenFishHostIssue(
+                kind: incompatible ? .incompatible : .recoverable,
+                title: incompatible ? "This Host is not compatible" : "OpenFish could not finish connecting",
+                message: incompatible
+                    ? detail
+                    : "The Host at \(connectionProfile.baseURL.absoluteString) did not complete its baseline check. \(detail)"
+            )
         }
     }
 
@@ -2264,13 +3242,100 @@ final class OpenCodexStore: ObservableObject {
         }
     }
 
+    /// Reconcile a cached, client-owned draft against the authoritative Host.
+    /// If the create response was lost, retrying the preallocated id is
+    /// idempotent. If the first prompt committed before the cache did, promote
+    /// it to a normal selected task instead of hiding active work.
+    private func resumePreparedDraftIfPossible() async -> Bool {
+        guard selectedSessionId == nil,
+              let draftSessionId,
+              let harnessId = draftHarnessId,
+              !harnessId.isEmpty else { return false }
+
+        var summary = sessions.first(where: { $0.sessionId == draftSessionId })
+        if summary == nil {
+            do {
+                let recovered = try await api.createSession(
+                    workspaceId: selectedWorkspaceId,
+                    harnessId: harnessId,
+                    sessionId: draftSessionId
+                )
+                guard recovered == draftSessionId else {
+                    throw DshApiError.host(
+                        "session-identity-mismatch",
+                        "The Host returned a different id while recovering the prepared task."
+                    )
+                }
+                mergeSessionBaseline(try await api.sessions())
+                summary = sessions.first(where: { $0.sessionId == draftSessionId })
+            } catch {
+                sessionModels = nil
+                isLoadingSessionModels = false
+                sessionModelsError = String(describing: error)
+                errorBanner = "Could not recover the prepared task: \(error)"
+                scheduleProjectionCache()
+                // Keep the exact identity for an explicit retry or a later
+                // reconnect; replacing it would recreate the orphan risk.
+                return true
+            }
+        }
+
+        guard let summary,
+              summary.origin != "subagent",
+              !archivedSessionIds.contains(summary.sessionId) else {
+            self.draftSessionId = nil
+            draftHarnessId = nil
+            scheduleProjectionCache()
+            return false
+        }
+        if !summary.blank {
+            self.draftSessionId = nil
+            draftHarnessId = nil
+            await selectSession(summary.sessionId)
+            return true
+        }
+
+        selectedWorkspaceId = workspaces.first(where: { $0.sessionIds.contains(summary.sessionId) })?.workspaceId
+        draftHarnessId = summary.harnessId ?? harnessId
+        sessionModels = nil
+        sessionModelsError = nil
+        isLoadingSessionModels = true
+        async let history: Void = loadHistory(sessionId: summary.sessionId)
+        async let models: Void = loadModels(sessionId: summary.sessionId)
+        async let capabilities: Void = loadSessionCapabilities(sessionId: summary.sessionId)
+        _ = await (history, models, capabilities)
+        scheduleProjectionCache()
+        return true
+    }
+
     private func loadHistory(sessionId: String) async {
         do {
-            applyHistory(try await api.history(sessionId: sessionId), sessionId: sessionId)
-            errorBanner = nil
+            let history = try await api.history(sessionId: sessionId)
+            applyHistory(history, sessionId: sessionId)
+            if await resolveHarnessSnapshot(sessionId: sessionId, history: history) {
+                errorBanner = nil
+            }
         } catch {
             guard !Task.isCancelled, !isOpenFishCancellation(error) else { return }
             errorBanner = "Could not load this task: \(error)"
+        }
+    }
+
+    private func resolveHarnessSnapshot(sessionId: String, history: SessionHistory) async -> Bool {
+        let selected = history.events.last(where: { $0.event.type == "harness/selected" })?.event.data
+        let summary = sessions.first(where: { $0.sessionId == sessionId })
+        let harnessId = selected?["harnessId"]?.stringValue ?? summary?.harnessId ?? "dsh"
+        let version = selected?["version"]?.stringValue ?? summary?.harnessVersion
+        let authMethod = selected?["authMethod"]?.stringValue ?? summary?.harnessAuthMethod
+        do {
+            let resolved = try await api.resolveHarness(id: harnessId, version: version, authMethod: authMethod)
+            harnessesBySession[sessionId] = resolved
+            objectWillChange.send()
+            return true
+        } catch {
+            harnessesBySession[sessionId] = nil
+            errorBanner = "This task is pinned to a Harness setup that is not available: \(error)"
+            return false
         }
     }
 
@@ -2329,6 +3394,24 @@ final class OpenCodexStore: ObservableObject {
 
     private func handle(_ update: DshLiveUpdate) async {
         switch update {
+        case .authorizationRevoked:
+            let revokedHost = connectionProfile.baseURL
+            connectionProfile = connectionProfile.forgetAuthorization()
+            purgeHostProjection()
+            projectionCacheTask?.cancel()
+            await projectionCache.clear(matching: revokedHost)
+            connectionState = .reconnecting(attempt: 0)
+            hasBaseline = false
+            isSynchronizingBaseline = false
+            hostIssue = OpenFishHostIssue(
+                kind: .recoverable,
+                title: "This Mac was unpaired",
+                message: "The Host rejected the saved device authorization. Create a new one-time code on the Host and pair this Mac again."
+            )
+            syncTask?.cancel()
+            await connection.stop()
+            connectionTask?.cancel()
+            connectionTask = nil
         case let .state(state):
             connectionState = state
             if case .reconnecting = state, hasBaseline {
@@ -2439,7 +3522,9 @@ final class OpenCodexStore: ObservableObject {
             if selectedWorkspaceId == id { selectedWorkspaceId = nil }
         case "host/workspace-order-changed":
             guard let ids = frame["workspaceIds"]?.arrayValue?.compactMap(\.stringValue) else { return }
-            let byId = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.workspaceId, $0) })
+            let byId = workspaces.reduce(into: [String: WorkspaceView]()) { result, workspace in
+                result[workspace.workspaceId] = workspace
+            }
             workspaces = ids.compactMap { byId[$0] }
         case "host/archived-sessions-changed":
             archivedSessionIds = Set(frame["archivedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? [])
@@ -2541,6 +3626,9 @@ final class OpenCodexStore: ObservableObject {
             if let block = session.projections { seedProjections(sessionId: session.sessionId, block: block) }
         }
         sessions = incoming
+        if let selectedSessionId {
+            selectedWorkspaceId = workspaces.first(where: { $0.sessionIds.contains(selectedSessionId) })?.workspaceId
+        }
         updateIdleGuard()
         scheduleProjectionCache()
     }
@@ -2549,7 +3637,10 @@ final class OpenCodexStore: ObservableObject {
         _ lhs: [SessionEventRecord],
         _ rhs: [SessionEventRecord]
     ) -> [SessionEventRecord] {
-        var bySeq = Dictionary(uniqueKeysWithValues: lhs.map { ($0.event.seq, $0) })
+        var bySeq = lhs.reduce(into: [Int: SessionEventRecord]()) { result, record in
+            if let existing = result[record.event.seq], record.view == nil, existing.view != nil { return }
+            result[record.event.seq] = record
+        }
         for record in rhs {
             if let existing = bySeq[record.event.seq], record.view == nil, existing.view != nil {
                 continue
@@ -2599,6 +3690,65 @@ final class OpenCodexStore: ObservableObject {
         selectedSessionId = snapshot.selectedSessionId.flatMap { id in
             sessions.contains(where: { $0.sessionId == id }) ? id : nil
         }
+        if selectedSessionId == nil,
+           let cachedDraft = snapshot.draftSessionId,
+           let harnessId = snapshot.draftHarnessId
+               ?? sessions.first(where: { $0.sessionId == cachedDraft })?.harnessId,
+           !harnessId.isEmpty {
+            draftSessionId = cachedDraft
+            draftHarnessId = harnessId
+        } else {
+            draftSessionId = nil
+            draftHarnessId = nil
+        }
+        if let selectedSessionId {
+            selectedWorkspaceId = workspaces.first(where: { $0.sessionIds.contains(selectedSessionId) })?.workspaceId
+        }
+        objectWillChange.send()
+    }
+
+    /// Remote revocation is also a local privacy boundary. Cached Host data is
+    /// useful during an ordinary outage, but it must not remain readable after
+    /// that Host explicitly removes this device's authorization.
+    private func purgeHostProjection() {
+        workspaces = []
+        sessions = []
+        archivedSessionIds = []
+        recordsBySession = [:]
+        historyHasMoreBySession = [:]
+        projectionsBySession = [:]
+        harnessesBySession = [:]
+        pendingApprovals = [:]
+        pendingQuestions = [:]
+        queuedItems = [:]
+        backgroundJobs = [:]
+        searchResults = []
+        skills = []
+        commands = []
+        subagents = []
+        harnesses = []
+        providers = []
+        plugins = []
+        pairedDevices = []
+        pairingCode = nil
+        nativeCapabilities = nil
+        hostDescription = nil
+        settingsCatalog = nil
+        agentPresets = nil
+        hostModels = HostModelCatalog(groups: [], failures: [])
+        directoryListing = nil
+        sessionModels = nil
+        sessionModelsError = nil
+        attachmentData = [:]
+        failedAttachmentKeys = []
+        pendingImages = []
+        draft = ""
+        draftSessionId = nil
+        draftHarnessId = nil
+        selectedSessionId = nil
+        selectedWorkspaceId = nil
+        activeSubagent = nil
+        UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
         objectWillChange.send()
     }
 
@@ -2615,7 +3765,7 @@ final class OpenCodexStore: ObservableObject {
 
     private func projectionCacheSnapshot() -> MacProjectionSnapshot {
         var retained = Array(sessions.sorted(by: sessionRecency).prefix(24))
-        let requiredIds = Set([selectedSessionId, conversationSessionId].compactMap { $0 })
+        let requiredIds = Set([selectedSessionId, conversationSessionId, draftSessionId].compactMap { $0 })
         for id in requiredIds where !retained.contains(where: { $0.sessionId == id }) {
             if let session = sessions.first(where: { $0.sessionId == id }) {
                 if retained.count == 24 { retained.removeLast() }
@@ -2631,7 +3781,7 @@ final class OpenCodexStore: ObservableObject {
         let history = historyHasMoreBySession.filter { retainedIds.contains($0.key) }
         let projections = projectionsBySession.filter { retainedIds.contains($0.key) }
         return MacProjectionSnapshot(
-            version: 1,
+            version: 2,
             host: connectionProfile.baseURL.absoluteString,
             savedAt: Date(),
             workspaces: workspaces,
@@ -2641,7 +3791,9 @@ final class OpenCodexStore: ObservableObject {
             historyHasMoreBySession: history,
             projectionsBySession: projections,
             selectedWorkspaceId: selectedWorkspaceId,
-            selectedSessionId: selectedSessionId
+            selectedSessionId: selectedSessionId,
+            draftSessionId: draftSessionId,
+            draftHarnessId: draftHarnessId
         )
     }
 

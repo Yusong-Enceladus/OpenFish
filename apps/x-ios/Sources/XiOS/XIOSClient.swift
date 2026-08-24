@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Security
 
 enum MobileJSONValue: Codable, Equatable, Sendable {
     case object([String: MobileJSONValue])
@@ -78,6 +80,10 @@ struct MobileDirectoryListing: Codable, Equatable, Sendable {
 struct MobileSession: Codable, Identifiable, Equatable, Sendable {
     let sessionId: String
     let harnessId: String
+    var harnessVersion: String? = nil
+    var harnessAuthMethod: String? = nil
+    var workspaceMode: String? = nil
+    var harnessCapabilities: [String]? = nil
     var updatedAt: Double
     var running: Bool
     var blank: Bool
@@ -96,9 +102,16 @@ struct MobileProjectionBlock: Codable, Equatable, Sendable {
 
 struct MobileHarnessRuntimeProjection: Codable, Equatable, Sendable {
     struct Node: Codable, Equatable, Sendable {
-        let status: String; let activity: String; let seq: Int; let time: Double
+        let status: String; let activity: String; var signal: String? = nil; let seq: Int; let time: Double
     }
+    struct Edge: Codable, Equatable, Sendable {
+        let from: String; let to: String; var fromPort: String? = nil; var toPort: String? = nil
+        let status: String; let activity: String; let signal: String; let seq: Int; let time: Double
+    }
+    var harnessId: String? = nil
+    var version: String? = nil
     let nodes: [String: Node]
+    var edges: [String: Edge]? = nil
 }
 
 struct MobileSessionEvent: Codable, Identifiable, Equatable, Sendable {
@@ -145,6 +158,8 @@ struct MobileCatalogModel: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let description: String?
+    let providerId: String?
+    let providerName: String?
     let reasoning: MobileModelReasoning?
 }
 
@@ -183,6 +198,7 @@ struct MobileSessionModels: Decodable, Equatable, Sendable {
     let routable: Bool
     let groups: [MobileModelGroup]
     let failures: [MobileModelFailure]
+    let account: MobileHarness.AccountDescriptor?
     let harnessOptions: [MobileHarnessConfigOption]?
 
     init(
@@ -190,12 +206,14 @@ struct MobileSessionModels: Decodable, Equatable, Sendable {
         routable: Bool,
         groups: [MobileModelGroup],
         failures: [MobileModelFailure],
+        account: MobileHarness.AccountDescriptor? = nil,
         harnessOptions: [MobileHarnessConfigOption]? = nil
     ) {
         self.current = current
         self.routable = routable
         self.groups = groups
         self.failures = failures
+        self.account = account
         self.harnessOptions = harnessOptions
     }
 }
@@ -228,31 +246,61 @@ struct MobileAgentPresetCatalog: Decodable, Equatable, Sendable {
 }
 
 struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
+    struct DriverBundle: Decodable, Equatable, Sendable {
+        let apiVersion: Int; let package: String; let spec: String; let requiresInstallScripts: Bool
+    }
+    struct AccountDescriptor: Decodable, Equatable, Sendable {
+        let label: String; let billing: String; let detail: String
+    }
+    struct ModelConfiguration: Decodable, Equatable, Sendable {
+        let owner: String; let required: Bool; let detail: String
+    }
     struct Capability: Decodable, Identifiable, Equatable, Sendable {
         let id: String; let status: String; let source: String; let detail: String?
     }
     struct Driver: Decodable, Equatable, Sendable {
-        let apiVersion: Int; let `protocol`: String; let loaded: Bool
+        let apiVersion: Int; let `protocol`: String; let loaded: Bool; let authorization: String
     }
     struct GraphEvidence: Decodable, Identifiable, Equatable, Sendable {
         let kind: String; let source: String; let version: String?
         var id: String { "\(kind):\(source):\(version ?? "")" }
     }
     struct GraphNode: Decodable, Identifiable, Equatable, Sendable {
+        struct Position: Decodable, Equatable, Sendable { let x: Double; let y: Double }
+        struct Port: Decodable, Identifiable, Equatable, Sendable {
+            let id: String; let name: String; let direction: String; let dataType: String; var required: Bool? = nil
+        }
+        struct ConfigChoice: Decodable, Identifiable, Equatable, Sendable {
+            let id: String; let name: String; var description: String? = nil
+        }
+        struct ConfigField: Decodable, Identifiable, Equatable, Sendable {
+            struct Binding: Decodable, Equatable, Sendable { let kind: String; let target: String }
+            let id: String; let name: String; var description: String? = nil; let type: String; let required: Bool
+            var choices: [ConfigChoice]? = nil; let binding: Binding
+        }
+        struct ConfigSchema: Decodable, Equatable, Sendable { let version: Int; let fields: [ConfigField] }
         let id: String; let kind: String; let title: String; let editable: Bool
         var responsibility: String? = nil; var inputs: [String]? = nil; var outputs: [String]? = nil
-        var evidence: [GraphEvidence]? = nil; let config: [String: MobileJSONValue]?
+        var ports: [Port]? = nil; var evidence: [GraphEvidence]? = nil; var observes: [String]? = nil
+        var position: Position? = nil; var configSchema: ConfigSchema? = nil; let config: [String: MobileJSONValue]?
     }
-    struct GraphEdge: Decodable, Equatable, Sendable { let from: String; let to: String }
+    struct GraphEdge: Decodable, Equatable, Sendable {
+        let from: String; let to: String; var fromPort: String? = nil; var toPort: String? = nil
+        var label: String? = nil; var observes: [String]? = nil
+    }
     struct Graph: Decodable, Equatable, Sendable {
         let level: String; var manifestVersion: Int? = nil; var boundary: String? = nil
         var evidence: [GraphEvidence]? = nil; let nodes: [GraphNode]; let edges: [GraphEdge]
     }
     struct Installation: Decodable, Equatable, Sendable {
+        struct Integrity: Decodable, Equatable, Sendable {
+            let status: String; let source: String; let digest: String?; let detail: String
+        }
         let status: String
         let installedVersion: String?
         let availableVersion: String
         let previousVersions: [String]
+        let integrity: Integrity
         let error: String?
     }
     struct Authentication: Decodable, Equatable, Sendable {
@@ -261,12 +309,20 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
             var id: String { ref }
         }
         struct Method: Decodable, Identifiable, Equatable, Sendable {
-            let id: String; let name: String; let kind: String; let fields: [Field]
+            struct Account: Decodable, Equatable, Sendable {
+                let label: String; let billing: String; let detail: String
+            }
+            let id: String; let name: String; let kind: String; let fields: [Field]; let account: Account?
         }
         let methods: [Method]; let selectedMethod: String?; let status: String; let missingFields: [String]
     }
     struct Compatibility: Decodable, Equatable, Sendable {
-        let status: String; let checkedAt: String?; let message: String?
+        let status: String; let classification: String; let checkedAt: String?; let message: String?
+    }
+    struct Publication: Decodable, Equatable, Sendable {
+        let status: String; let review: String; let publishedVersion: String?; let knownVersions: [String]
+        let catalogUrl: String?; let detail: String; let revokedVersion: String?; let revokedReason: String?
+        let revokedAt: String?; let reviewUrl: String?
     }
     let id: String
     let isDefault: Bool
@@ -277,16 +333,20 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let verified: Bool
     let protocolName: String
     let source: String
+    var account: AccountDescriptor? = nil
+    var modelConfiguration: ModelConfiguration? = nil
+    var driverBundle: DriverBundle? = nil
     let graph: Graph
     let available: Bool
     let unavailableReason: String?
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let publication: Publication?
     let capabilities: [Capability]
     let driver: Driver
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, verified, source, graph, available, unavailableReason, installation, auth, compatibility, capabilities, driver
+        case id, isDefault, name, version, description, publisher, verified, source, account, modelConfiguration, driverBundle, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
         case protocolName = "protocol"
     }
 }
@@ -501,6 +561,8 @@ public struct XHandshake: Codable, Sendable {
     public let minimumClientProtocol: String
     public let host: String
     public let surface: String
+    public let plainHost: String?
+    public let secureRemotePort: Int?
     public let embeddedRuntimeId: String?
     public let embeddedProcessId: Int32?
 }
@@ -573,7 +635,26 @@ struct MobilePairReceipt: Decodable, Sendable {
     let createdAt: Double
 }
 
+struct MobilePairingResult: Sendable {
+    let receipt: MobilePairReceipt
+    let tlsFingerprint: String
+}
+
 private struct MobileEmpty: Encodable, Sendable {}
+
+private struct MobileHTTPErrorResponse: Decodable, Sendable {
+    struct Failure: Decodable, Sendable {
+        let code: String
+        let message: String
+    }
+
+    let error: Failure
+}
+
+private struct MobileFlatHTTPErrorResponse: Decodable, Sendable {
+    let code: String
+    let message: String
+}
 
 private struct MobileRpcRequest<Payload: Encodable>: Encodable {
     let type = "client-request"
@@ -610,7 +691,7 @@ enum MobileApiError: Error, LocalizedError, Sendable {
         switch self {
         case let .transport(message): message
         case let .host(code, message): "\(code): \(message)"
-        case .invalidResponse: "The DSH Host returned an invalid response."
+        case .invalidResponse: "The OpenFish Host returned an invalid response."
         }
     }
 }
@@ -618,17 +699,25 @@ enum MobileApiError: Error, LocalizedError, Sendable {
 public actor XIOSClient {
     public nonisolated let baseURL: URL
     private let bearerToken: String?
+    private let trustDelegate: MobileTLSDelegate
     private let session: URLSession
 
     public init(
         baseURL: URL = URL(string: "http://127.0.0.1:3080")!,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        tlsFingerprint: String? = nil,
+        permitsBootstrapTrust: Bool = false
     ) {
         self.baseURL = baseURL
         self.bearerToken = bearerToken
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 45
-        session = URLSession(configuration: configuration)
+        let trustDelegate = MobileTLSDelegate(
+            expectedFingerprint: tlsFingerprint,
+            permitsBootstrapTrust: permitsBootstrapTrust
+        )
+        self.trustDelegate = trustDelegate
+        session = URLSession(configuration: configuration, delegate: trustDelegate, delegateQueue: nil)
     }
 
     private func request(
@@ -645,8 +734,32 @@ public actor XIOSClient {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "authorization")
         }
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw MobileApiError.transport("HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for \(path)")
+        guard let http = response as? HTTPURLResponse else {
+            throw MobileApiError.transport("The OpenFish Host returned a non-HTTP response for \(path).")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if let failure = try? JSONDecoder().decode(MobileHTTPErrorResponse.self, from: data) {
+                throw MobileApiError.host(failure.error.code, failure.error.message)
+            }
+            if let failure = try? JSONDecoder().decode(MobileFlatHTTPErrorResponse.self, from: data) {
+                throw MobileApiError.host(failure.code, failure.message)
+            }
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let failure = object["error"] as? [String: Any] ?? object
+                if let code = failure["code"] as? String {
+                    throw MobileApiError.host(
+                        code,
+                        failure["message"] as? String ?? "The OpenFish Host rejected this request."
+                    )
+                }
+            }
+            let contentType = http.value(forHTTPHeaderField: "content-type")?.lowercased() ?? ""
+            let bodyKind = data.isEmpty
+                ? "empty"
+                : contentType.contains("json") ? "json-unrecognized"
+                : contentType.hasPrefix("text/") ? "text"
+                : "other"
+            throw MobileApiError.transport("HTTP \(http.statusCode) [\(bodyKind)] for \(path)")
         }
         return data
     }
@@ -692,15 +805,86 @@ public actor XIOSClient {
         )
     }
 
-    func pair(deviceName: String, code: String) async throws -> MobilePairReceipt {
-        struct Payload: Encodable, Sendable { let deviceName: String; let surface = "iphone"; let code: String }
-        return try JSONDecoder().decode(
+    func pair(deviceName: String, code: String) async throws -> MobilePairingResult {
+        struct Payload: Encodable, Sendable {
+            let deviceName: String
+            let surface = "iphone"
+            let appVersion: String
+            let codeId: String
+            let clientNonce: String
+            let proof: String
+        }
+        guard baseURL.scheme == "https" else {
+            throw MobileApiError.transport("Remote pairing requires the Host HTTPS address.")
+        }
+        _ = try await handshake()
+        guard let fingerprint = trustDelegate.acceptedFingerprint else {
+            throw MobileApiError.transport("OpenFish could not capture the Host TLS identity.")
+        }
+        let appVersion = "0.1.0"
+        let proof = try Self.pairingProof(
+            code: code,
+            certificateFingerprint: fingerprint,
+            surface: "iphone",
+            deviceName: deviceName,
+            appVersion: appVersion
+        )
+        let receipt = try JSONDecoder().decode(
             MobilePairReceipt.self,
             from: await request(
                 "/x-native/v2/pair",
                 method: "POST",
-                body: JSONEncoder().encode(Payload(deviceName: deviceName, code: code))
+                body: JSONEncoder().encode(Payload(
+                    deviceName: deviceName,
+                    appVersion: appVersion,
+                    codeId: proof.codeId,
+                    clientNonce: proof.clientNonce,
+                    proof: proof.proof
+                ))
             )
+        )
+        return MobilePairingResult(receipt: receipt, tlsFingerprint: fingerprint)
+    }
+
+    private static func pairingProof(
+        code: String,
+        certificateFingerprint: String,
+        surface: String,
+        deviceName: String,
+        appVersion: String
+    ) throws -> (codeId: String, clientNonce: String, proof: String) {
+        let normalized = code.uppercased().unicodeScalars.filter {
+            $0.isASCII && (($0.value >= 65 && $0.value <= 90) || ($0.value >= 48 && $0.value <= 57))
+        }.map(String.init).joined()
+        guard normalized.count == 16 else {
+            throw MobileApiError.host("invalid-code", "Enter the complete 16-character pairing code.")
+        }
+        let codeDigest = SHA256.hash(data: Data(normalized.utf8))
+        let codeId = Data(codeDigest).map { String(format: "%02x", $0) }.joined()
+        var nonceBytes = [UInt8](repeating: 0, count: 24)
+        guard SecRandomCopyBytes(kSecRandomDefault, nonceBytes.count, &nonceBytes) == errSecSuccess else {
+            throw MobileApiError.transport("Could not create a secure pairing nonce.")
+        }
+        let clientNonce = Data(nonceBytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let message = [
+            "openfish-pair-v1",
+            certificateFingerprint.lowercased(),
+            clientNonce,
+            surface,
+            deviceName,
+            appVersion,
+        ].joined(separator: "\0")
+        let authentication = HMAC<SHA256>.authenticationCode(
+            for: Data(message.utf8),
+            using: SymmetricKey(data: Data(normalized.utf8))
+        )
+        return (
+            codeId,
+            clientNonce,
+            Data(authentication).map { String(format: "%02x", $0) }.joined()
         )
     }
 
@@ -734,6 +918,15 @@ public actor XIOSClient {
         struct Value: Decodable, Sendable { let items: [MobileSession] }
         let value: Value = try await rpc("session.list", Payload())
         return value.items
+    }
+
+    func discardSession(_ sessionId: String) async throws {
+        struct Payload: Encodable, Sendable { let sessionId: String }
+        struct Value: Decodable, Sendable { let discarded: Bool }
+        let value: Value = try await rpc("session.discard", Payload(sessionId: sessionId))
+        guard value.discarded else {
+            throw MobileApiError.host("draft-discard-rejected", "The Host did not discard the draft task")
+        }
     }
 
     func setArchived(sessionId: String, archived: Bool) async throws -> Set<String> {
@@ -863,6 +1056,20 @@ public actor XIOSClient {
         return value.items
     }
 
+    func resolveHarness(id: String, version: String?, authMethod: String?) async throws -> MobileHarness {
+        struct Payload: Encodable, Sendable {
+            let id: String
+            let version: String?
+            let authMethod: String?
+        }
+        struct Value: Decodable, Sendable { let item: MobileHarness }
+        let value: Value = try await rpc(
+            "harness.resolve",
+            Payload(id: id, version: version, authMethod: authMethod)
+        )
+        return value.item
+    }
+
     func selectDefaultHarness(_ id: String) async throws -> [MobileHarness] {
         struct Payload: Encodable, Sendable { let action = "default"; let id: String; let authMethod: String? = nil; let pack: MobileJSONValue? = nil }
         struct Value: Decodable, Sendable { let items: [MobileHarness] }
@@ -877,10 +1084,38 @@ public actor XIOSClient {
         return value.items
     }
 
-    func createSession(workspaceId: String?, harnessId: String? = nil) async throws -> String {
-        struct Payload: Encodable, Sendable { let workspaceId: String?; let noProject: Bool?; let harnessId: String? }
+    func mutateHarness(action: String, id: String, authMethod: String? = nil) async throws -> [MobileHarness] {
+        struct Payload: Encodable, Sendable {
+            let action: String
+            let id: String
+            let authMethod: String?
+            let pack: MobileJSONValue? = nil
+        }
+        struct Value: Decodable, Sendable { let items: [MobileHarness] }
+        let value: Value = try await rpc(
+            "harness.mutate",
+            Payload(action: action, id: id, authMethod: authMethod)
+        )
+        return value.items
+    }
+
+    func createSession(workspaceId: String?, harnessId: String? = nil, sessionId: String? = nil) async throws -> String {
+        struct Payload: Encodable, Sendable {
+            let workspaceId: String?
+            let noProject: Bool?
+            let harnessId: String?
+            let sessionId: String?
+        }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String }
-        let value: Value = try await rpc("session.create", Payload(workspaceId: workspaceId, noProject: workspaceId == nil ? true : nil, harnessId: harnessId))
+        let value: Value = try await rpc(
+            "session.create",
+            Payload(
+                workspaceId: workspaceId,
+                noProject: workspaceId == nil ? true : nil,
+                harnessId: harnessId,
+                sessionId: sessionId
+            )
+        )
         return value.sessionId
     }
 
@@ -1027,26 +1262,6 @@ public actor XIOSClient {
         return value.ref
     }
 
-    func settings() async throws -> MobileSettingsCatalog {
-        try await rpc("settings.describe", MobileEmpty())
-    }
-
-    func replaceSettings(
-        namespace: String,
-        section: MobileJSONValue,
-        revision: Int
-    ) async throws -> MobileSettingsNamespace {
-        struct Payload: Encodable, Sendable {
-            let ns: String
-            let section: MobileJSONValue
-            let expectedRevision: Int
-        }
-        return try await rpc(
-            "settings.replace",
-            Payload(ns: namespace, section: section, expectedRevision: revision)
-        )
-    }
-
     func configurableProviders() async throws -> [MobileConfigurableProvider] {
         struct Value: Decodable, Sendable { let providers: [MobileConfigurableProvider] }
         let value: Value = try await rpc("llm.providers", MobileEmpty())
@@ -1059,30 +1274,12 @@ public actor XIOSClient {
         return value["entries"]?.arrayValue?.compactMap(MobilePluginInventoryEntry.init(json:)) ?? []
     }
 
-    func setCredential(ref: String, value: String) async throws {
-        struct Payload: Encodable, Sendable { let ref: String; let value: String }
-        let _: MobileJSONValue = try await rpc("credentials.set", Payload(ref: ref, value: value))
-    }
-
-    func unsetCredential(ref: String) async throws {
-        struct Payload: Encodable, Sendable { let ref: String }
-        let _: MobileJSONValue = try await rpc("credentials.unset", Payload(ref: ref))
-    }
-
-    func devices() async throws -> [MobileNativeDevice] {
-        try JSONDecoder().decode(
-            [MobileNativeDevice].self,
-            from: await request("/x-native/v2/devices", authorize: true)
-        )
-    }
-
-    func revokeDevice(_ deviceId: String) async throws -> Bool {
-        struct Payload: Encodable, Sendable { let deviceId: String }
+    func revokeCurrentDevice() async throws -> Bool {
         struct Value: Decodable, Sendable { let revoked: Bool }
         let data = try await request(
-            "/x-native/v2/revoke",
+            "/x-native/v2/self/revoke",
             method: "POST",
-            body: JSONEncoder().encode(Payload(deviceId: deviceId)),
+            body: JSONEncoder().encode(MobileEmpty()),
             authorize: true
         )
         return try JSONDecoder().decode(Value.self, from: data).revoked

@@ -1,10 +1,10 @@
-# Agent Note：OpenFish 行业体验参考
+# Agent Note: OpenFish 行业体验参考
 
-状态：proposed
+Status: proposed
 
 [English](2026-08-22-openfish-experience-reference.md) | 中文
 
-## 问题
+## Problem
 
 OpenFish 需要完整重做 Mac 和 iPhone 体验，但此前的视觉改动没有先记录与优秀 Coding Agent、原生效率工具、图编辑器、运行时和扩展市场产品的系统比较。因此，当前控件虽然在本机看似合理，却仍存在信息层级弱、任务配置拥挤、架构图静态、空态和错误态不一致，以及核心价值不可见或未经证明等问题。
 
@@ -39,7 +39,7 @@ OpenFish 需要完整重做 Mac 和 iPhone 体验，但此前的视觉改动没�
 - 浅色模式的信息层级和对比弱于深色模式。这只是视觉发现，不代表无障碍合规结论。
 - iPhone 架构网格会裁剪长节点标题和 Kind；Mac-only Builder 虽有说明，但仍需直接 Handoff 和共享验证结果。
 
-## 选定方向
+## Proposal
 
 OpenFish 使用克制的原生效率工具外壳，配合明确的运行时控制条和 Progressive Lens：
 
@@ -52,7 +52,15 @@ OpenFish 使用克制的原生效率工具外壳，配合明确的运行时控�
 
 Mac 保留两层任务侧栏、快捷键、可调整 Inspector、指针能力和独立设置窗口。iPhone 使用 Navigation Stack、大触控目标和紧凑菜单，以审批和连续使用为主要任务；需要凭据的安装或发布明确 Handoff 到 Mac。
 
-## 验收标准
+## Alternatives considered
+
+**逐个修补较弱的页面。** 局部视觉修改会保留彼此冲突的身份层级，并让同一个 Harness 状态继续在 Onboarding、输入区、Settings 与 Inspector 之间漂移。
+
+**完整照搬一个竞品。** 对比对象中没有任何一个同时具备可安装 Harness Runtime、跨 Harness 固定 Session、配对 iPhone 客户端、有证据的 Architecture 与 Pack Authoring。OpenFish 采用已经验证的交互模式，但不会复制其他产品的外皮或丢掉自身的归属边界。
+
+**默认直接展示图。** 强制图界面会让普通用户在知道运行什么、如何认证和费用归属前先面对实现细节。Progressive Lens 把这些决定保留在 Simple，同时为技术用户保留准确证据和编辑能力。
+
+## Acceptance criteria
 
 - 每个重做后的 P0 界面至少能对应上表一个采用模式和一个明确的 OpenFish 需求，单纯审美偏好不够。
 - Mac/iPhone Fixture 覆盖有数据、空、加载、需设置、离线、可恢复错误和致命错误，且不含个人数据。
@@ -60,7 +68,7 @@ Mac 保留两层任务侧栏、快捷键、可调整 Inspector、指针能力和
 - Architecture 不虚构内部结构；Runtime 只来自持久观察事件；标签在支持尺寸下不裁剪。
 - 宣称设计通过前，必须包括当前截图和真实键盘、窗口缩放、VoiceOver、Dynamic Type、外观及物理设备检查。
 
-## 风险
+## Risks
 
 - 多产品组合容易变成功能拼贴，因此选定方向只使用一个稳定身份层级和 Progressive Lens，不复制孤立视觉。
 - 能力驱动的通用 UI 容易机械而冗长，因此 Simple 负责总结，Architecture 和 Manifest Editor 保留精确证据与配置。

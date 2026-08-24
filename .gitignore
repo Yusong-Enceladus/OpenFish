@@ -1,6 +1,8 @@
 CLAUDE.local.md
 .env
 node_modules/
+/.openfish-cache
+/.openfish-build.env
 lib/
 *.tsbuildinfo
 pnpm-debug.log
@@ -24,6 +26,9 @@ tmp/
 .vscode/
 .DS_Store
 .idea
+xcuserdata/
+*.xcuserstate
+DerivedData/
 mise.toml
 dist-exe/
 python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-*
@@ -31,10 +36,10 @@ python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/
 python/**/__pycache__/
 python/**/.pytest_cache/
 apps/web/dist/
-/apps/x-macos/.build/
-/apps/x-ios/.build/
-/.build/
-/dist/
+/apps/x-macos/.build
+/apps/x-ios/.build
+/.build
+/dist
 .artifacts/
 .dsh-build/
 .playwright-mcp/

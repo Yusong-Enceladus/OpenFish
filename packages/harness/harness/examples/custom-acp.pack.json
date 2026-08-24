@@ -13,7 +13,10 @@
   "authMethods": [],
   "graph": {
     "level": "opaque",
-    "nodes": [{ "id": "runtime", "kind": "harness-runtime", "title": "ACP runtime", "editable": false }],
+    "nodes": [{
+      "id": "runtime", "kind": "harness-runtime", "title": "ACP runtime", "editable": false,
+      "observes": ["protocol.ready", "session.ready", "turn.started", "turn.completed", "turn.failed", "model.completed", "tool.activity", "output.activity", "approval.requested", "approval.resolved"]
+    }],
     "edges": []
   }
 }

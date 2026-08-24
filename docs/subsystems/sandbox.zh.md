@@ -8,14 +8,16 @@
 
 ## 模式与强制执行
 
-`SandboxMode` 仅管控文件系统效果。`read-only` 要求后端拒绝写入——POSIX runner 还会授予其 shell 所需的 `/dev/null` 接收器，而 Windows ACL runner 不授予任何显式可写根目录，并因环境 ACL 缺口报告部分强制执行；`workspace-write` 允许在工作区根目录及后端承诺的临时区域下写入；`danger-full-access` 绕过隔离。网络与进程可见性不在此处的定义范围内。
+`SandboxMode` 仅管控文件系统效果。`read-only` 要求后端拒绝写入——POSIX runner 还会授予其 shell 所需的 `/dev/null` 接收器，而 Windows ACL runner 不授予任何显式可写根目录，并因环境 ACL 缺口报告部分强制执行；`workspace-write` 允许在工作区根目录及后端承诺的临时区域下写入；`danger-full-access` 绕过隔离。长期驻留的第三方运行时还可以显式请求 `SandboxPolicy.isolation` 边界，用于保护宿主读取、入站监听、无关进程控制和环境 IPC；普通一次性调用仍沿用仅文件效果策略。
 
 ```ts type-equiv
 /**
  * File-effect policy for confined processes. `read-only` permits only required
  * sinks such as `/dev/null`; `workspace-write` also permits the workspace and a
  * backend-defined temp area; `danger-full-access` bypasses confinement. Network
- * and process visibility are outside this vocabulary.
+ * Additional resident-runtime isolation is expressed explicitly through
+ * {@link SandboxPolicy.isolation}; ordinary one-shot callers retain the
+ * historical file-effect-only policy.
  */
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 ```
@@ -90,6 +92,27 @@ interface SandboxPolicyRequest {
 interface SandboxPolicy extends SandboxExecutionPolicy {
   /** The file-effect mode this execution runs under. */
   mode: ConfinedSandboxMode
+  /**
+   * Additional private state roots the consumer owns and may write even when
+   * the workspace itself is read-only. This is for runtime state such as an
+   * isolated Harness home, never an ambient user directory.
+   */
+  runtimeWritableRoots?: readonly string[]
+  /**
+   * Whether `workspace-write` also grants the platform temporary roots.
+   * Ordinary shell calls retain the historical default (`true`). Long-lived
+   * third-party runtimes set this to `false` and receive a private temp root
+   * through {@link runtimeWritableRoots} instead.
+   */
+  platformTemporaryWrites?: boolean
+  /**
+   * Optional host-privacy boundary for an untrusted long-lived runtime. The
+   * provider must deny reads beneath every protected root except the exact
+   * readable roots, reject inbound listeners, and prevent control or
+   * inspection of unrelated host processes. A provider that cannot enforce
+   * every requested boundary fails closed.
+   */
+  isolation?: SandboxIsolationPolicy
 }
 ```
 
@@ -184,7 +207,7 @@ Abstract process-sandbox service. confine must return enforcing argv or fail clo
 abstract confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv
 ```
 
-Source: [`packages/sandbox/sandbox/src/index.ts:158`](../../packages/sandbox/sandbox/src/index.ts)
+Source: [`packages/sandbox/sandbox/src/index.ts:195`](../../packages/sandbox/sandbox/src/index.ts)
 
 <a id="ctxsandboxpolicy--sandboxpolicyservice"></a>
 
@@ -214,5 +237,5 @@ overrideOf(session: Session): SandboxMode | undefined
 
 Types: [Session](session.md)
 
-Source: [`packages/sandbox/sandbox-policy/src/index.ts:91`](../../packages/sandbox/sandbox-policy/src/index.ts)
+Source: [`packages/sandbox/sandbox-policy/src/index.ts:112`](../../packages/sandbox/sandbox-policy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

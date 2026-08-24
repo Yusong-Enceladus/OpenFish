@@ -39,7 +39,7 @@ The 2026-08-22 deterministic Mac fixture was captured before the redesign work. 
 - Light appearance has weaker hierarchy and contrast than dark appearance. This is a visual finding, not an accessibility compliance result.
 - The iPhone architecture grid can clip long node titles and kinds. Mac-only Builder ownership is disclosed, but the handoff needs a direct action and shared validation results.
 
-## Selected direction
+## Proposal
 
 OpenFish uses a calm native productivity shell with an explicit runtime control strip and a Progressive Lens:
 
@@ -51,6 +51,14 @@ OpenFish uses a calm native productivity shell with an explicit runtime control 
 The task composer keeps the prompt visually dominant. Project and permission form one task-scope group; Harness, account, provider/model, reasoning, and Harness-specific options form one runtime group; rare options use progressive disclosure while every active value stays readable. Empty, loading, setup-required, offline, recovery, and fatal states occupy the same stable regions instead of replacing the whole interface unpredictably.
 
 Mac keeps the two-level task sidebar, keyboard shortcuts, resizable inspector, pointer affordances, and a separate Settings window. iPhone uses navigation stacks, large touch targets, compact menus, approvals and continuity as primary jobs, and explicit Mac handoffs for credential-bearing installation or publication.
+
+## Alternatives considered
+
+**Patch each weak screen independently.** Local visual fixes preserve the conflicting identity hierarchy and allow the same Harness state to drift between onboarding, the composer, Settings, and the inspector.
+
+**Clone one competing product.** No compared product combines installable Harness runtimes, pinned cross-Harness sessions, a paired iPhone client, evidence-backed architecture, and Pack authoring. OpenFish adopts verified interaction patterns without copying another product's skin or omitting its own ownership boundaries.
+
+**Make the graph the default interface.** A mandatory graph exposes implementation detail before ordinary users can answer what will run, how it authenticates, and what it costs. Progressive Lens keeps those decisions in Simple while preserving exact evidence and editing for technical users.
 
 ## Acceptance criteria
 

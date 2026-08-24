@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-24-openfish-release-builds-both-faces.md
+2026-08-24-openfish-release-builds-both-faces.md: aedf5671b36f8becf15dbdc1d7c1b070db8b7a29
+2026-08-24-openfish-release-builds-both-faces.zh.md: ed3316b96347eb0564dd25fb10e77ce890b9300f

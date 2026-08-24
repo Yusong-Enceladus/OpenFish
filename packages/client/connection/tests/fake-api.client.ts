@@ -2,7 +2,7 @@
 // data source on a real clock; behavior tests need per-case responses and
 // deferred-controlled timing). Streams are hand pumps: pushMux/pushHost.
 import type {
-  HostFrame, IApiClient, ModelSelection, MuxFrame,
+  HostFrame, IApiClient, ModelSelection, MuxFrame, RpcError,
   RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry, WorkspaceId,
 } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
@@ -30,6 +30,10 @@ export function ok<T>(value: T): RpcResponse<T> {
   return { rpcId: RpcId(`fake-${nextRpc++}`), result: { ok: true, value } }
 }
 
+export function err<T>(error: RpcError): RpcResponse<T> {
+  return { rpcId: RpcId(`fake-${nextRpc++}`), result: { ok: false, error } }
+}
+
 
 type StreamItem<F> = { kind: 'frame'; envelope: RpcRequest<F> } | { kind: 'end' } | { kind: 'fail'; error: unknown }
 
@@ -43,8 +47,12 @@ export class FakeApiClient implements IApiClient {
 
   readonly harnesses: IApiClient['harnesses'] = {
     list: payload => this.record('harness.list', payload, Promise.resolve(ok({ items: [] }))),
+    resolve: payload => this.record('harness.resolve', payload, Promise.resolve(err<never>({
+      code: 'harness-failed', message: 'fake Harness was not programmed', details: {},
+    }))),
     refresh: payload => this.record('harness.refresh', payload, Promise.resolve(ok({ items: [] }))),
     mutate: payload => this.record('harness.mutate', payload, Promise.resolve(ok({ items: [] }))),
+    manage: payload => this.record('harness.manage', payload, Promise.resolve(ok({ items: [] }))),
   }
 
   // Programmable slots (defaults answer OK-empty); reassign per case.
@@ -117,6 +125,7 @@ export class FakeApiClient implements IApiClient {
       return this.record('session.search', payload, this.onSearch(payload))
     },
     create: (payload: unknown) => this.record('session.create', payload, this.onCreate(payload)),
+    discard: (payload: unknown) => this.record('session.discard', payload, Promise.resolve(ok({ discarded: true as const }))),
     history: (payload: { sessionId: SessionId; beforeSeq?: number; maxMessages?: number }) =>
       this.record('session.history', payload, this.onHistory(payload)),
     models: (payload: unknown) => this.record('session.models', payload, this.onModels(payload)),
@@ -175,6 +184,9 @@ export class FakeApiClient implements IApiClient {
     }))),
     archiveSession: (payload: unknown) => this.record('workspace.archiveSession', payload, Promise.resolve(ok({
       archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId],
+    }))),
+    unarchiveSession: (payload: unknown) => this.record('workspace.unarchiveSession', payload, Promise.resolve(ok({
+      archivedSessionIds: [],
     }))),
   }
 

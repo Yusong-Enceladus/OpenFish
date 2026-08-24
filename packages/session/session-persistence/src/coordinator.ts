@@ -198,6 +198,9 @@ export interface PersistenceBackend<TornMarker = unknown> {
    */
   list(signal?: AbortSignal): Promise<SessionHeader[]>
 
+  /** Permanently remove one stored session after its live lifecycle detaches. */
+  deleteStored?(id: SessionId): Promise<boolean>
+
   /**
    * Optional side-effect-free artifact locator, used to point refusal
    * diagnostics ({@link SessionFormatUnsupportedError}) at the raw log.
@@ -816,6 +819,30 @@ export class PersistenceCoordinator<TornMarker = unknown> {
         throw error
       }
     }
+  }
+
+  /**
+   * Permanently remove one detached session. The per-id chain drains its
+   * retirement first so no buffered append or recovery can race deletion.
+   * @param id - detached session identity to remove.
+   * @returns whether durable session state existed and was deleted.
+   */
+  async delete(id: SessionId): Promise<boolean> {
+    await this.waitForRetirement(id)
+    if (this.ctx.sessions.get(id) !== undefined) {
+      throw new Error(`cannot delete session "${id}" while it is live`)
+    }
+    return await this.serialize(id, async () => {
+      if (this.ctx.sessions.get(id) !== undefined) {
+        throw new Error(`cannot delete session "${id}" while it is live`)
+      }
+      if (this.backend.deleteStored === undefined) {
+        throw new Error(`${this.backend.name} does not support session deletion`)
+      }
+      this.preparations.invalidate(id)
+      this.states.delete(id)
+      return await this.backend.deleteStored(id)
+    })
   }
 
   /**

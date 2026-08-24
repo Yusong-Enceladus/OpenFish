@@ -8,8 +8,12 @@
  * IPC bridge. This package never prints: the URL line belongs to the shell.
  */
 
+import { constants } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse, Server } from 'node:http'
+import { createServer as createSecureServer, type Server as SecureServer } from 'node:https'
+import { X509Certificate } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -47,6 +51,33 @@ export interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Optional TLS-only all-interfaces listener for native remote clients. */
+  remoteTlsHost?: '' | '0.0.0.0'
+  /** Remote TLS port; zero requests an OS-assigned port. */
+  remoteTlsPort?: number
+  /** PEM certificate path for the remote TLS listener. */
+  remoteTlsCertificatePath?: string
+  /** PEM private-key path for the remote TLS listener. */
+  remoteTlsPrivateKeyPath?: string
+}
+
+const MAX_TLS_CREDENTIAL_BYTES = 1024 * 1024
+
+/** Read one PEM file without following a replacement symlink or accepting a public private key. */
+async function readCredentialFile(path: string, privateKey: boolean): Promise<Buffer> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_TLS_CREDENTIAL_BYTES) {
+      throw new Error(`webserver: invalid TLS ${privateKey ? 'private key' : 'certificate'} file`)
+    }
+    if (privateKey && process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
+      throw new Error('webserver: TLS private key must not be readable by group or other users')
+    }
+    return await handle.readFile()
+  } finally {
+    await handle.close()
+  }
 }
 
 /**
@@ -60,6 +91,10 @@ export class WebServer extends Service {
   static Config: z<Config> = z.object({
     host: z.union([z.const('127.0.0.1'), z.const('0.0.0.0')]).required(),
     port: z.natural().max(65535).required(),
+    remoteTlsHost: z.union([z.const(''), z.const('0.0.0.0')]).default(''),
+    remoteTlsPort: z.natural().max(65535).default(0),
+    remoteTlsCertificatePath: z.string().default(''),
+    remoteTlsPrivateKeyPath: z.string().default(''),
   })
 
   private readonly exact = new Map<string, WebRoute>()
@@ -69,7 +104,10 @@ export class WebServer extends Service {
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
   private server!: Server
+  private remoteServer: SecureServer | undefined
   private listenedPort!: number
+  private listenedRemotePort: number | undefined
+  private remoteFingerprint: string | undefined
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'webServer')
@@ -83,6 +121,21 @@ export class WebServer extends Service {
   /** The configured bind host (the loopback or all-interfaces literal). */
   get host(): Config['host'] {
     return this.config.host
+  }
+
+  /** TLS-only remote port, absent when this composition is loopback-only. */
+  get remotePort(): number | undefined {
+    return this.listenedRemotePort
+  }
+
+  /** Whether this carrier has a separately encrypted all-interfaces listener. */
+  get exposesSecureRemote(): boolean {
+    return this.listenedRemotePort !== undefined
+  }
+
+  /** SHA-256 fingerprint of the remote listener's leaf certificate. */
+  get remoteCertificateFingerprint(): string | undefined {
+    return this.remoteFingerprint
   }
 
   /**
@@ -163,11 +216,7 @@ export class WebServer extends Service {
       }
       await fallback(req, res)
     }
-    // Last-resort guard: handle() rejecting would otherwise be an unhandled
-    // rejection killing the process on one malformed request (bad %-escape,
-    // client dropping mid-body). Per-request failures log and answer 400 —
-    // never a process exit.
-    this.server = createServer((req, res) => {
+    const handleFailure = (req: IncomingMessage, res: ServerResponse): void => {
       handle(req, res).catch((err: unknown) => {
         this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))
         if (res.headersSent) {
@@ -177,8 +226,59 @@ export class WebServer extends Service {
         res.writeHead(400)
         res.end()
       })
-    })
-    this.server.on('upgrade', (req, socket, head) => {
+    }
+    // Last-resort guard: handle() rejecting would otherwise be an unhandled
+    // rejection killing the process on one malformed request (bad %-escape,
+    // client dropping mid-body). Per-request failures log and answer 400 —
+    // never a process exit.
+    const remote = await this.remoteTlsConfiguration()
+    this.server = createServer(handleFailure)
+    this.installUpgradeHandler(this.server)
+    if (remote !== undefined) {
+      this.remoteServer = createSecureServer({
+        cert: remote.certificate,
+        key: remote.privateKey,
+        minVersion: 'TLSv1.3',
+      }, handleFailure)
+      this.installUpgradeHandler(this.remoteServer)
+      this.remoteFingerprint = new X509Certificate(remote.certificate).fingerprint256
+        .replaceAll(':', '')
+        .toLowerCase()
+    }
+    try {
+      await this.listen(this.server, this.config.port, this.config.host)
+      this.listenedPort = (this.server.address() as AddressInfo).port
+      if (this.remoteServer !== undefined && remote !== undefined) {
+        await this.listen(this.remoteServer, remote.port, '0.0.0.0')
+        this.listenedRemotePort = (this.remoteServer.address() as AddressInfo).port
+      }
+    } catch (error) {
+      await Promise.all([this.server, this.remoteServer]
+        .filter((server): server is Server | SecureServer => server?.listening === true)
+        .map(server => new Promise<void>((resolve) => { server.close(() => { resolve() }) })))
+      throw error
+    }
+
+    // Node does not include upgraded sockets in closeAllConnections(). The service
+    // owns them with the other connections, so it tracks and destroys them explicitly.
+    this.ctx.effect(() => async () => {
+      const servers = [this.server, this.remoteServer].filter(
+        (server): server is Server | SecureServer => server !== undefined,
+      )
+      const closed = servers.map(server => new Promise<void>((resolve) => {
+        server.close(() => { resolve() })
+        server.closeAllConnections()
+      }))
+      const upgradedClosed = [...this.upgradedSockets].map(socket => new Promise<void>((resolve) => {
+        socket.once('close', () => { resolve() })
+        socket.destroy()
+      }))
+      await Promise.all([...closed, ...upgradedClosed])
+    }, 'webServer.listen')
+  }
+
+  private installUpgradeHandler(server: Server | SecureServer): void {
+    server.on('upgrade', (req, socket, head) => {
       const onError = (error: Error): void => {
         this.ctx.logger.warn(error)
         socket.destroy()
@@ -212,30 +312,37 @@ export class WebServer extends Service {
         socket.destroy()
       }
     })
+  }
 
+  private async listen(server: Server | SecureServer, port: number, host: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject)
-      this.server.listen(this.config.port, this.config.host, () => {
-        this.server.off('error', reject)
-        this.server.on('error', (err) => { this.ctx.logger.error(err) })
-        this.listenedPort = (this.server.address() as AddressInfo).port
+      server.once('error', reject)
+      server.listen(port, host, () => {
+        server.off('error', reject)
+        server.on('error', (err) => { this.ctx.logger.error(err) })
         resolve()
       })
     })
+  }
 
-    // Node does not include upgraded sockets in closeAllConnections(). The service
-    // owns them with the other connections, so it tracks and destroys them explicitly.
-    this.ctx.effect(() => async () => {
-      const serverClosed = new Promise<void>((resolve) => {
-        this.server.close(() => { resolve() })
-      })
-      this.server.closeAllConnections()
-      const upgradedClosed = [...this.upgradedSockets].map(socket => new Promise<void>((resolve) => {
-        socket.once('close', () => { resolve() })
-        socket.destroy()
-      }))
-      await Promise.all([serverClosed, ...upgradedClosed])
-    }, 'webServer.listen')
+  private async remoteTlsConfiguration(): Promise<{
+    certificate: Buffer
+    privateKey: Buffer
+    port: number
+  } | undefined> {
+    const host = this.config.remoteTlsHost ?? ''
+    const certificatePath = this.config.remoteTlsCertificatePath?.trim() ?? ''
+    const privateKeyPath = this.config.remoteTlsPrivateKeyPath?.trim() ?? ''
+    const enabled = host !== '' || certificatePath !== '' || privateKeyPath !== ''
+    if (!enabled) return undefined
+    if (host !== '0.0.0.0' || certificatePath === '' || privateKeyPath === '') {
+      throw new Error('webserver: remote TLS requires host 0.0.0.0 plus certificate and private-key paths')
+    }
+    const [certificate, privateKey] = await Promise.all([
+      readCredentialFile(certificatePath, false),
+      readCredentialFile(privateKeyPath, true),
+    ])
+    return { certificate, privateKey, port: this.config.remoteTlsPort ?? 0 }
   }
 
   /** Longest-prefix-wins over the prefix table after an exact-table miss. */

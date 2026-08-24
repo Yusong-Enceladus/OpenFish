@@ -17,9 +17,9 @@ Indirectly, through the provider/model selection supplied to an entry point; req
 
 #### KV Cache effect
 
-Changing the default affects only Agents that subsequently resolve from it. An existing session whose request log already names a selection keeps that selection, so this service does not invalidate its established prefix.
+Changing the default affects only sessions that have never accepted a task-local choice and have not assembled a request. `agent/model-selected` records an accepted choice even while New Task is blank; older sessions fall back to their latest `request/header`. Either durable pin keeps an established session from drifting when the process-wide default changes.
 
 ## Known Limitations and Deferred Work
 
-- The service owns one process-wide default; per-session selection remains the entry point's responsibility.
+- The service owns one process-wide default; `@deepseek-ai/dsh-agent` owns the durable per-session selection event and entry points decide when to record an accepted choice.
 - Without a settings provider, `saveSelection()` cannot retain a selection for a later Agent.

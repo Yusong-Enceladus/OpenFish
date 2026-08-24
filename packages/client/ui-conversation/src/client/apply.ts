@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveSlotLabel, type BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  resolveWorkspacePath, type ISessions, type SessionId,
+  resolveWorkspacePath, type ClientContext, type ISessions, type SessionId,
 } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the ctx.settingsScope Context merge. Cross-plugin collaboration
 // goes through the service, never a value import (client bundle purity gate).
@@ -112,7 +112,7 @@ function selectApproval({ interactions }: ComposerChainProps): ApprovalWait | nu
 /** Mounts the conversation plugin.
  * @param ctx - Client root context.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: ClientContext): void {
   const sessions = ctx.sessions
   const workspaces = ctx.workspaces
   const layout = ctx.layout

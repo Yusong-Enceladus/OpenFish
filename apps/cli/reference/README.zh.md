@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-本参考定义 profile 启动、web 别名、插件管理和配置 dump 等命令模式。argv 由 [`src/args.ts`](../src/args.ts) 统一解析一次，[`src/bin.ts`](../src/bin.ts) 只会动态导入选中的运行器。
+本参考定义 profile 启动、web 别名、Driver 管理、插件管理和配置 dump 等命令模式。argv 由 [`src/args.ts`](../src/args.ts) 统一解析一次，[`src/bin.ts`](../src/bin.ts) 只会动态导入选中的运行器。
 
 ## Profile 启动
 
@@ -37,6 +37,24 @@ dsh --profile web --patch ./extra.yml --dump-config
 ```
 
 `--dump-default-config` 只打印组合包各层；`--dump-config` 额外加上 profile 的 `cordis.patch.yml`、home 级的 `$DSH_HOME/cordis.patch.yml` 和 `--patch` overlay。两者都会打印注释，标明每行由哪个文件提供，以及哪些 overlay 修改过它；`!!js` 表达式保持未求值，找不到目标的 patch 会报告到 stderr。dump 操作不会运行应用的命令行参数提供方，因此展示的是解析任何应用参数之前的组合配置树；如果调用中包含应用参数，dump 会拒绝该调用。
+
+## Harness Driver Bundle 管理
+
+`dsh driver --profile <name> list` 会报告已经作为依赖管理的 Bundle 层，并且只列出实际存在、结构可读的条目。`install` 只接受 `package@<exact-semver>` 或 `github:<owner>/<repo>#<full-40-character-commit>`；GitHub 形式还必须提供 `--package <expected-name>`。标签、版本范围、本地路径、URL 与任意 npm 参数都会被拒绝。
+
+安装时，系统会先使用 `$DSH_HOME/openfish/driver-staging` 下的一次性私有目录。候选项必须物化为预期的包，声明位于包内的 `dsh.bundle.patch`，通过真实 Loader patch 方言解析，并插入至少一个归属于该包的模块；这个阶段不会导入该模块，并且始终禁用生命周期脚本。然后，系统在持有锁的情况下，把同一条准确 spec 安装到 Profile。除非明确提供 `--allow-scripts`，否则生命周期脚本保持禁用。受管 npm 使用私有临时 HOME／配置／缓存／临时目录、公共 npm Registry、小范围 Runtime PATH，不继承 npm 或 Git 凭据、系统 Git 配置，也不允许交互式凭据提示。项目 `.npmrc` 会被拒绝，因为私有 Registry 不属于这条一键安装信任路径。
+
+替换已启用 Bundle 前，管理器会记录它的准确来源与旧的生命周期脚本许可，并先停用它，保证 Loader 不会指向半物化包。更新失败时，系统用记录的旧许可恢复同一准确旧来源和原有 Manifest。没有许可记录的遗留来源会保持停用，并要求用户显式重装，系统不会猜测是否可以运行脚本。移除同样先停用，再让 npm 删除依赖。每个 Profile 的变更都会串行执行，并且都需要重启 Profile。
+
+```sh
+dsh driver --profile x list
+dsh driver --profile x install @acme/openfish-driver-demo@1.2.3
+dsh driver --profile x --package @acme/openfish-driver-demo \
+  install github:acme/openfish-driver-demo#0123456789abcdef0123456789abcdef01234567
+dsh driver --profile x remove @acme/openfish-driver-demo
+```
+
+这项结构准入不等同于 Driver Conformance，也不构成安全背书。重启后，真实 Loader 才会导入该 Bundle；Harness 注册表会另行协商 Driver API 与 Pack Capability。`--allow-scripts` 会让第三方代码更早在安装期间运行，因此只能用于已经审查过的准确来源。
 
 ## 插件管理
 

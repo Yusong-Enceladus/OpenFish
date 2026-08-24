@@ -127,10 +127,15 @@ try {
  * an OS-assigned port is unknowable before bind.
  * @param bindHost - the active webserver bind host.
  * @param extra - explicit `--trusted-host` values, in argument order.
+ * @param secureRemote - whether the TLS remote listener also requires LAN address discovery.
  * @returns the LAN display addresses and invocation-derived fence authorities.
  */
-export function resolveLanTrust(bindHost: string, extra: readonly string[]): WebRuntimeValues {
-  const lanAddresses = bindHost === ALL_INTERFACES_HOST
+export function resolveLanTrust(
+  bindHost: string,
+  extra: readonly string[],
+  secureRemote = false,
+): WebRuntimeValues {
+  const lanAddresses = bindHost === ALL_INTERFACES_HOST || secureRemote
     ? Object.values(networkInterfaces()).flat()
       .filter((iface): iface is NonNullable<typeof iface> => iface !== undefined && iface.family === 'IPv4' && !iface.internal)
       .map(iface => iface.address)
@@ -224,7 +229,11 @@ export const internals: {
  * @param config - validated {@link Config}.
  */
 export function apply(ctx: Context, config: Config): void {
-  const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
+  const runtime = resolveLanTrust(
+    ctx.webServer.host,
+    config.trustedHosts,
+    ctx.webServer.exposesSecureRemote,
+  )
   // The loopback URL belongs to this host. Under SSH, the operator reaches it
   // through a local forwarding address that this process cannot derive.
   const handoffBrowser = config.openBrowser && !launchedThroughSsh(ctx)

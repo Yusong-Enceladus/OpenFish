@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct VisualSmoke {
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
 
@@ -36,10 +36,13 @@ struct VisualSmoke {
         try render(inspector, scheme: .dark, to: outputDirectory.appending(path: "opencodex-inspector.png"))
 
         guard let harness = inspector.currentHarness else { throw VisualSmokeError.harnessStudioDataIsUnavailable }
-        let exportedPack = outputDirectory.appending(path: "codex-acp.openfish-harness.json")
-        guard inspector.exportHarness(harness, to: exportedPack),
+        let exportedPack = outputDirectory.appending(path: "codex.openfish-harness.json")
+        guard await inspector.exportHarness(harness, to: exportedPack),
               let exportedText = try? String(contentsOf: exportedPack, encoding: .utf8),
-              exportedText.contains("\"distribution\"") && !exportedText.localizedCaseInsensitiveContains("api_key") else {
+              exportedText.contains("\"distribution\"")
+                && exportedText.contains("\"OPENAI_API_KEY\"")
+                && exportedText.range(of: #"\"env\"\s*:\s*\{\s*\}"#, options: .regularExpression) != nil
+                && !exportedText.contains("sk-") else {
             throw VisualSmokeError.harnessStudioExportFailed
         }
         print("OpenFish visual smoke rendered task, new-task, model effort, and inspector fixtures at 1260×820")
@@ -56,7 +59,7 @@ struct VisualSmoke {
 
     @MainActor
     private static func renderHarnessOnboarding(_ store: OpenCodexStore, scheme: ColorScheme, to output: URL) throws {
-        let root = HarnessOnboardingPreview(store: store)
+        let root = HarnessOnboardingPreview(store: store, initialLens: "How it works")
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: "en_US"))
             .frame(width: 1_260, height: 820)
