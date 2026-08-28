@@ -8,7 +8,18 @@ Status: proposed
 
 OpenFish 需要完整重做 Mac 和 iPhone 体验，但此前的视觉改动没有先记录与优秀 Coding Agent、原生效率工具、图编辑器、运行时和扩展市场产品的系统比较。因此，当前控件虽然在本机看似合理，却仍存在信息层级弱、任务配置拥挤、架构图静态、空态和错误态不一致，以及核心价值不可见或未经证明等问题。
 
-本文记录 2026-08-22 的当前一手资料对比和产品基线审计。它从属于完整的[产品完成合同](2026-08-22-openfish-product-completion-contract.md)，不会缩小该合同。
+本文记录 2026-08-22 的当前一手资料对比和产品基线审计。它从属于完整的[产品完成合同](2026-08-22-openfish-product-completion-contract.zh.md)，不会缩小该合同。
+
+## 2026-08-28 生态更新
+
+- Codex 官方稳定版为 `0.150.1`，其文档仍将 `app-server` 定义为丰富 Codex 客户端使用的接口。因此 OpenFish 的官方 app-server 通道继续固定到稳定版 `0.150.1`，不追随 `0.151.0-alpha.*` 预发布版。
+- 官方 ACP Registry 已收录大量独立版本的 Agent，并按小时刷新 Release 元数据。它是通用发现层，不是 OpenFish 手工维护的短名单，也不是安全背书。
+- `pi-acp` 已在 Registry 中发布到 `0.0.33`，用于包装独立的 Pi Coding Agent。Pi 本体目前由 `earendil-works/pi` 发布，稳定版为 `0.84.3`，已包含 Session 级模型与思考控制。OpenFish 应通过通用 ACP 通道提供 Pi，而不是增加原生 Pi 分支。
+- Oh My Pi 稳定版 `18.0.9` 继续提供直接 ACP 模式和更广的 Provider／模型／认证能力。它仍作为 Pi 系列的 Curated 发布基线，因为这种直接而更丰富的集成与 Registry Adapter 有实际区别；这只是支持决策，不等于宣称 OMP 的编码效果更好。
+- OpenCode `1.18.25` 已通过 ACP Registry 提供带校验和、按平台区分的原生二进制。这证明 Registry 接入必须原样保留平台 Artifact 与完整性事实，而不需要产品专属 UI。
+- 同一份实时 Registry 现已提供 `codex-acp` `1.7.0`、Gemini CLI `0.57.0` 与 Harn `0.10.119`。`codex-acp` 证明 ACP Adapter 也能公开丰富的 Codex 模型、思考、审批和认证控制；Harn 则证明图原生 Agent Pipeline 已经成为真实 Harness 形态。它们都应通过通用 Registry 通道和一致性门禁进入 OpenFish，而不是再增加原生选择器分支。
+
+这些更新进一步确认当前架构：只 Curate OpenFish 能逐项验证、会阻断 Release 的 Harness；所有兼容 Registry 条目统一经过同一个有边界的 ACP Driver。没有统一任务 Benchmark 之前，仍不能宣称 Codex、OMP、Pi、OpenCode 或 DSH 谁“最好”。
 
 ## 参考矩阵
 

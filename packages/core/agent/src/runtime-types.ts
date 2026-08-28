@@ -7,11 +7,12 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { LlmCallConfig, LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
-import type { AgentCancelCause, Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import type { LlmCallConfig, LlmFailure, ReasoningEffortId, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { AgentCancelCause, Session, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
 import type { Inbox } from './inbox.ts'
-import type { InboxTarget } from './types.ts'
+import type { Agent, InboxTarget } from './types.ts'
+export type { Agent } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-system-prompt' {
   interface AssembleContext {
@@ -26,6 +27,8 @@ export interface AgentOptions {
   provider?: string
   /** Model id interpreted by the selected provider adapter. */
   model?: string
+  /** Adapter-owned reasoning effort for the selected provider/model route. */
+  reasoningEffort?: ReasoningEffortId
   /** Maximum output tokens for each conversation-model request. */
   maxTokens?: number
 }
@@ -52,7 +55,12 @@ export type AgentStatus = 'idle' | 'running'
 /** Whether and with which messages the loop enters a proposed step. */
 export type PreStepDecision =
   | { kind: 'reject' }
-  | { kind: 'enter'; messages: UserMessage[] }
+  | {
+    kind: 'enter'
+    messages: UserMessage[]
+    /** Start a distinct model-message series before this step's admitted messages. */
+    startsRequestSeries?: true
+  }
 
 /** Action returned by a listener that owns model-request recovery. */
 export type RequestErrorAction = { kind: 'retry' } | undefined
@@ -60,10 +68,8 @@ export type RequestErrorAction = { kind: 'retry' } | undefined
 /** Why a session lifecycle began; seeded creates are `startup`, while persisted loads are `resume`. */
 export type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'
 
-/** Public live-agent handle. */
-export interface Agent {
-  /** The single identity shared with {@link session}. */
-  readonly id: SessionId
+/** Host-only live capabilities mixed into the client-safe Agent identity. */
+export interface AgentRuntimeFace {
   /** The provider route and model this agent's requests use. */
   readonly options: AgentOptions
   /** The live session this agent drives; its log is the durable source of truth. */
@@ -141,6 +147,16 @@ export interface Agent {
    * @param message - identified injected context and the source that supplied it.
    */
   inject(message: UserMessage): void
+}
+
+declare module './types.ts' {
+  interface Agent extends AgentRuntimeFace {}
+}
+
+// Composite-project consumers may reach the same client-safe identity through
+// the public type outlet rather than this package's relative source path.
+declare module '@deepseek-ai/dsh-agent/types' {
+  interface Agent extends AgentRuntimeFace {}
 }
 
 declare module '@deepseek-ai/cordis' {

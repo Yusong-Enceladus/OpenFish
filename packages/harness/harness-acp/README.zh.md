@@ -1,6 +1,6 @@
 # `@deepseek-ai/dsh-harness-acp`
 
-[English](README.md)
+[English](README.md) | 中文
 
 此包是 Open Fish Harness Pack 背后的通用 ACP Driver。安装使用壳子自带且固定版本的 Node/npm 或 Bun runtime，把每个 Pack 版本放入 Open Fish 管理状态。会话从该精确快照以不经过 shell 的 argv 启动可执行文件，而不会再次解析网络包。随后 Driver 把远端 ACP 会话映射到普通 DSH `Agent`、`Session`、inbox、审批、取消和状态约定。
 
@@ -27,4 +27,4 @@
 - Codex 使用独立的内置 Driver 对接官方 `codex app-server` 协议，包括实时账号、模型／思考强度、thread 恢复／删除和真实的 `thread/fork`；它不经过通用 ACP 适配器。
 - 通用 ACP 尚无标准的提供方侧会话删除或 Fork 原语。OpenFish 会在本地停止被放弃的 ACP 草稿，并禁用 Fork，而不会伪造这些远端语义。
 - 受管理的 Harness 进程会在所选 OpenFish 工作区和进程沙箱策略中启动，并使用私有 HOME／缓存／配置／临时目录。发布者元数据和 ACP Registry 传输仍不能替代包完整性、沙箱执行或明确的用户审批。
-- 带校验和的平台归档由 OpenFish 在进程内解包，不委托给宿主机归档工具。系统仅接受 ZIP、TAR、TAR.GZ 与 TGZ，拒绝链接和非普通归档条目，并把归档限制为最多 20,000 个条目、1,024 字节路径、512 MiB 压缩体积和 2 GiB 解包体积；所有内容只能写入全新的受管版本目录。Bzip2 TAR 有意保持不支持。直接下载的可执行文件在声明的 SHA-256 匹配时仍然受支持。
+- 带校验和的平台归档由 OpenFish 在进程内解包，不委托给宿主机归档工具。系统接受 ZIP、TAR、TAR.GZ、TGZ、TAR.BZ2 与 TBZ2，拒绝链接和非普通归档条目，并把归档限制为最多 20,000 个条目、1,024 字节路径、512 MiB 压缩体积和 2 GiB 解包／解压体积；所有内容只能写入全新的受管版本目录。直接下载的可执行文件在声明的 SHA-256 匹配时仍然受支持。

@@ -75,13 +75,13 @@ function fakeSeatbeltExec(status: number): string {
 const SEATBELT_RO_PROFILE = '(version 1) (allow default) (deny file-write*) (allow file-write* (literal "/dev/null"))'
 
 describe('profile dialects', () => {
-  it('bwrap read-only: whole tree read-only with fresh /dev and /proc, no writable mounts', () => {
-    expect(bwrapProfileArgs(RO)).toEqual(['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent'])
+  it('bwrap read-only: whole tree read-only with fresh /dev and private PID-scoped /proc, no writable mounts', () => {
+    expect(bwrapProfileArgs(RO)).toEqual(['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent'])
   })
 
   it('bwrap workspace-write: adds an ephemeral /tmp and rebinds the workspace root', () => {
     expect(bwrapProfileArgs(WW)).toEqual([
-      '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent',
+      '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent',
       '--tmpfs', '/tmp', '--bind', '/ws', '/ws',
     ])
   })
@@ -128,6 +128,30 @@ describe('profile dialects', () => {
     expect(profile).toContain('(deny process-info*)')
     expect(profile).toContain('(deny appleevent-send)')
     expect(profile).toContain('(deny mach-lookup)')
+  })
+
+  it('seatbelt grants metadata-only traversal through protected ancestors of an explicit readable root', () => {
+    const profile = seatbeltProfileArgs({
+      mode: 'read-only',
+      workspaceRoot: '/Volumes/OpenFish/workspace',
+      isolation: {
+        protectedReadRoots: ['/Volumes', '/Users'],
+        readableRoots: ['/Volumes/OpenFish/runtime/bin', '/Users/example/OpenFish/auth'],
+        denyNetworkInbound: true,
+        denyHostProcessControl: true,
+        denyHostInterprocessCommunication: true,
+      },
+    })[1] as string
+
+    expect(profile).toContain('(allow file-read-metadata')
+    expect(profile).toContain('(literal "/Volumes")')
+    expect(profile).toContain('(literal "/Volumes/OpenFish")')
+    expect(profile).toContain('(literal "/Volumes/OpenFish/runtime")')
+    expect(profile).toContain('(literal "/Users")')
+    expect(profile).toContain('(literal "/Users/example")')
+    expect(profile).toContain('(literal "/Users/example/OpenFish")')
+    expect(profile).not.toContain('(allow file-read* (subpath "/Volumes")')
+    expect(profile).not.toContain('(allow file-read* (subpath "/Users")')
   })
 })
 

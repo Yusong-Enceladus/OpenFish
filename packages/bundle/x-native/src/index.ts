@@ -19,10 +19,14 @@
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionAuthenticationRequest } from '@deepseek-ai/dsh-client-connection'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
+import { followNativeContracts } from './feed.ts'
+import { nativeHistory } from './history.ts'
+import { importNativeSessions } from './import.ts'
 import { PairingError, PairingStore, DEFAULT_MAX_DEVICES, DEFAULT_PAIR_TTL_MS } from './pairing.ts'
 import {
   toNativeMethod,
@@ -30,6 +34,13 @@ import {
   type NativeDeviceView,
   type NativeHandshake,
   type NativeMethod,
+  type NativeFollowFrame,
+  type NativeFollowRequest,
+  type NativeHistoryRequest,
+  type NativeHistoryValue,
+  type NativeHostDescription,
+  type NativeImportRequest,
+  type NativeImportValue,
   type PairingCodeResponse,
   type PairRequest,
   type PairResponse,
@@ -40,6 +51,16 @@ export type {
   NativeCapabilities,
   NativeDeviceView,
   NativeHandshake,
+  NativeFollowFrame,
+  NativeFollowRequest,
+  NativeHistoryRequest,
+  NativeHistoryValue,
+  NativeHostDescription,
+  NativeImportFile,
+  NativeImportFormat,
+  NativeImportItem,
+  NativeImportRequest,
+  NativeImportValue,
   NativeMethod,
   PairingCodeResponse,
   PairRequest,
@@ -57,12 +78,18 @@ declare module '@deepseek-ai/cordis' {
 export const name = 'x-native'
 
 /** Service required before the native routes can be registered. */
-export const inject = ['webServer', 'connection']
+export const inject = [
+  'webServer',
+  'connection',
+  'typert',
+  'typertGateway',
+  'sessionController',
+  'workspaceController',
+]
 
 /** API paths owned by dsh-client-connection; duplicated here as protocol facts. */
 const API_BASE = '/api'
-const HOST_EVENTS_PATH = `${API_BASE}/events.host`
-const MUX_EVENTS_PATH = `${API_BASE}/events.mux`
+const REMOTE_MUX_PATH = `${API_BASE}/remote.mux`
 const NATIVE_ROUTE_PREFIX = '/x-native/v2'
 
 /** Maximum accepted JSON body for `/x-native/v2/pair`. */
@@ -109,20 +136,6 @@ interface LoaderFacade {
 /** Minimal Typert facade used for the live method manifest. */
 interface TypertFacade {
   local: { list(): unknown[] }
-}
-
-interface ApiProxyFacade {
-  sessions?: Record<string, unknown>
-  workspace?: Record<string, unknown>
-  host?: Record<string, unknown>
-  settings?: Record<string, unknown>
-  credentials?: Record<string, unknown>
-  llm?: Record<string, unknown>
-  downloads?: Record<string, unknown>
-}
-
-function hasFunctions(value: Record<string, unknown> | undefined, ...names: string[]): boolean {
-  return value !== undefined && names.every(name => typeof value[name] === 'function')
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -192,12 +205,12 @@ function bearerToken(request: ConnectionAuthenticationRequest): string | undefin
 }
 
 /** DSH-owned bootstrap service used before a native client joins the ordinary API. */
-export class XNative extends Service {
+export class XNative extends TypertRemoteService {
   /** Durable device-pairing registry; it never owns business or session state. */
   readonly pairing: PairingStore
 
   constructor(ctx: Context, private config: XNativeConfig) {
-    super(ctx, 'xNative')
+    super(ctx, 'xNative', { namespace: 'xNative' })
     const configuredDataDir = this.config.dataDir
     const dataDir = configuredDataDir
       ? configuredDataDir
@@ -352,7 +365,7 @@ export class XNative extends Service {
                       pairRequest as PairRequest & { codeId: string; clientNonce: string; proof: string },
                       ctx.webServer.remoteCertificateFingerprint,
                     )
-            sendJson(res, 201, result)
+            sendJson(res, 201, this.withCanonicalHostURL(result))
           } catch (error) {
             if (error instanceof PairingError) {
               const status = error.code === 'device-limit' ? 409 : error.code === 'invalid-code' ? 401 : 400
@@ -501,7 +514,8 @@ export class XNative extends Service {
     const mounted = this.mountedPackages()
     const voice = this.ctx.get('voice')
     const voiceCapabilities = voice?.describe()
-    const apiProxy = this.ctx.get('apiProxy') as ApiProxyFacade | undefined
+    const endpoints = new Set(this.methods().map(method => method.endpoint))
+    const hasEndpoints = (...required: string[]): boolean => required.every(endpoint => endpoints.has(endpoint))
     const hasLocalVoice = voiceCapabilities?.providers.some(provider =>
       provider.operations.includes('speech-to-text')
         && provider.operations.includes('text-to-speech')) === true
@@ -512,11 +526,13 @@ export class XNative extends Service {
       surface: 'native',
       api: {
         base: API_BASE,
-        hostEvents: HOST_EVENTS_PATH,
-        muxEvents: MUX_EVENTS_PATH,
+        remoteMux: REMOTE_MUX_PATH,
+        remoteEvents: '$events',
+        nativeFeed: 'xNative/follow',
       },
       features: {
-        apiProxy: this.ctx.get('apiProxy') !== undefined,
+        apiProxy: false,
+        gateway: this.ctx.get('typertGateway') !== undefined,
         typert: this.ctx.get('typert') !== undefined,
         remotePlugin: mounted.has('dsh-remote-plugin'),
         voicePlugin: voice !== undefined || mounted.has('dsh-voice-input'),
@@ -524,15 +540,21 @@ export class XNative extends Service {
         imageGenerationExtension: mounted.has('@deepseek-ai/dsh-extension-image-generation'),
       },
       contracts: {
-        sessions: hasFunctions(apiProxy?.sessions, 'create', 'history', 'prompt', 'cancel'),
-        workspaces: hasFunctions(apiProxy?.workspace, 'list', 'create', 'archiveSession'),
-        interactions: this.ctx.get('approval') !== undefined && this.ctx.get('userQuestions') !== undefined,
-        settings: hasFunctions(apiProxy?.settings, 'describe', 'update')
-          && hasFunctions(apiProxy?.credentials, 'describe'),
-        providers: hasFunctions(apiProxy?.llm, 'providers', 'models')
-          && hasFunctions(apiProxy?.sessions, 'selectModel'),
-        migration: hasFunctions(apiProxy?.sessions, 'import') && apiProxy?.downloads !== undefined,
-        sandbox: hasFunctions(apiProxy?.host, 'runSandboxed'),
+        sessions: hasEndpoints(
+          'session/list', 'session/create', 'session/prompt', 'session/cancel',
+          'session/follow', 'session/control', 'xNative/history',
+        ),
+        workspaces: hasEndpoints(
+          'workspace/list', 'workspace/create', 'workspace/archiveSession',
+          'workspace/unarchiveSession', 'workspace/follow',
+        ),
+        interactions: this.ctx.get('typertGateway') !== undefined
+          && this.ctx.get('approval') !== undefined
+          && this.ctx.get('userQuestions') !== undefined,
+        settings: hasEndpoints('settings/describe', 'settings/update', 'credentials/describe'),
+        providers: hasEndpoints('session/models', 'session/selectModel', 'session/modelCatalog'),
+        migration: hasEndpoints('xNative/import'),
+        sandbox: false,
       },
       ...(voiceCapabilities === undefined ? {} : { voice: voiceCapabilities }),
       pairing: {
@@ -562,6 +584,43 @@ export class XNative extends Service {
       .sort((left, right) => left.endpoint.localeCompare(right.endpoint))
   }
 
+  /** Merge canonical Remote Event, Workspace, Session control, and selected-task streams. */
+  @Remote({ mode: 'stream' })
+  follow(request: NativeFollowRequest, signal: AbortSignal): AsyncIterable<NativeFollowFrame> {
+    return followNativeContracts(this.ctx, request, signal)
+  }
+
+  /** Read one native transcript page without restoring the removed ApiProxy transport. */
+  @Remote('history')
+  history(request: NativeHistoryRequest, signal: AbortSignal): Promise<NativeHistoryValue> {
+    return nativeHistory(this.ctx, request, signal)
+  }
+
+  /** Import bounded Codex or DSH archives as replayable DSH-owned tasks. */
+  @Remote('import')
+  import(request: NativeImportRequest, signal: AbortSignal): Promise<NativeImportValue> {
+    return importNativeSessions(this.ctx, request, signal)
+  }
+
+  /** Return diagnostics without exposing the Host launch directory to paired devices. */
+  @Remote('describe')
+  async describe(signal: AbortSignal): Promise<NativeHostDescription> {
+    const [sessions, catalog] = await Promise.all([
+      this.ctx.sessionController.list({}, signal),
+      this.ctx.sessionController.modelCatalog().catch(() => undefined),
+    ])
+    return {
+      version: process.env.npm_package_version ?? 'development',
+      cwd: '',
+      ...(catalog === undefined ? {} : {
+        provider: catalog.default.provider,
+        model: catalog.default.model,
+      }),
+      attachedSessions: sessions.items.length,
+      canOpenPath: this.ctx.sessionController.canOpenWorkspacePath(),
+    }
+  }
+
   /**
    * Register one native device through the DSH pairing store.
    * @param request - Validated device identity supplied by the loopback route.
@@ -577,11 +636,26 @@ export class XNative extends Service {
    */
   createPairingCode(): PairingCodeResponse {
     const code = this.pairing.createPairingCode()
+    const hostURL = this.canonicalHostURL()
+    return hostURL === undefined ? code : { ...code, hostURL }
+  }
+
+  /**
+   * Return the stable Bonjour address covered by the packaged Host's TLS
+   * identity. Persisting this value prevents paired phones from becoming
+   * stranded whenever DHCP assigns the Mac a different LAN address.
+   */
+  private canonicalHostURL(): string | undefined {
     const port = this.ctx.webServer.remotePort
-    if (port === undefined) return code
+    if (port === undefined) return undefined
     const localName = hostname().trim().replace(/\.local$/iu, '')
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(localName)) return code
-    return { ...code, hostURL: `https://${localName}.local:${String(port)}` }
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(localName)) return undefined
+    return `https://${localName}.local:${String(port)}`
+  }
+
+  private withCanonicalHostURL(response: PairResponse): PairResponse {
+    const hostURL = this.canonicalHostURL()
+    return hostURL === undefined ? response : { ...response, hostURL }
   }
 
   /**

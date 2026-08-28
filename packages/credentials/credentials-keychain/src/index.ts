@@ -5,8 +5,16 @@ import { readFile, stat, unlink } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { CredentialProvider, credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
+import { CredentialProvider, credentialRef, parseCredentialKey } from '@deepseek-ai/dsh-credentials'
+import type {
+  CredentialInfo,
+  CredentialKey,
+  CredentialRecord,
+  CredentialRecordEntry,
+  CredentialRecordInfo,
+  CredentialRef,
+  ResolvedCredential,
+} from '@deepseek-ai/dsh-credentials'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { parse as parseYaml } from 'yaml'
@@ -67,6 +75,67 @@ function accountFor(ref: CredentialRef): string {
   return `openfish:${ref}`
 }
 
+const RECORD_INDEX_ACCOUNT = 'openfish:records:index'
+
+function accountForRecord(key: CredentialKey): string {
+  return `openfish:record:${key}`
+}
+
+function assertJsonValue(value: unknown, seen = new Set<object>()): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return
+  if (typeof value === 'number' && Number.isFinite(value)) return
+  if (typeof value !== 'object') throw new TypeError('keychain credential record contains a non-JSON value')
+  if (seen.has(value)) throw new TypeError('keychain credential record contains a cycle')
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new TypeError('keychain credential record contains a non-plain object')
+  }
+  seen.add(value)
+  for (const nested of Object.values(value)) assertJsonValue(nested, seen)
+  seen.delete(value)
+}
+
+function admittedRecord(key: CredentialKey, value: unknown): CredentialRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`keychain credential record "${key}" is not an object`)
+  }
+  const record = value as Record<string, unknown>
+  if (record.kind === 'api-key') {
+    if (Object.keys(record).some(field => !['kind', 'key', 'env'].includes(field))) {
+      throw new TypeError(`keychain credential record "${key}" has an unknown field`)
+    }
+    if (record.key !== undefined && (typeof record.key !== 'string' || record.key.length === 0)) {
+      throw new TypeError(`keychain credential record "${key}" has an invalid key`)
+    }
+    let env: Record<string, string> | undefined
+    if (record.env !== undefined) {
+      if (typeof record.env !== 'object' || record.env === null || Array.isArray(record.env)) {
+        throw new TypeError(`keychain credential record "${key}" has invalid environment values`)
+      }
+      env = {}
+      for (const [name, entry] of Object.entries(record.env as Record<string, unknown>)) {
+        credentialRef(name)
+        if (typeof entry !== 'string' || entry.length === 0) {
+          throw new TypeError(`keychain credential record "${key}" has an invalid environment value`)
+        }
+        env[name] = entry
+      }
+    }
+    return {
+      kind: 'api-key',
+      ...(record.key === undefined ? {} : { key: record.key }),
+      ...(env === undefined ? {} : { env }),
+    }
+  }
+  if (record.kind === 'grant') {
+    if (Object.keys(record).some(field => !['kind', 'payload'].includes(field)) || !('payload' in record)) {
+      throw new TypeError(`keychain credential record "${key}" has an invalid grant payload`)
+    }
+    assertJsonValue(record.payload)
+    return { kind: 'grant', payload: record.payload }
+  }
+  throw new TypeError(`keychain credential record "${key}" has an unknown kind`)
+}
+
 /** Values never enter settings, Pack state, process arguments, or API responses. */
 export class KeychainCredentials extends CredentialProvider {
   static Config: z<Config> = z.object({
@@ -76,6 +145,7 @@ export class KeychainCredentials extends CredentialProvider {
 
   private readonly executor: KeychainExecutor
   private readonly ready: Promise<void>
+  private recordMutationTail: Promise<void> = Promise.resolve()
 
   constructor(ctx: Context, config: Config = {}, executor?: KeychainExecutor) {
     super(ctx)
@@ -135,6 +205,90 @@ export class KeychainCredentials extends CredentialProvider {
     }
     await this.executor.remove(accountFor(validated))
     this.notifyUpdated(validated)
+  }
+
+  private enqueueRecordMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.recordMutationTail.then(operation, operation)
+    this.recordMutationTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async recordIndex(): Promise<CredentialKey[]> {
+    const serialized = await this.executor.get(RECORD_INDEX_ACCOUNT)
+    if (serialized === undefined) return []
+    const parsed = JSON.parse(serialized) as unknown
+    if (!Array.isArray(parsed) || parsed.some(value => typeof value !== 'string')) {
+      throw new Error('keychain credential record index is invalid')
+    }
+    return [...new Set(parsed.map(value => parseCredentialKey(value as string)))]
+      .sort((left, right) => String(left).localeCompare(String(right)))
+  }
+
+  private async writeRecordIndex(keys: readonly CredentialKey[]): Promise<void> {
+    if (keys.length === 0) {
+      await this.executor.remove(RECORD_INDEX_ACCOUNT)
+      return
+    }
+    await this.executor.set(RECORD_INDEX_ACCOUNT, JSON.stringify(keys.map(String).toSorted()))
+  }
+
+  private async readStoredRecord(key: CredentialKey): Promise<CredentialRecord | undefined> {
+    const serialized = await this.executor.get(accountForRecord(key))
+    if (serialized === undefined) return undefined
+    return admittedRecord(key, JSON.parse(serialized) as unknown)
+  }
+
+  override async readRecord(key: CredentialKey): Promise<CredentialRecord | undefined> {
+    await this.ready
+    await this.recordMutationTail
+    return this.readStoredRecord(key)
+  }
+
+  override async describeRecord(key: CredentialKey): Promise<CredentialRecordInfo> {
+    const record = await this.readRecord(key)
+    return record === undefined
+      ? { configured: false, writable: true }
+      : { configured: true, kind: record.kind, writable: true }
+  }
+
+  override async listRecords(): Promise<readonly CredentialRecordEntry[]> {
+    await this.ready
+    await this.recordMutationTail
+    const entries: CredentialRecordEntry[] = []
+    for (const key of await this.recordIndex()) {
+      const record = await this.readStoredRecord(key)
+      if (record !== undefined) entries.push({ key, kind: record.kind })
+    }
+    return entries
+  }
+
+  override modifyRecord(
+    key: CredentialKey,
+    mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+  ): Promise<CredentialRecord | undefined> {
+    return this.enqueueRecordMutation(async () => {
+      await this.ready
+      const current = await this.readStoredRecord(key)
+      const proposed = await mutate(current)
+      if (proposed === undefined) return current
+      const next = admittedRecord(key, proposed)
+      await this.executor.set(accountForRecord(key), JSON.stringify(next))
+      const index = await this.recordIndex()
+      if (!index.includes(key)) await this.writeRecordIndex([...index, key])
+      this.notifyRecordUpdated(key)
+      return next
+    })
+  }
+
+  override deleteRecord(key: CredentialKey): Promise<void> {
+    return this.enqueueRecordMutation(async () => {
+      await this.ready
+      const current = await this.readStoredRecord(key)
+      if (current === undefined) return
+      await this.executor.remove(accountForRecord(key))
+      await this.writeRecordIndex((await this.recordIndex()).filter(candidate => candidate !== key))
+      this.notifyRecordUpdated(key)
+    })
   }
 
   private async migrateLegacy(path: string): Promise<void> {

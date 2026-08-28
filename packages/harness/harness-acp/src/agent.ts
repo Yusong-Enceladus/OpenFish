@@ -2,24 +2,31 @@
 
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Readable as NodeReadable, Writable as NodeWritable } from 'node:stream'
+import { Readable as NodeReadable, Transform, Writable as NodeWritable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { StringDecoder } from 'node:string_decoder'
 import { closeSync, constants, createReadStream, existsSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import { access, chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   ClientSideConnection,
-  ndJsonStream,
+  CreateElicitationRequest as AcpCreateElicitationRequest,
+  ElicitationPropertySchema as AcpElicitationPropertySchema,
+  MultiSelectItems as AcpMultiSelectItems,
   PROTOCOL_VERSION,
   type Agent as AcpConnection,
   type Client,
   type ContentBlock as AcpContentBlock,
+  type BooleanPropertySchema,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
   type CreateTerminalRequest,
   type ElicitationContentValue,
   type ElicitationPropertySchema,
+  type IntegerPropertySchema,
   type KillTerminalRequest,
+  type MultiSelectPropertySchema,
+  type NumberPropertySchema,
   type ReadTextFileRequest,
   type ReleaseTerminalRequest,
   type RequestPermissionRequest,
@@ -27,6 +34,9 @@ import {
   type SessionConfigOption,
   type SessionModeState,
   type SessionNotification,
+  type StringPropertySchema,
+  type StringMultiSelectItems,
+  type TitledMultiSelectItems,
   type TerminalOutputRequest,
   type WaitForTerminalExitRequest,
   type WriteTextFileRequest,
@@ -39,6 +49,8 @@ import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionId, TurnEndReason } from '@deepseek-ai/dsh-session'
 import {
   observeHarnessRuntime,
+  parseHarnessPack,
+  safeHarnessDiagnostic,
   type HarnessAuthMethod,
   type HarnessCapability,
   type HarnessPack,
@@ -52,11 +64,19 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { Unzip, UnzipInflate } from 'fflate'
-import { extract as extractTar } from 'tar'
+import { extract as extractTar, type TarOptionsWithAliasesAsyncNoFile } from 'tar'
+import unbzip2Stream from 'unbzip2-stream'
 import { prepareHarnessProcess } from './process-authority.ts'
-import { abortableHarnessOperation, harnessStartupError, harnessStartupSignal } from './startup.ts'
+import { abortableHarnessOperation, harnessStartupError, harnessStartupSignal, harnessTransportClosed } from './startup.ts'
+import { boundedAcpNdJsonStream } from './acp-stream.ts'
+import { durableAcpSessionUpdate } from './native-event.ts'
 
 type Phase = { kind: 'idle'; turn: number } | { kind: 'running'; turn: number; abort: AbortController }
+
+interface AcpSessionSelectionSnapshot {
+  mode?: string
+  options: Array<{ id: string; value: string | boolean; category?: string }>
+}
 
 /** One model and its optional reasoning directory advertised by an ACP Harness. */
 export interface AcpHarnessModelOption {
@@ -106,9 +126,9 @@ export interface AcpHarnessConfigOption {
 }
 
 /**
- * Resolve portable session defaults declared by editable Pack nodes.
- * `acpSessionOptions` maps standard ACP configuration ids to select/boolean
- * values, so this remains generic when a new Harness appears.
+ * Resolve portable session defaults declared by typed controls on editable
+ * Pack nodes. Driver-owned bindings map fields to standard ACP configuration
+ * ids, so this remains generic when a new Harness appears.
  * @param pack - Admitted Pack whose composable nodes may declare defaults.
  * @returns Ordered ACP option assignments for a newly created session.
  */
@@ -133,27 +153,88 @@ export function packSessionConfiguration(pack: HarnessPack): Array<{ id: string;
       }
       resolved.set(field.binding.target, value)
     }
-    const raw = node.config.acpSessionOptions
-    if (raw === undefined) continue
-    if (raw === null || Array.isArray(raw) || typeof raw !== 'object') {
-      throw new Error(`Harness Pack node "${node.id}" must declare "acpSessionOptions" as an object`)
-    }
-    for (const [id, value] of Object.entries(raw)) {
-      if (id.trim() === '' || (typeof value !== 'string' && typeof value !== 'boolean')) {
-        throw new Error(`Harness Pack node "${node.id}" has an invalid ACP session option "${id}"`)
-      }
-      const previous = resolved.get(id)
-      if (previous !== undefined && previous !== value) {
-        throw new Error(`Harness Pack declares conflicting values for ACP session option "${id}"`)
-      }
-      resolved.set(id, value)
-    }
   }
   return [...resolved].map(([id, value]) => ({ id, value }))
 }
 
 function flattenedSelectOptions(option: Extract<SessionConfigOption, { type: 'select' }>) {
   return option.options.flatMap(entry => 'group' in entry ? entry.options : [entry])
+}
+
+const MAX_ACP_CONFIG_OPTIONS = 128
+const MAX_ACP_CONFIG_VALUES = 1_024
+const MAX_ACP_ID_CODE_POINTS = 256
+const MAX_ACP_LABEL_CODE_POINTS = 256
+const MAX_ACP_DESCRIPTION_CODE_POINTS = 2_048
+
+function validAcpText(value: unknown, maximum: number, allowEmpty = false): value is string {
+  if (typeof value !== 'string') return false
+  const length = Array.from(value).length
+  return (allowEmpty || value.trim().length > 0) && length <= maximum && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
+}
+
+/** Admit one bounded, unambiguous ACP configuration directory before UI projection or mutation. */
+export function admitAcpSessionConfigOptions(input: readonly SessionConfigOption[]): SessionConfigOption[] {
+  if (!Array.isArray(input) || input.length > MAX_ACP_CONFIG_OPTIONS) {
+    throw new Error(`ACP configuration directory exceeds ${MAX_ACP_CONFIG_OPTIONS} options`)
+  }
+  const optionIds = new Set<string>()
+  for (const raw of input) {
+    const option = raw as SessionConfigOption & Record<string, unknown>
+    if (!validAcpText(option.id, MAX_ACP_ID_CODE_POINTS) || optionIds.has(option.id)) {
+      throw new Error('ACP configuration option ids must be unique, non-empty, and bounded')
+    }
+    optionIds.add(option.id)
+    if (!validAcpText(option.name, MAX_ACP_LABEL_CODE_POINTS)) {
+      throw new Error(`ACP configuration option "${option.id}" has an invalid label`)
+    }
+    if (option.description !== undefined && option.description !== null
+      && !validAcpText(option.description, MAX_ACP_DESCRIPTION_CODE_POINTS, true)) {
+      throw new Error(`ACP configuration option "${option.id}" has an invalid description`)
+    }
+    if (option.category !== undefined && option.category !== null
+      && !validAcpText(option.category, MAX_ACP_ID_CODE_POINTS)) {
+      throw new Error(`ACP configuration option "${option.id}" has an invalid category`)
+    }
+    if (option.type === 'boolean') {
+      if (typeof option.currentValue !== 'boolean') {
+        throw new Error('ACP boolean configuration option requires a boolean current value')
+      }
+      continue
+    }
+    if (option.type !== 'select' || !Array.isArray(option.options)) {
+      throw new Error('ACP configuration option has an unsupported type')
+    }
+    const values = flattenedSelectOptions(option)
+    if (values.length === 0 || values.length > MAX_ACP_CONFIG_VALUES) {
+      throw new Error(`ACP configuration option "${option.id}" has an invalid choice count`)
+    }
+    const valueIds = new Set<string>()
+    for (const entry of option.options) {
+      if ('group' in entry) {
+        if (!validAcpText(entry.group, MAX_ACP_ID_CODE_POINTS)
+          || !validAcpText(entry.name, MAX_ACP_LABEL_CODE_POINTS)) {
+          throw new Error(`ACP configuration option "${option.id}" has an invalid choice group`)
+        }
+      }
+    }
+    for (const value of values) {
+      if (!validAcpText(value.value, MAX_ACP_ID_CODE_POINTS) || valueIds.has(value.value)
+        || !validAcpText(value.name, MAX_ACP_LABEL_CODE_POINTS)) {
+        throw new Error(`ACP configuration option "${option.id}" has duplicate or invalid choices`)
+      }
+      valueIds.add(value.value)
+      if (value.description !== undefined && value.description !== null
+        && !validAcpText(value.description, MAX_ACP_DESCRIPTION_CODE_POINTS, true)) {
+        throw new Error(`ACP configuration option "${option.id}" has an invalid choice description`)
+      }
+    }
+    if (!validAcpText(option.currentValue, MAX_ACP_ID_CODE_POINTS)
+      || !valueIds.has(option.currentValue)) {
+      throw new Error(`ACP configuration option "${option.id}" selected an unadvertised value`)
+    }
+  }
+  return [...input]
 }
 
 /**
@@ -254,7 +335,10 @@ function uvCliPath(): string {
   const runtimeRoot = process.env.OPENFISH_EMBEDDED_RUNTIME_ROOT
   if (runtimeRoot !== undefined && runtimeRoot !== '') {
     const candidate = join(runtimeRoot, 'uv', process.platform === 'win32' ? 'uv.exe' : 'uv')
-    if (existsSync(candidate)) return candidate
+    if (!existsSync(candidate)) {
+      throw new Error('The packaged OpenFish runtime is incomplete: its pinned uv executable is missing')
+    }
+    return candidate
   }
   return process.platform === 'win32' ? 'uv.exe' : 'uv'
 }
@@ -268,8 +352,11 @@ function pythonPackageCommand(spec: string): string {
 function embeddedRuntimePackagePath(packageName: string, relativePath: string): string | undefined {
   const runtimeRoot = process.env.OPENFISH_EMBEDDED_RUNTIME_ROOT
   if (runtimeRoot === undefined || runtimeRoot === '') return undefined
-  const candidate = join(runtimeRoot, 'app', 'node_modules', '.pnpm', 'node_modules', packageName, relativePath)
-  return existsSync(candidate) ? candidate : undefined
+  const candidate = join(runtimeRoot, 'app', 'node_modules', packageName, relativePath)
+  if (!existsSync(candidate)) {
+    throw new Error(`The packaged OpenFish runtime is incomplete: its pinned ${packageName} executable is missing`)
+  }
+  return candidate
 }
 
 /**
@@ -374,14 +461,9 @@ export function terminalAuthenticationMarker(runtimeDirectory: string, methodId:
 function startupDiagnostic(child: SubprocessHandle): string | undefined {
   const stderr = child.collected.stderr?.readFrom(0).text.trim()
   if (stderr === undefined || stderr === '') return undefined
-  return sanitizeDiagnostic(stderr.split(/\r?\n/u).filter(line => line.trim() !== '').slice(-12).join(' | ').slice(0, 1_600))
-}
-
-function sanitizeDiagnostic(input: string): string {
-  return input
-    .replace(/\/Users\/[^/\s]+/gu, '$HOME')
-    .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{12,}\b/gu, '[REDACTED]')
-    .replace(/((?:api[_-]?key|authorization|token)\s*[:=]\s*)[^\s,;]+/giu, '$1[REDACTED]')
+  return safeHarnessDiagnostic(
+    stderr.split(/\r?\n/u).filter(line => line.trim() !== '').slice(-12).join(' | ').slice(0, 1_600),
+  )
 }
 
 /**
@@ -431,7 +513,7 @@ export async function installHarnessPack(
     if (outcome.exitCode !== 0) {
       const diagnostic = child.collected.stderr?.readFrom(0).text.trim()
         || child.collected.stdout?.readFrom(0).text.trim() || `exit ${String(outcome.exitCode)}`
-      throw new Error(`Harness Python package installation failed: ${sanitizeDiagnostic(diagnostic)}`)
+      throw new Error(`Harness Python package installation failed: ${safeHarnessDiagnostic(diagnostic)}`)
     }
     return
   }
@@ -454,7 +536,7 @@ export async function installHarnessPack(
     const diagnostic = child.collected.stderr?.readFrom(0).text.trim()
       || child.collected.stdout?.readFrom(0).text.trim()
       || `exit ${String(outcome.exitCode)}`
-    throw new Error(`Harness package installation failed: ${sanitizeDiagnostic(diagnostic)}`)
+    throw new Error(`Harness package installation failed: ${safeHarnessDiagnostic(diagnostic)}`)
   }
 }
 
@@ -489,7 +571,7 @@ export async function discoverAcpAuthentication(
       sessionUpdate: () => Promise.resolve(),
       requestPermission: () => Promise.resolve({ outcome: { outcome: 'cancelled' } }),
     }),
-    ndJsonStream(
+    boundedAcpNdJsonStream(
       NodeWritable.toWeb(child.stdin) as WritableStream<Uint8Array>,
       NodeReadable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
     ),
@@ -500,23 +582,15 @@ export async function discoverAcpAuthentication(
       clientCapabilities: { plan: {}, auth: { terminal: true }, fs: { readTextFile: false, writeTextFile: false } },
       clientInfo: { name: 'open-fish', title: 'Open Fish', version: '0.1.0' },
     })
-    return (initialized.authMethods ?? []).map((method): HarnessAuthMethod => {
-      if ('type' in method && method.type === 'env_var') {
-        return {
-          id: method.id, name: method.name, kind: 'environment',
-          fields: method.vars.map(variable => ({
-            // ACP names the process environment variable itself. Reusing that
-            // valid credential reference lets existing CI/user credentials
-            // work and avoids an artificial Open Fish-only alias.
-            ref: credentialRef(variable.name),
-            name: variable.label ?? variable.name,
-            env: variable.name,
-            required: variable.optional !== true,
-            secret: variable.secret !== false,
-          })),
+    const advertised = initialized.authMethods ?? []
+    if (!Array.isArray(advertised) || advertised.length > 32) {
+      throw new Error('ACP Harness advertised too many authentication methods')
+    }
+    const methods = advertised.map((method): HarnessAuthMethod => {
+      if ('type' in method && method.type === 'terminal') {
+        if ((method.args?.length ?? 0) > 128 || Object.keys(method.env ?? {}).length > 128) {
+          throw new Error('ACP Harness terminal authentication exceeds the supported process configuration limits')
         }
-      }
-      if ('type' in method) {
         return {
           id: method.id, name: method.name, kind: 'terminal', fields: [],
           terminal: { args: method.args ?? [], env: method.env ?? {} },
@@ -524,6 +598,9 @@ export async function discoverAcpAuthentication(
       }
       return { id: method.id, name: method.name, kind: 'agent', fields: [] }
     })
+    // Reuse Pack admission so discovery cannot bypass the exact same scalar,
+    // process, secret-reference, and duplicate-id rules as authored Packs.
+    return parseHarnessPack({ ...pack, authMethods: methods }).authMethods ?? []
   } finally {
     child.terminate()
     await child.done.catch(() => undefined)
@@ -623,7 +700,7 @@ export async function launchManagedTerminalAuthentication(
   const outcome = await child.done
   if (outcome.exitCode !== 0) {
     const detail = child.collected.stderr?.readFrom(0).text.trim() || `exit ${String(outcome.exitCode)}`
-    throw new Error(`Could not open Harness login: ${sanitizeDiagnostic(detail)}`)
+    throw new Error(`Could not open Harness login: ${safeHarnessDiagnostic(detail)}`)
   }
   const completionFile = request.completionFile ?? request.successMarker
   if (completionFile !== undefined) {
@@ -762,12 +839,11 @@ async function extractBoundedZip(archivePath: string, directory: string, signal?
   }
 }
 
-async function extractBoundedTar(archivePath: string, directory: string, signal?: AbortSignal): Promise<void> {
+function boundedTarOptions(directory: string, signal?: AbortSignal): TarOptionsWithAliasesAsyncNoFile {
   let entryCount = 0
   let unpackedBytes = 0
   const targets = new Set<string>()
-  await extractTar({
-    file: archivePath,
+  return {
     cwd: directory,
     strict: true,
     preservePaths: false,
@@ -794,7 +870,30 @@ async function extractBoundedTar(archivePath: string, directory: string, signal?
       }
       return true
     },
+  }
+}
+
+async function extractBoundedTar(archivePath: string, directory: string, signal?: AbortSignal): Promise<void> {
+  await extractTar({ file: archivePath, ...boundedTarOptions(directory, signal) })
+}
+
+async function extractBoundedBzip2Tar(archivePath: string, directory: string, signal?: AbortSignal): Promise<void> {
+  let tarBytes = 0
+  const boundedTarStream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      signal?.throwIfAborted()
+      tarBytes += chunk.byteLength
+      if (!Number.isSafeInteger(tarBytes) || tarBytes > MAXIMUM_UNPACKED_BYTES) {
+        callback(new Error('Harness bzip2 archive exceeds the 2 GiB decompressed TAR limit'))
+        return
+      }
+      callback(null, chunk)
+    },
   })
+  const unpack = extractTar(boundedTarOptions(directory, signal))
+  const streams = [createReadStream(archivePath), unbzip2Stream(), boundedTarStream, unpack] as const
+  if (signal === undefined) await pipeline(...streams)
+  else await pipeline(...streams, { signal })
 }
 
 async function installBinaryHarness(
@@ -854,7 +953,7 @@ async function installBinaryHarness(
   } else if (/\.(?:tar|tar\.gz|tgz)$/u.test(lower)) {
     await extractBoundedTar(archivePath, directory, signal)
   } else if (/\.(?:tar\.bz2|tbz2)$/u.test(lower)) {
-    throw new Error('Bzip2 Harness archives are not supported; publish zip, tar, tar.gz, or a direct executable')
+    await extractBoundedBzip2Tar(archivePath, directory, signal)
   } else {
     // A non-archive URL is already streamed into `archivePath`; promote that
     // exact verified byte stream instead of buffering a second copy. The
@@ -905,12 +1004,33 @@ interface AcpClientTerminal {
 
 interface ElicitationField {
   readonly id: string
-  readonly schema: ElicitationPropertySchema
+  readonly schema: SupportedElicitationPropertySchema
   readonly required: boolean
   readonly valuesByLabel: ReadonlyMap<string, string>
 }
 
 const OPTIONAL_ELICITATION_VALUE = '\u0000openfish.optional.skip'
+
+type SupportedElicitationPropertySchema =
+  | (StringPropertySchema & { type: 'string' })
+  | (NumberPropertySchema & { type: 'number' })
+  | (IntegerPropertySchema & { type: 'integer' })
+  | (BooleanPropertySchema & { type: 'boolean' })
+  | (Omit<MultiSelectPropertySchema, 'items'> & {
+    type: 'array'
+    items: (StringMultiSelectItems & { type: 'string' }) | TitledMultiSelectItems
+  })
+
+function isSupportedElicitationPropertySchema(
+  schema: ElicitationPropertySchema,
+): schema is SupportedElicitationPropertySchema {
+  return AcpElicitationPropertySchema.isString(schema)
+    || AcpElicitationPropertySchema.isNumber(schema)
+    || AcpElicitationPropertySchema.isInteger(schema)
+    || AcpElicitationPropertySchema.isBoolean(schema)
+    || (AcpElicitationPropertySchema.isArray(schema)
+      && (AcpMultiSelectItems.isString(schema.items) || AcpMultiSelectItems.isTitled(schema.items)))
+}
 
 function utf8Tail(value: string, byteLimit: number): { value: string; truncated: boolean } {
   const encoded = Buffer.from(value, 'utf8')
@@ -987,18 +1107,18 @@ async function promptBlocks(
   return content
 }
 
-function elicitationChoices(schema: ElicitationPropertySchema): Array<{ label: string; value: string }> {
+function elicitationChoices(schema: SupportedElicitationPropertySchema): Array<{ label: string; value: string }> {
   if (schema.type === 'boolean') return [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }]
   if (schema.type === 'string') {
     if (schema.oneOf !== undefined && schema.oneOf !== null) {
-      return schema.oneOf.map(option => ({ label: option.title, value: option.const }))
+      return schema.oneOf.slice(0, 101).map(option => ({ label: option.title, value: option.const }))
     }
-    return (schema.enum ?? []).map(value => ({ label: value, value }))
+    return (schema.enum ?? []).slice(0, 101).map(value => ({ label: value, value }))
   }
   if (schema.type === 'array') {
-    return 'anyOf' in schema.items
-      ? schema.items.anyOf.map(option => ({ label: option.title, value: option.const }))
-      : schema.items.enum.map(value => ({ label: value, value }))
+    return AcpMultiSelectItems.isTitled(schema.items)
+      ? schema.items.anyOf.slice(0, 101).map(option => ({ label: option.title, value: option.const }))
+      : schema.items.enum.slice(0, 101).map(value => ({ label: value, value }))
   }
   return []
 }
@@ -1039,6 +1159,7 @@ function elicitationFieldValue(
     case 'string': {
       const raw = selected[0] ?? answer.custom
       if (raw === undefined) return undefined
+      if (Array.from(raw).length > 65_536) return undefined
       if (field.schema.minLength !== undefined && field.schema.minLength !== null && raw.length < field.schema.minLength) return undefined
       if (field.schema.maxLength !== undefined && field.schema.maxLength !== null && raw.length > field.schema.maxLength) return undefined
       if (field.schema.format === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(raw)) return undefined
@@ -1071,8 +1192,12 @@ export class AcpHarnessAgent implements Agent {
   private phase: Phase
   private activity: Promise<void> = Promise.resolve()
   private process: SubprocessHandle | undefined
+  private processFailure: Promise<never> | undefined
+  private processStopped = false
   private connection: ClientSideConnection | undefined
   private remoteSessionId: string | undefined
+  private sessionDeleteSupported = false
+  private sessionCloseSupported = false
   private configOptions: SessionConfigOption[] = []
   private modeState: SessionModeState | undefined
   /**
@@ -1091,6 +1216,7 @@ export class AcpHarnessAgent implements Agent {
   private readonly dispatch: AgentEventDispatch
   private processSandboxMode: SandboxMode
   private readonly clientTerminals = new Map<string, AcpClientTerminal>()
+  private readonly workspaceDirectory: string
 
   constructor(
     private readonly hostCtx: Context,
@@ -1103,6 +1229,11 @@ export class AcpHarnessAgent implements Agent {
     private readonly workspaceMode?: HarnessSessionRequest['workspaceMode'],
     private readonly capabilities: HarnessCapability[] = [],
   ) {
+    const workspaceDirectory = session.header.cwd
+    if (workspaceDirectory === undefined || !isAbsolute(workspaceDirectory) || workspaceDirectory.includes('\0')) {
+      throw new Error('ACP Harness sessions require an explicit absolute Project or OpenFish-managed No Project directory')
+    }
+    this.workspaceDirectory = workspaceDirectory
     this.options = { provider: 'harness', model: pack.id }
     this.processSandboxMode = hostCtx.sandboxPolicy.resolve({ session }).mode
     const currentSandboxMode = (): SandboxMode => this.processSandboxMode
@@ -1141,7 +1272,7 @@ export class AcpHarnessAgent implements Agent {
     const authEnv = await this.resolveAuthenticationEnvironment()
     const launch = await prepareHarnessProcess(this.hostCtx, {
       argv,
-      cwd: this.session.header.cwd ?? process.cwd(),
+      cwd: this.workspaceDirectory,
       installationDirectory: this.installationDirectory,
       runtimeDirectory: this.runtimeDirectory,
       purpose: 'session',
@@ -1151,7 +1282,7 @@ export class AcpHarnessAgent implements Agent {
     })
     const child = this.hostCtx.subprocess.spawn({
       argv: launch.argv,
-      cwd: this.session.header.cwd ?? process.cwd(),
+      cwd: this.workspaceDirectory,
       stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } },
       graceMs: 3_000,
       env: launch.env,
@@ -1161,6 +1292,24 @@ export class AcpHarnessAgent implements Agent {
       throw new Error('ACP Harness subprocess did not expose protocol pipes')
     }
     this.process = child
+    this.processStopped = false
+    const processFailure = child.done.then<never>(
+      (outcome) => {
+        if (this.process === child) this.processStopped = true
+        const detail = startupDiagnostic(child)
+        const exit = outcome.exitCode === null ? `signal ${outcome.signal ?? 'unknown'}` : `exit ${String(outcome.exitCode)}`
+        throw new Error(`ACP Harness "${this.pack.name}" process stopped unexpectedly (${exit})${detail === undefined ? '' : `: ${detail}`}`)
+      },
+      (error: unknown) => {
+        if (this.process === child) this.processStopped = true
+        throw new Error(`ACP Harness "${this.pack.name}" process failed: ${safeHarnessDiagnostic(error)}`, { cause: error })
+      },
+    )
+    // A resident Harness can exit while the user is reading the transcript.
+    // Observe that rejection here; a turn races it explicitly and the next
+    // recovery resumes the exact pinned remote session.
+    processFailure.catch(() => undefined)
+    this.processFailure = processFailure
     const makeClient = (_agent: AcpConnection): Client => ({
       sessionUpdate: notification => this.sessionUpdate(notification),
       requestPermission: request => this.requestPermission(request),
@@ -1171,11 +1320,11 @@ export class AcpHarnessAgent implements Agent {
       waitForTerminalExit: request => this.waitForTerminalExit(request),
       killTerminal: request => this.killTerminal(request),
       releaseTerminal: request => this.releaseTerminal(request),
-      unstable_createElicitation: request => this.createElicitation(request),
+      createElicitation: request => this.createElicitation(request),
     })
     const connection = new ClientSideConnection(
       makeClient,
-      ndJsonStream(
+      boundedAcpNdJsonStream(
         NodeWritable.toWeb(child.stdin) as WritableStream<Uint8Array>,
         NodeReadable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       ),
@@ -1193,6 +1342,8 @@ export class AcpHarnessAgent implements Agent {
         },
         clientInfo: { name: 'open-fish', title: 'Open Fish', version: '0.1.0' },
       }), startup)
+      this.sessionDeleteSupported = initialized.agentCapabilities?.sessionCapabilities?.delete !== undefined
+      this.sessionCloseSupported = initialized.agentCapabilities?.sessionCapabilities?.close !== undefined
       const authMethods = initialized.authMethods ?? []
       const agentMethods = authMethods.filter(method => !('type' in method))
       const selectedPackMethod = this.pack.authMethods?.find(method => method.id === this.preferredAuthMethod)
@@ -1220,7 +1371,7 @@ export class AcpHarnessAgent implements Agent {
         throw new Error(`Harness "${this.pack.id}" requires an interactive or environment authentication method not yet configured in Open Fish`)
       }
       if (resumeRemoteSessionId !== undefined) {
-        const request = { sessionId: resumeRemoteSessionId, cwd: this.session.header.cwd ?? process.cwd(), mcpServers: [] }
+        const request = { sessionId: resumeRemoteSessionId, cwd: this.workspaceDirectory, mcpServers: [] }
         // Prefer ACP's resume primitive: Open Fish already owns and renders
         // the durable transcript, so asking the Harness to stream its entire
         // history again is redundant. Codex advertises this capability and
@@ -1231,15 +1382,15 @@ export class AcpHarnessAgent implements Agent {
             ? await abortableHarnessOperation(connection.loadSession(request), startup)
             : undefined
         if (loaded === undefined) throw new Error(`Harness "${this.pack.id}" cannot resume sessions`)
-        this.configOptions = loaded.configOptions ?? []
+        this.configOptions = admitAcpSessionConfigOptions(loaded.configOptions ?? [])
         this.modeState = loaded.modes ?? undefined
         this.remoteSessionId = resumeRemoteSessionId
       } else {
         const created = await abortableHarnessOperation(
-          connection.newSession({ cwd: this.session.header.cwd ?? process.cwd(), mcpServers: [] }),
+          connection.newSession({ cwd: this.workspaceDirectory, mcpServers: [] }),
           startup,
         )
-        this.configOptions = created.configOptions ?? []
+        this.configOptions = admitAcpSessionConfigOptions(created.configOptions ?? [])
         this.modeState = created.modes ?? undefined
         this.remoteSessionId = created.sessionId
       }
@@ -1319,7 +1470,11 @@ export class AcpHarnessAgent implements Agent {
     this.pendingStartupUpdates = []
     for (const update of buffered) {
       void this.recordSessionUpdate(update).catch((error: unknown) => {
-        this.dispatch.emit('agent/error', { turn: this.phase.turn, step: 1, error })
+        this.dispatch.emit('agent/error', {
+          turn: this.phase.turn,
+          step: 1,
+          error: new Error(safeHarnessDiagnostic(error)),
+        })
       })
     }
   }
@@ -1429,7 +1584,7 @@ export class AcpHarnessAgent implements Agent {
       ...(config.type === 'boolean' ? { type: 'boolean' as const, value: value as boolean } : { value: value as string }),
     })
     const response = await operation
-    this.configOptions = response.configOptions
+    this.configOptions = admitAcpSessionConfigOptions(response.configOptions)
     signal?.throwIfAborted()
     return this.harnessConfigCatalog()
   }
@@ -1479,7 +1634,7 @@ export class AcpHarnessAgent implements Agent {
       value: model,
     })
     const response = await modelOperation
-    this.configOptions = response.configOptions
+    this.configOptions = admitAcpSessionConfigOptions(response.configOptions)
     if (reasoningEffort !== undefined) {
       const thought = this.configOptions.find(option => option.type === 'select' && option.category === 'thought_level')
       if (thought === undefined || thought.type !== 'select') {
@@ -1496,7 +1651,7 @@ export class AcpHarnessAgent implements Agent {
         value: reasoningEffort,
       })
       const effortResponse = await effortOperation
-      this.configOptions = effortResponse.configOptions
+      this.configOptions = admitAcpSessionConfigOptions(effortResponse.configOptions)
     }
     const selected = this.harnessModelCatalog()
     signal?.throwIfAborted()
@@ -1551,12 +1706,16 @@ export class AcpHarnessAgent implements Agent {
       const remoteSessionId = this.remoteSessionId
       if (remoteSessionId === undefined) throw new Error(`Harness "${this.pack.id}" has no resumable session identity`)
       const previous = this.processSandboxMode
+      const stagedSelection = this.selectionSnapshot()
       await this.disposeProcess()
       try {
         await this.start(remoteSessionId, mode)
+        await this.restoreSelection(stagedSelection)
       } catch (error: unknown) {
         try {
+          await this.disposeProcess()
           await this.start(remoteSessionId, previous)
+          await this.restoreSelection(stagedSelection)
         } catch (rollbackError: unknown) {
           throw new AggregateError(
             [error, rollbackError],
@@ -1565,6 +1724,19 @@ export class AcpHarnessAgent implements Agent {
         }
         throw error
       }
+    })
+  }
+
+  /** Delete the provider-side identity for an explicitly abandoned blank draft when ACP advertises it. */
+  deleteCurrentRemoteSession(): Promise<void> {
+    return this.runMaintenance(async (signal) => {
+      const connection = this.connection
+      const remoteSessionId = this.remoteSessionId
+      if (connection === undefined || remoteSessionId === undefined || !this.sessionDeleteSupported) return
+      signal.throwIfAborted()
+      await connection.deleteSession({ sessionId: remoteSessionId })
+      signal.throwIfAborted()
+      this.remoteSessionId = undefined
     })
   }
 
@@ -1582,7 +1754,11 @@ export class AcpHarnessAgent implements Agent {
     try {
       while (this.inbox.hasPending && !running.abort.signal.aborted) await this.turn(running)
     } catch (error: unknown) {
-      this.dispatch.emit('agent/error', { turn: running.turn, step: 1, error })
+      this.dispatch.emit('agent/error', {
+        turn: running.turn,
+        step: 1,
+        error: new Error(safeHarnessDiagnostic(error)),
+      })
     } finally {
       this.phase = { kind: 'idle', turn: running.turn }
       this.dispatch.emit('agent/status', { status: 'idle' })
@@ -1608,15 +1784,19 @@ export class AcpHarnessAgent implements Agent {
       this.activeAssembler = new BlockAssembler()
       this.activeChunkSeqs = []
       this.activeNextContentIndex = 2
+      await this.reconnectStoppedProcess(running.abort.signal)
       const connection = this.connection
       const remoteSessionId = this.remoteSessionId
       if (connection === undefined || remoteSessionId === undefined) throw new Error('ACP Harness connection is not ready')
       const prompt = (await Promise.all(messages.map(message =>
         promptBlocks(message, this.hostCtx.attachments, running.abort.signal)))).flat()
-      const result = await connection.prompt({
+      const promptOperation = connection.prompt({
         sessionId: remoteSessionId,
         prompt,
       })
+      const result = this.processFailure === undefined
+        ? await promptOperation
+        : await Promise.race([promptOperation, this.processFailure])
       this.observe('model.completed', 'completed', `Turn ${turn} inference completed`)
       const assembler = this.activeAssembler
       const content = assembler.blocks()
@@ -1632,12 +1812,26 @@ export class AcpHarnessAgent implements Agent {
       }
       if (result.stopReason === 'cancelled') reason = { kind: 'aborted', reason: { kind: 'user' } }
       else if (result.stopReason === 'max_tokens') reason = { kind: 'max-tokens' }
-      else if (result.stopReason !== 'end_turn') reason = { kind: 'error', error: { code: 'ACP_STOP', message: result.stopReason } }
+      else if (result.stopReason !== 'end_turn') {
+        reason = { kind: 'error', error: { code: 'ACP_STOP', message: safeHarnessDiagnostic(result.stopReason) } }
+      }
     } catch (error: unknown) {
+      let failure = error
+      if (harnessTransportClosed(error)) this.processStopped = true
+      if (!running.abort.signal.aborted && this.processStopped) {
+        try {
+          await this.reconnectStoppedProcess(running.abort.signal)
+          failure = new Error(`${safeHarnessDiagnostic(error)}. OpenFish restored the pinned Harness session; retry this turn because the interrupted prompt may have reached the provider.`)
+        } catch (recoveryError: unknown) {
+          failure = new Error(`${safeHarnessDiagnostic(error)}. Automatic Harness recovery failed: ${safeHarnessDiagnostic(recoveryError)}`, {
+            cause: new AggregateError([error, recoveryError]),
+          })
+        }
+      }
       if (running.abort.signal.aborted) reason = { kind: 'aborted', reason: running.abort.signal.reason as AgentCancelCause }
-      else reason = { kind: 'error', error: { code: 'ACP_ERROR', message: error instanceof Error ? error.message : String(error) } }
+      else reason = { kind: 'error', error: { code: 'ACP_ERROR', message: safeHarnessDiagnostic(failure) } }
       this.observe('turn.failed', 'failed', `Turn ${turn} failed`)
-      throw error
+      throw new Error(safeHarnessDiagnostic(failure))
     } finally {
       this.activeAssembler = undefined
       this.activeChunkSeqs = []
@@ -1658,11 +1852,16 @@ export class AcpHarnessAgent implements Agent {
 
   private async recordSessionUpdate(params: SessionNotification): Promise<void> {
     const update = params.update
-    if (update.sessionUpdate === 'config_option_update') this.configOptions = update.configOptions
+    if (update.sessionUpdate === 'config_option_update') {
+      this.configOptions = admitAcpSessionConfigOptions(update.configOptions)
+    }
     if (update.sessionUpdate === 'current_mode_update' && this.modeState !== undefined) {
       this.modeState = { ...this.modeState, currentModeId: update.currentModeId }
     }
-    this.session.append('harness/native-event', { harnessId: this.pack.id, event: update })
+    const durableUpdate = durableAcpSessionUpdate(update)
+    if (durableUpdate !== undefined) {
+      this.session.append('harness/native-event', { harnessId: this.pack.id, event: durableUpdate })
+    }
     if (update.sessionUpdate.includes('tool')) {
       this.observe('tool.activity', 'active', update.sessionUpdate)
     }
@@ -1734,7 +1933,7 @@ export class AcpHarnessAgent implements Agent {
   }
 
   private async workspaceRootPath(): Promise<string> {
-    return realpath(this.session.header.cwd ?? process.cwd())
+    return realpath(this.workspaceDirectory)
   }
 
   private async workspaceExistingPath(path: string): Promise<string> {
@@ -1916,16 +2115,21 @@ export class AcpHarnessAgent implements Agent {
   }
 
   private async createElicitation(request: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    if (!AcpCreateElicitationRequest.isForm(request)) return { action: 'decline' }
     if ('sessionId' in request) this.assertClientSession(request.sessionId)
-    if (request.mode !== 'form') return { action: 'decline' }
     const properties = Object.entries(request.requestedSchema.properties ?? {})
-    if (properties.length === 0 || properties.length > 32 || request.message.length > 10_000) return { action: 'decline' }
-    const required = new Set(request.requestedSchema.required ?? [])
+    if (properties.length === 0 || properties.length > 32 || request.message.length > 10_000
+      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(request.message)
+      || (request.requestedSchema.title?.length ?? 0) > 128) return { action: 'decline' }
+    const requiredRows = request.requestedSchema.required ?? []
+    if (requiredRows.length > 32) return { action: 'decline' }
+    const required = new Set(requiredRows)
     if ([...required].some(id => !properties.some(([candidate]) => candidate === id))) return { action: 'decline' }
     const fields: ElicitationField[] = []
     const questions: AskUserQuestionItem[] = []
     for (const [id, schema] of properties) {
-      if (id.length === 0 || id.length > 256) return { action: 'decline' }
+      if (id.length === 0 || id.length > 256 || /[\u0000-\u001f\u007f]/u.test(id)) return { action: 'decline' }
+      if (!isSupportedElicitationPropertySchema(schema)) return { action: 'decline' }
       // ACP permits arbitrary JSON-Schema regular expressions. Driver API v1
       // does not execute untrusted regexes inside the Host process.
       if (schema.type === 'string' && schema.pattern !== undefined && schema.pattern !== null) return { action: 'decline' }
@@ -1934,10 +2138,16 @@ export class AcpHarnessAgent implements Agent {
         ...elicitationChoices(schema),
         ...(isRequired ? [] : [{ label: 'Skip this optional field', value: OPTIONAL_ELICITATION_VALUE }]),
       ])
-      if (choices.length > 100 || choices.some(choice => choice.label.length === 0 || choice.label.length > 512)) {
+      if (choices.length > 100 || choices.some(choice => choice.label.length === 0 || choice.label.length > 512
+        || choice.value.length === 0 || choice.value.length > 4_096
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(choice.label + choice.value))) {
         return { action: 'decline' }
       }
       if ((schema.title?.length ?? 0) > 512 || (schema.description?.length ?? 0) > 10_000) return { action: 'decline' }
+      if ((schema.type === 'string' && ((schema.maxLength ?? 0) > 65_536 || (schema.minLength ?? 0) > 65_536))
+        || (schema.type === 'array' && ((schema.maxItems ?? 0) > 100 || (schema.minItems ?? 0) > 100))) {
+        return { action: 'decline' }
+      }
       const valuesByLabel = new Map(choices.map(choice => [choice.label, choice.value]))
       fields.push({ id, schema, required: isRequired, valuesByLabel })
       const detail = [request.message, schema.description ?? undefined, isRequired ? undefined : 'Optional']
@@ -1994,12 +2204,67 @@ export class AcpHarnessAgent implements Agent {
     observeHarnessRuntime(this.session, this.pack, signal, status, activity)
   }
 
+  private async reconnectStoppedProcess(signal: AbortSignal): Promise<void> {
+    if (!this.processStopped) return
+    const remoteSessionId = this.remoteSessionId
+    if (remoteSessionId === undefined) throw new Error(`Harness "${this.pack.id}" stopped before it created a resumable session`)
+    const stagedSelection = this.selectionSnapshot()
+    await this.disposeProcess()
+    await this.start(remoteSessionId, this.processSandboxMode, signal)
+    await this.restoreSelection(stagedSelection, signal)
+  }
+
+  /** Capture every live user-visible ACP selection before replacing a process. */
+  private selectionSnapshot(): AcpSessionSelectionSnapshot {
+    return {
+      ...(this.modeState === undefined ? {} : { mode: this.modeState.currentModeId }),
+      options: this.configOptions.map(option => ({
+        id: option.id,
+        value: option.currentValue,
+        ...(option.category === undefined || option.category === null ? {} : { category: option.category }),
+      })),
+    }
+  }
+
+  /** Restore the exact advertised ACP configuration without Harness-specific knowledge. */
+  private async restoreSelection(snapshot: AcpSessionSelectionSnapshot, signal?: AbortSignal): Promise<void> {
+    if (snapshot.mode !== undefined) {
+      const mode = this.modeState
+      if (mode === undefined || !mode.availableModes.some(candidate => candidate.id === snapshot.mode)) {
+        throw new Error(`Harness "${this.pack.id}" no longer advertises operating mode "${snapshot.mode}"`)
+      }
+      if (mode.currentModeId !== snapshot.mode) {
+        await this.selectHarnessConfigUnserialized(this.modeControlId(), snapshot.mode, signal)
+      }
+    }
+    const ordered = [...snapshot.options].sort((left, right) => {
+      const priority = (category?: string) => category === 'model' ? 0 : category === 'thought_level' ? 1 : 2
+      return priority(left.category) - priority(right.category)
+    })
+    for (const selected of ordered) {
+      const live = this.configOptions.find(option => option.id === selected.id)
+      if (live === undefined) {
+        throw new Error(`Harness "${this.pack.id}" no longer advertises configuration option "${selected.id}"`)
+      }
+      if (live.currentValue === selected.value) continue
+      await this.selectHarnessConfigUnserialized(selected.id, selected.value, signal)
+    }
+  }
+
   /** Stop the remote session and release its process and scoped registrations. */
   async dispose(): Promise<void> {
     this.cancel({ kind: 'disposed' })
     await this.whenIdle()
-    await this.scope.dispose()
-    await this.disposeProcess()
+    const connection = this.connection
+    const remoteSessionId = this.remoteSessionId
+    try {
+      if (connection !== undefined && remoteSessionId !== undefined && this.sessionCloseSupported) {
+        await connection.closeSession({ sessionId: remoteSessionId })
+      }
+    } finally {
+      await this.scope.dispose()
+      await this.disposeProcess()
+    }
   }
 
   private async disposeProcess(): Promise<void> {
@@ -2016,6 +2281,11 @@ export class AcpHarnessAgent implements Agent {
     }))
     const child = this.process
     this.process = undefined
+    this.processFailure = undefined
+    this.processStopped = false
+    this.connection = undefined
+    this.sessionDeleteSupported = false
+    this.sessionCloseSupported = false
     if (child !== undefined) {
       child.stdin?.end()
       const timeout = AbortSignal.timeout(1_000)

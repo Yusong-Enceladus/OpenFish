@@ -1,6 +1,7 @@
 /** OpenCodex CLI handlers over the DSH runtime and Host API. */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createConnection } from 'node:net'
 import {
   existsSync,
@@ -43,6 +44,8 @@ import {
   projectedTitle,
   resolveSession,
   rpc,
+  rpcDirect,
+  rpcEmpty,
   waitForTurn,
   type SessionSummaryView,
 } from './host-client.ts'
@@ -218,6 +221,7 @@ interface LiveNativeCapabilities {
   surface: string
   features: {
     apiProxy: boolean
+    gateway: boolean
     typert: boolean
     remotePlugin: boolean
     voicePlugin: boolean
@@ -263,7 +267,7 @@ function compositionCapabilityRows(value: LiveNativeCapabilities): LiveCapabilit
     detail,
   })
   return [
-    row('runtime', value.features.apiProxy && value.features.typert, 'DSH Host', 'Typert business API and event carriers'),
+    row('runtime', value.features.gateway && value.features.typert, 'DSH Host', 'Typert business API and multiplexed Gateway carrier'),
     row('sessions', value.contracts.sessions, 'dsh-session', 'turns, history, streaming, cancellation, and recovery'),
     row('workspaces', value.contracts.workspaces, 'dsh-workspace', 'projects, task ordering, and archives'),
     row('interactions', value.contracts.interactions, 'dsh-interaction', 'approvals and user questions'),
@@ -319,7 +323,7 @@ async function selectModel(
   reasoningEffort: string | undefined,
 ): Promise<void> {
   if (requested === undefined && localProvider === undefined) return
-  const catalog = await rpc<CliModelCatalog>('session.models', { sessionId })
+  const catalog = await rpc<CliModelCatalog>('session/models', { sessionId })
   let localGroup: CliModelCatalog['groups'][number] | undefined
   if (localProvider !== undefined) {
     const matches = configuredLocalGroups(catalog, localProvider)
@@ -356,7 +360,7 @@ async function selectModel(
     provider = localGroup.id
     model = first.id
   }
-  await rpc('session.selectModel', {
+  await rpc('session/selectModel', {
     sessionId,
     provider,
     model,
@@ -372,8 +376,8 @@ async function setPermission(sessionId: string, opts: Record<string, unknown>): 
   if (!['read-only', 'workspace-write', 'danger-full-access'].includes(preset)) {
     throw new Error(`unsupported sandbox preset ${JSON.stringify(preset)}`)
   }
-  const execution = await rpc<{ result: { kind: 'success' | 'error'; text?: string } }>('commands/execute', {
-    args: { agentId: sessionId, line: `/permission ${preset}`, images: [] },
+  const execution = await rpcDirect<{ result: { kind: 'success' | 'error'; text?: string } }>('commands/execute', {
+    agentId: sessionId, line: `/permission ${preset}`, images: [],
   })
   if (execution.result.kind !== 'success') {
     throw new Error(execution.result.text ?? `permission preset ${JSON.stringify(preset)} was rejected`)
@@ -395,8 +399,8 @@ async function setApprovalPolicy(sessionId: string, opts: Record<string, unknown
   if (opts.dangerouslyBypassApprovalsAndSandbox === true && policy !== 'never') {
     throw new Error('--dangerously-bypass-approvals-and-sandbox conflicts with an interactive approval policy')
   }
-  const execution = await rpc<{ result: { kind: 'success' | 'error'; text?: string } }>('commands/execute', {
-    args: { agentId: sessionId, line: `/approval ${policy}`, images: [] },
+  const execution = await rpcDirect<{ result: { kind: 'success' | 'error'; text?: string } }>('commands/execute', {
+    agentId: sessionId, line: `/approval ${policy}`, images: [],
   })
   if (execution.result.kind !== 'success') {
     throw new Error(execution.result.text ?? `approval policy ${JSON.stringify(policy)} was rejected`)
@@ -439,7 +443,7 @@ async function configureSession(sessionId: string, opts: Record<string, unknown>
   rejectUnsupportedExecutionFlags(opts)
   let localProvider = stringOption(opts, 'localProvider')
   if (opts.oss === true && localProvider === undefined) {
-    const catalog = await rpc<CliModelCatalog>('session.models', { sessionId })
+    const catalog = await rpc<CliModelCatalog>('session/models', { sessionId })
     const local = configuredLocalGroups(catalog)
     if (local.length === 0) throw new Error('--oss requested a local model, but no Ollama or LM Studio provider is configured')
     if (local.length > 1) {
@@ -460,7 +464,7 @@ async function configureSession(sessionId: string, opts: Record<string, unknown>
 }
 
 async function workspaceFor(cwd: string): Promise<string> {
-  const value = await rpc<{ workspace: { workspaceId: string } }>('workspace.create', { path: cwd })
+  const value = await rpc<{ workspace: { workspaceId: string } }>('workspace/create', { path: cwd })
   return value.workspace.workspaceId
 }
 
@@ -479,7 +483,8 @@ async function submitAndPrint(sessionId: string, prompt: string, opts: Record<st
     : `${prompt}\n\nReturn the final answer as JSON matching this schema exactly:\n${readFileSync(resolve(schemaPath), 'utf8')}`
   const before = await fullHistory(sessionId)
   const afterSeq = before.at(-1)?.event.seq ?? -1
-  await rpc('session.prompt', {
+  await rpc('session/prompt', {
+    requestId: randomUUID(),
     sessionId,
     mode: 'queue',
     content: promptParts(effectivePrompt, opts),
@@ -505,7 +510,7 @@ async function createTask(prompt: string, opts: Record<string, unknown>): Promis
   await ensureHost()
   const cwd = resolve(stringOption(opts, 'cd') ?? process.cwd())
   const workspaceId = await workspaceFor(cwd)
-  const created = await rpc<{ sessionId: string }>('session.create', { workspaceId })
+  const created = await rpc<{ sessionId: string }>('session/create', { workspaceId })
   await configureSession(created.sessionId, opts)
   return submitAndPrint(created.sessionId, prompt, opts)
 }
@@ -520,7 +525,7 @@ async function resumeTask(
   await ensureHost()
   const source = await resolveSession(reference, opts.last === true)
   const sessionId = fork
-    ? (await rpc<{ sessionId: string }>('session.fork', { sessionId: source.sessionId })).sessionId
+    ? (await rpc<{ sessionId: string }>('session/fork', { sessionId: source.sessionId })).sessionId
     : source.sessionId
   await configureSession(sessionId, opts)
   if (prompt === '') {
@@ -625,8 +630,8 @@ export interface OpenCodexNativeCapabilities {
   protocolVersion: 'v2'
   host: 'dsh'
   surface: 'native'
-  api: { base: string; hostEvents: string; muxEvents: string }
-  features: { apiProxy: boolean; typert: boolean; remotePlugin: boolean; voicePlugin: boolean; localVoice: boolean; imageGenerationExtension: boolean }
+  api: { base: string; remoteMux: string; remoteEvents: '$events'; nativeFeed: 'xNative/follow' }
+  features: { apiProxy: boolean; gateway: boolean; typert: boolean; remotePlugin: boolean; voicePlugin: boolean; localVoice: boolean; imageGenerationExtension: boolean }
   contracts: { sessions: boolean; workspaces: boolean; interactions: boolean; settings: boolean; providers: boolean; migration: boolean; sandbox: boolean }
   voice?: { contract: 'dsh.voice.v1'; transcriptAuthority: 'session.prompt'; providers: Array<{ id: string; name: string; platforms: Array<'macos' | 'iphone' | 'web'>; operations: Array<'speech-to-text' | 'text-to-speech'>; locality: 'device'; streaming: boolean; interruptible: boolean; quality: 'standard' | 'enhanced' | 'premium' }> }
   pairing: { supported: boolean; kind: 'authenticated-tls-code'; durable: boolean }
@@ -993,7 +998,7 @@ async function migrateRollouts(opts: Record<string, unknown>): Promise<number> {
       transferredBytes += data.byteLength * 2
       return { name: basename(path), data: data.toString('base64') }
     })
-    const value = await rpc<{ items: unknown[] }>('session.import', {
+    const value = await rpc<{ items: unknown[] }>('xNative/import', {
       workspaceId,
       format: 'codex-jsonl',
       files: payloadFiles,
@@ -1019,97 +1024,6 @@ function completion(shell = 'bash'): string {
   if (shell === 'fish') return `complete -c opencodex -f -a '${joined}'\n`
   if (shell === 'zsh') return `#compdef opencodex\n_arguments '1:command:(${joined})'\n`
   return `_opencodex_complete(){ COMPREPLY=( $(compgen -W '${joined}' -- "\${COMP_WORDS[1]}") ); }; complete -F _opencodex_complete opencodex\n`
-}
-
-interface CliSandboxResult {
-  exitCode: number | null
-  signal: string | null
-  timedOut: boolean
-  aborted: boolean
-  stdout: string
-  stderr: string
-  stdoutTruncated: boolean
-  stderrTruncated: boolean
-  sandbox: { mode: 'read-only' | 'workspace-write'; denied: boolean; enforcement?: 'full' | 'partial' }
-}
-
-function quoteCommandArgument(value: string): string {
-  if (process.platform === 'win32') return `'${value.replaceAll("'", "''")}'`
-  return `'${value.replaceAll("'", '\'\\\'\'')}'`
-}
-
-function commandSource(args: string[]): string {
-  if (args.length === 0) throw new Error('missing command to run in the DSH sandbox')
-  const [command] = args
-  if (command === undefined) throw new Error('missing command to run in the DSH sandbox')
-  return args.length === 1 ? command : args.map(quoteCommandArgument).join(' ')
-}
-
-function sandboxRequest(
-  args: string[],
-  opts: Record<string, unknown>,
-): { command: string; cwd: string; mode: 'read-only' | 'workspace-write'; timeoutMs?: number } {
-  rejectOptions(opts, [
-    ['sandboxStateReadableRoot', '--sandbox-state-readable-root'],
-    ['sandboxStateDisableNetwork', '--sandbox-state-disable-network'],
-    ['allowUnixSocket', '--allow-unix-socket'],
-    ['logDenials', '--log-denials'],
-    ['includeManagedConfig', '--include-managed-config'],
-  ], 'cannot be represented by DSH\'s file-effect sandbox contract')
-
-  let mode = stringOption(opts, 'permissionProfile') ?? stringOption(opts, 'sandbox') ?? 'read-only'
-  let cwd = process.cwd()
-  const stateText = stringOption(opts, 'sandboxStateJson')
-  if (stateText !== undefined) {
-    let state: unknown
-    try { state = JSON.parse(stateText) } catch { throw new Error('--sandbox-state-json must be valid JSON') }
-    if (typeof state !== 'object' || state === null || Array.isArray(state)) {
-      throw new Error('--sandbox-state-json must be a JSON object')
-    }
-    const record = state as Record<string, unknown>
-    const supported = new Set(['mode', 'sandbox_mode', 'workspaceRoot', 'workspace_root', 'timeoutMs', 'timeout_ms'])
-    const unknown = Object.keys(record).filter(key => !supported.has(key))
-    if (unknown.length > 0) {
-      throw new Error(`--sandbox-state-json contains fields outside the DSH sandbox contract: ${unknown.join(', ')}`)
-    }
-    const stateMode = record.mode ?? record.sandbox_mode
-    if (typeof stateMode === 'string') mode = stateMode
-    const stateRoot = record.workspaceRoot ?? record.workspace_root
-    if (typeof stateRoot === 'string' && stateRoot !== '') cwd = resolve(stateRoot)
-    const timeout = record.timeoutMs ?? record.timeout_ms
-    if (timeout !== undefined && (typeof timeout !== 'number' || !Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 600_000)) {
-      throw new Error('sandbox timeout must be an integer from 1 to 600000 milliseconds')
-    }
-    if (typeof timeout === 'number') {
-      return normalizedSandboxRequest(args, mode, cwd, timeout)
-    }
-  }
-  return normalizedSandboxRequest(args, mode, cwd)
-}
-
-function normalizedSandboxRequest(
-  args: string[],
-  mode: string,
-  cwd: string,
-  timeoutMs?: number,
-): { command: string; cwd: string; mode: 'read-only' | 'workspace-write'; timeoutMs?: number } {
-  if (mode !== 'read-only' && mode !== 'workspace-write') {
-    throw new Error(`sandbox permission profile must be read-only or workspace-write, got ${JSON.stringify(mode)}`)
-  }
-  return { command: commandSource(args), cwd: resolve(cwd), mode, ...(timeoutMs === undefined ? {} : { timeoutMs }) }
-}
-
-async function runSandboxCommand(args: string[], opts: Record<string, unknown>): Promise<number> {
-  await ensureHost()
-  const result = await rpc<CliSandboxResult>('host.runSandboxed', sandboxRequest(args, opts))
-  if (result.stdout !== '') process.stdout.write(result.stdout)
-  if (result.stderr !== '') process.stderr.write(result.stderr)
-  if (result.stdoutTruncated || result.stderrTruncated) {
-    process.stderr.write('opencodex sandbox: DSH bounded the captured command output; the displayed tail is incomplete\n')
-  }
-  if (result.timedOut) process.stderr.write('opencodex sandbox: command timed out\n')
-  if (result.sandbox.denied) process.stderr.write('opencodex sandbox: the DSH sandbox denied a file operation\n')
-  return result.exitCode ?? (result.aborted || result.signal !== null ? 130 : 1)
 }
 
 function unavailable(path: string, capability: string): number {
@@ -1207,7 +1121,7 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
     if (path === 'archive' || path === 'unarchive') {
       await ensureHost()
       const session = await resolveSession(args[0])
-      const method = path === 'archive' ? 'workspace.archiveSession' : 'workspace.unarchiveSession'
+      const method = path === 'archive' ? 'workspace/archiveSession' : 'workspace/unarchiveSession'
       const value = await rpc<{ archivedSessionIds: string[] }>(method, { sessionId: session.sessionId })
       if (opts.json === true) emitJson({ sessionId: session.sessionId, archived: path === 'archive', archivedSessionIds: value.archivedSessionIds })
       else process.stdout.write(`${path === 'archive' ? 'Archived' : 'Unarchived'} ${titleOf(session)} (${session.sessionId})\n`)
@@ -1223,7 +1137,7 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
         const secret = await readStdin()
         if (secret === '') throw new Error('credential stdin is empty')
         const ref = opts.withApiKey === true ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'
-        await rpc('credentials.set', { ref, value: secret })
+        await rpcDirect('credentials/set', { ref, value: secret })
         process.stdout.write(`Credential stored by the DSH Host for ${ref}.\n`)
         return 0
       }
@@ -1253,10 +1167,10 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
 
     if (path === 'login/status') {
       await ensureHost()
-      const value = await rpc<{ credentials: Record<string, { configured: boolean; source?: string; writable: boolean }> }>(
-        'credentials.describe', { refs: ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY'] },
+      const value = await rpcDirect<Record<string, { configured: boolean; source?: string; writable: boolean }>>(
+        'credentials/describe', { refs: ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY'] },
       )
-      const rows = Object.entries(value.credentials).map(([ref, state]) => ({ ref, ...state }))
+      const rows = Object.entries(value).map(([ref, state]) => ({ ref, ...state }))
       if (opts.json === true) emitJson(rows)
       else for (const row of rows) process.stdout.write(`${row.ref}\t${row.configured ? `configured (${row.source ?? 'provider'})` : 'not configured'}\n`)
       return rows.some(row => row.configured) ? 0 : 1
@@ -1265,8 +1179,8 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
     if (path === 'logout') {
       await ensureHost()
       for (const ref of ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY']) {
-        const described = await rpc<{ credentials: Record<string, { writable: boolean }> }>('credentials.describe', { refs: [ref] })
-        if (described.credentials[ref]?.writable === true) await rpc('credentials.unset', { ref })
+        const described = await rpcDirect<Record<string, { writable: boolean }>>('credentials/describe', { refs: [ref] })
+        if (described[ref]?.writable === true) await rpcDirect('credentials/unset', { ref })
       }
       clearConnection()
       process.stdout.write('Writable model credentials were removed from the DSH Host; the local device profile was cleared.\n')
@@ -1483,7 +1397,10 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
         try {
           const handshake = await (await hostRequest('/x-native/v2/health')).json() as { protocolVersion?: string; product?: string }
           checks.push({ name: 'Native protocol', ok: handshake.product === PRODUCT && handshake.protocolVersion === 'v2', detail: `${handshake.product ?? 'unknown'} ${handshake.protocolVersion ?? 'unknown'}` })
-          const description = await rpc<{ provider: string; model: string }>('host.describe', {})
+          const description = await rpcEmpty<{ provider?: string; model?: string }>('xNative/describe')
+          if (description.provider === undefined || description.model === undefined) {
+            throw new Error('the Host has no routable default model')
+          }
           checks.push({ name: 'Default model', ok: true, detail: `${description.provider}/${description.model}` })
         } catch (error) { checks.push({ name: 'Host contract', ok: false, detail: errorText(error) }) }
       }
@@ -1495,7 +1412,7 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
 
     if (path === 'debug/models') {
       if (opts.bundled === true) emitJson(loadFeatureRegistry())
-      else { await ensureHost(); emitJson(await rpc('llm.providers', {})) }
+      else { await ensureHost(); emitJson(await rpcEmpty('llm/listConfigurableProviders')) }
       return 0
     }
     if (path === 'debug/prompt-input') {
@@ -1505,7 +1422,7 @@ export async function run(invocation: Invocation, opts: Record<string, unknown>)
     if (path === 'debug/app-server/send-message-v2') return await createTask(args.join(' '), opts)
 
     if (path === 'completion') { process.stdout.write(completion(args[0])); return 0 }
-    if (path === 'sandbox') return await runSandboxCommand(args, opts)
+    if (path === 'sandbox') return unavailable(path, 'a one-shot sandbox execution contract')
 
     if (path === 'cloud' || path.startsWith('cloud/') || path === 'apply') {
       return unavailable(path, 'a cloud task provider; local, LAN, Tailscale, and relay transports use DSH sessions')

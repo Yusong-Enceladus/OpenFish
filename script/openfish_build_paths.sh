@@ -8,7 +8,17 @@
 # mounted: this helper never creates a look-alike directory on the system disk.
 
 if [[ -z "${OPENFISH_REPO_ROOT:-}" ]]; then
-  OPENFISH_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    OPENFISH_BUILD_PATHS_SOURCE="${BASH_SOURCE[0]}"
+  elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    # zsh does not populate BASH_SOURCE for a sourced helper. `%N` is the
+    # current sourced file, unlike `$0`, which remains the caller's shell.
+    OPENFISH_BUILD_PATHS_SOURCE="${(%):-%N}"
+  else
+    echo "OpenFish cannot locate the repository from this shell; set OPENFISH_REPO_ROOT explicitly." >&2
+    return 2 2>/dev/null || exit 2
+  fi
+  OPENFISH_REPO_ROOT="$(cd "$(dirname "$OPENFISH_BUILD_PATHS_SOURCE")/.." && pwd)"
 fi
 
 OPENFISH_LOCAL_BUILD_CONFIG="$OPENFISH_REPO_ROOT/.openfish-build.env"

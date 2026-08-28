@@ -26,7 +26,7 @@ DSH plugin for the small protocol a native OpenCodex client needs before it join
 - A local client may pair directly. A remote client must redeem a ten-minute, single-use code created on the Host through TLS code proof: the HMAC is keyed by the out-of-band code itself and bound to the Host certificate fingerprint, so the public code id sent on the bootstrap connection cannot manufacture a valid proof. The resulting bearer is accepted by the ordinary DSH HTTP and WebSocket trust boundary; device listing, code creation, and revocation of other devices remain Host-local, while a paired device may revoke only itself.
 - LAN and Tailscale use the same authenticated DSH carrier. Relay remains a replaceable transport plugin and is reported only when mounted.
 - The image-generation capability flag describes the mounted provider registry. OpenCodex intentionally ships no image model.
-- A native task created without a Workspace uses its own `$DSH_HOME/openfish/no-project/<session-id>` cwd; it never inherits the folder that launched the Host process or shares another No Project task's files.
+- A native task created without a Workspace uses its own `$DSH_HOME/openfish/sessions/no-workspace/<session-id>` cwd; it never inherits the folder that launched the Host process or shares another No Project task's files.
 
 ## Composition
 

@@ -32,7 +32,7 @@
 - 对 Codex，OpenFish 会向实时官方 app-server 查询当前认证路径与计划类型，并丢弃邮箱和凭据材料。只有所选 Driver 能创建真实远端分支时才会提供任务分支；Codex 映射到官方 `thread/fork`，通用 ACP 当前保持禁用。
 - ACP Registry 或 OpenFish 社区目录收录只是发现元数据，不代表安全审计或质量背书。非 ACP Harness 必须发布固定来源的 Driver Bundle，而且只有实时 Driver Conformance 通过后才能运行；OpenFish 不会只根据协议名或 Harness 名猜出并执行代码。
 - 社区发布目前通过受审核的 GitHub Pull Request 完成；OpenFish 尚未运营 App 内账号、排行系统或一键式 Marketplace 后端。
-- ACP Pack 使用运行中 Harness 实时发现的 `acpSessionOptions`。其他有类型的节点配置只有在对应 Pack 的 Driver 会验证并消费时才具有执行语义；编辑器会标明不受支持的字段，而不会假装它们能够运行。
+- ACP Pack 使用类型化控件，其 Driver 绑定会指向运行中 Harness 实时发现的 Option ID。其他节点配置只有在对应 Pack 的 Driver 会验证并消费时才具有执行语义；编辑器会标明不受支持的字段，而不会假装它们能够运行。
 - ACP 当前没有永久删除远端 Session 的标准操作。放弃一个已准备的通用 ACP 任务时，OpenFish 会停止受管进程并删除本地空白草稿，但上游 Harness 仍可能保留自己的空白 Session 记录。Codex Driver 会对等价的空白 Thread 调用官方 `thread/delete`。
 - 未知 Harness 的内部结构始终只显示一个 opaque 边界。丰富 Architecture 视图必须声明进程边界、连通实际展示的全部职责、为每个组件提供证据，并使用有意义的图边标签。系统不设置装饰性的最少节点数，UI 也不会猜测私有内部结构。
 - 新操作系统可能无法继续安装旧任务固定的 Runtime，从而暴露上游兼容性破坏。请导出重要工作。

@@ -95,6 +95,36 @@ struct MobileSession: Codable, Identifiable, Equatable, Sendable {
     var id: String { sessionId }
 }
 
+extension MobileSession {
+    private enum CodingKeys: String, CodingKey {
+        case sessionId, harnessId, harnessVersion, harnessAuthMethod, workspaceMode
+        case harnessCapabilities, updatedAt, running, blank, parentSessionId
+        case origin, cwd, agentPreset, projections
+    }
+
+    /// The session protocol deliberately omits `harnessId` for tasks created
+    /// before Harness selection existed. Those tasks are DSH tasks by contract;
+    /// normalize that legacy wire form here so one old row cannot invalidate the
+    /// complete mobile baseline or inherit today's unrelated default Harness.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try values.decode(String.self, forKey: .sessionId)
+        harnessId = try values.decodeIfPresent(String.self, forKey: .harnessId) ?? "dsh"
+        harnessVersion = try values.decodeIfPresent(String.self, forKey: .harnessVersion)
+        harnessAuthMethod = try values.decodeIfPresent(String.self, forKey: .harnessAuthMethod)
+        workspaceMode = try values.decodeIfPresent(String.self, forKey: .workspaceMode)
+        harnessCapabilities = try values.decodeIfPresent([String].self, forKey: .harnessCapabilities)
+        updatedAt = try values.decode(Double.self, forKey: .updatedAt)
+        running = try values.decode(Bool.self, forKey: .running)
+        blank = try values.decode(Bool.self, forKey: .blank)
+        parentSessionId = try values.decodeIfPresent(String.self, forKey: .parentSessionId)
+        origin = try values.decodeIfPresent(String.self, forKey: .origin)
+        cwd = try values.decodeIfPresent(String.self, forKey: .cwd)
+        agentPreset = try values.decodeIfPresent(String.self, forKey: .agentPreset)
+        projections = try values.decodeIfPresent(MobileProjectionBlock.self, forKey: .projections)
+    }
+}
+
 struct MobileProjectionBlock: Codable, Equatable, Sendable {
     let asOfSeq: Int
     let values: [String: MobileJSONValue]
@@ -255,6 +285,9 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     struct ModelConfiguration: Decodable, Equatable, Sendable {
         let owner: String; let required: Bool; let detail: String
     }
+    struct AuthenticationDiscovery: Decodable, Equatable, Sendable {
+        let source: String; let detail: String
+    }
     struct Capability: Decodable, Identifiable, Equatable, Sendable {
         let id: String; let status: String; let source: String; let detail: String?
     }
@@ -297,6 +330,8 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
             let status: String; let source: String; let digest: String?; let detail: String
         }
         let status: String
+        let operationPhase: String?
+        let operationDetail: String?
         let installedVersion: String?
         let availableVersion: String
         let previousVersions: [String]
@@ -314,7 +349,7 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
             }
             let id: String; let name: String; let kind: String; let fields: [Field]; let account: Account?
         }
-        let methods: [Method]; let selectedMethod: String?; let status: String; let missingFields: [String]
+        let methods: [Method]; let selectedMethod: String?; let status: String; let missingFields: [String]; let detail: String?
     }
     struct Compatibility: Decodable, Equatable, Sendable {
         let status: String; let classification: String; let checkedAt: String?; let message: String?
@@ -335,6 +370,7 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let source: String
     var account: AccountDescriptor? = nil
     var modelConfiguration: ModelConfiguration? = nil
+    var authenticationDiscovery: AuthenticationDiscovery? = nil
     var driverBundle: DriverBundle? = nil
     let graph: Graph
     let available: Bool
@@ -346,7 +382,7 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let capabilities: [Capability]
     let driver: Driver
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, verified, source, account, modelConfiguration, driverBundle, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
+        case id, isDefault, name, version, description, publisher, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
         case protocolName = "protocol"
     }
 }
@@ -389,6 +425,7 @@ struct MobileQuestionAnswer: Encodable, Equatable, Sendable {
 }
 
 struct MobileApproval: Identifiable, Equatable, Sendable {
+    let clientId: String
     let rpcId: String
     let sessionId: String
     let approvalId: String
@@ -412,6 +449,7 @@ struct MobileQuestionOption: Identifiable, Codable, Equatable, Sendable {
 }
 
 struct MobilePendingQuestion: Identifiable, Equatable, Sendable {
+    let clientId: String
     let rpcId: String
     let sessionId: String
     let questions: [MobileQuestion]
@@ -570,11 +608,15 @@ public struct XHandshake: Codable, Sendable {
 public struct XCapabilities: Codable, Sendable {
     public struct Api: Codable, Sendable {
         public let base: String
-        public let hostEvents: String
-        public let muxEvents: String
+        public let remoteMux: String
+        public let remoteEvents: String
+        public let nativeFeed: String
+        public let hostEvents: String?
+        public let muxEvents: String?
     }
     public struct Features: Codable, Sendable {
         public let apiProxy: Bool
+        public let gateway: Bool
         public let typert: Bool
         public let remotePlugin: Bool
         public let voicePlugin: Bool
@@ -633,6 +675,7 @@ struct MobilePairReceipt: Decodable, Sendable {
     let token: String
     let expiresAt: Double
     let createdAt: Double
+    let hostURL: String?
 }
 
 struct MobilePairingResult: Sendable {
@@ -663,11 +706,30 @@ private struct MobileRpcRequest<Payload: Encodable>: Encodable {
     let payload: Payload
 }
 
+private struct MobileTypertPayload<Arguments: Encodable>: Encodable {
+    let args: Arguments
+}
+
+private struct MobileTypertRequestArguments<Request: Encodable & Sendable>: Encodable, Sendable {
+    let request: Request
+}
+
 private struct MobileRpcResponse<Value: Decodable>: Decodable {
     struct Result: Decodable {
         struct Failure: Decodable { let code: String; let message: String }
         let ok: Bool
         let value: Value?
+        let error: Failure?
+    }
+    let type: String
+    let rpcId: String
+    let result: Result
+}
+
+private struct MobileRpcVoidResponse: Decodable {
+    struct Result: Decodable {
+        struct Failure: Decodable { let code: String; let message: String }
+        let ok: Bool
         let error: Failure?
     }
     let type: String
@@ -764,12 +826,12 @@ public actor XIOSClient {
         return data
     }
 
-    private func rpc<Payload: Encodable & Sendable, Value: Decodable & Sendable>(
+    private func invoke<Arguments: Encodable & Sendable, Value: Decodable & Sendable>(
         _ method: String,
-        _ payload: Payload,
+        arguments: Arguments,
+        rpcId: String = UUID().uuidString,
         timeout: TimeInterval? = nil
     ) async throws -> Value {
-        let rpcId = UUID().uuidString
         var request = URLRequest(url: baseURL.appending(path: "/api/\(method)"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -777,7 +839,13 @@ public actor XIOSClient {
         if let bearerToken, !bearerToken.isEmpty {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "authorization")
         }
-        request.httpBody = try JSONEncoder().encode(MobileRpcRequest(rpcId: rpcId, method: method, payload: payload))
+        request.httpBody = try JSONEncoder().encode(
+            MobileRpcRequest(
+                rpcId: rpcId,
+                method: method,
+                payload: MobileTypertPayload(args: arguments)
+            )
+        )
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw MobileApiError.transport("HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for \(method)")
@@ -789,6 +857,69 @@ public actor XIOSClient {
             envelope.result.error?.code ?? "unknown",
             envelope.result.error?.message ?? "RPC failed"
         )
+    }
+
+    private func rpc<Payload: Encodable & Sendable, Value: Decodable & Sendable>(
+        _ method: String,
+        _ request: Payload,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(
+            method,
+            arguments: MobileTypertRequestArguments(request: request),
+            timeout: timeout
+        )
+    }
+
+    private func rpcDirect<Arguments: Encodable & Sendable, Value: Decodable & Sendable>(
+        _ method: String,
+        _ arguments: Arguments,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(method, arguments: arguments, timeout: timeout)
+    }
+
+    private func rpcEmpty<Value: Decodable & Sendable>(
+        _ method: String,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(method, arguments: MobileEmpty(), timeout: timeout)
+    }
+
+    private func rpcDirectVoid<Arguments: Encodable & Sendable>(
+        _ method: String,
+        _ arguments: Arguments
+    ) async throws {
+        let rpcId = UUID().uuidString
+        var request = URLRequest(url: baseURL.appending(path: "/api/\(method)"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if let bearerToken, !bearerToken.isEmpty {
+            request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "authorization")
+        }
+        request.httpBody = try JSONEncoder().encode(
+            MobileRpcRequest(
+                rpcId: rpcId,
+                method: method,
+                payload: MobileTypertPayload(args: arguments)
+            )
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw MobileApiError.transport(
+                "HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for \(method)"
+            )
+        }
+        let envelope = try JSONDecoder().decode(MobileRpcVoidResponse.self, from: data)
+        guard envelope.type == "server-response", envelope.rpcId == rpcId else {
+            throw MobileApiError.invalidResponse
+        }
+        guard envelope.result.ok else {
+            throw MobileApiError.host(
+                envelope.result.error?.code ?? "unknown",
+                envelope.result.error?.message ?? "RPC failed"
+            )
+        }
     }
 
     public func handshake() async throws -> XHandshake {
@@ -890,40 +1021,42 @@ public actor XIOSClient {
 
     func workspaces() async throws -> (items: [MobileWorkspace], archived: Set<String>) {
         struct Value: Decodable, Sendable { let items: [MobileWorkspace]; let archivedSessionIds: [String] }
-        let value: Value = try await rpc("workspace.list", MobileEmpty())
+        let value: Value = try await rpcEmpty("workspace/list")
         return (value.items, Set(value.archivedSessionIds))
     }
 
     func listDirectory(path: String? = nil) async throws -> MobileDirectoryListing {
         struct Payload: Encodable, Sendable { let path: String? }
-        return try await rpc("host.listDirectory", Payload(path: path))
+        return try await rpcDirect("directoryPicker/list", Payload(path: path))
     }
 
     func createDirectory(parent: String, name: String) async throws -> String {
         struct Payload: Encodable, Sendable { let path: String; let name: String }
-        struct Value: Decodable, Sendable { let path: String }
-        let value: Value = try await rpc("host.createDirectory", Payload(path: parent, name: name))
-        return value.path
+        let value: String = try await rpcDirect(
+            "directoryPicker/createDirectory",
+            Payload(path: parent, name: name)
+        )
+        return value
     }
 
     func createWorkspace(path: String) async throws -> MobileWorkspace {
         struct Payload: Encodable, Sendable { let path: String }
         struct Value: Decodable, Sendable { let workspace: MobileWorkspace }
-        let value: Value = try await rpc("workspace.create", Payload(path: path))
+        let value: Value = try await rpc("workspace/create", Payload(path: path))
         return value.workspace
     }
 
     func sessions() async throws -> [MobileSession] {
         struct Payload: Encodable, Sendable { let cursor: String? = nil }
         struct Value: Decodable, Sendable { let items: [MobileSession] }
-        let value: Value = try await rpc("session.list", Payload())
+        let value: Value = try await rpc("session/list", Payload())
         return value.items
     }
 
     func discardSession(_ sessionId: String) async throws {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let discarded: Bool }
-        let value: Value = try await rpc("session.discard", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("session/discard", Payload(sessionId: sessionId))
         guard value.discarded else {
             throw MobileApiError.host("draft-discard-rejected", "The Host did not discard the draft task")
         }
@@ -932,21 +1065,21 @@ public actor XIOSClient {
     func setArchived(sessionId: String, archived: Bool) async throws -> Set<String> {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let archivedSessionIds: [String] }
-        let method = archived ? "workspace.archiveSession" : "workspace.unarchiveSession"
+        let method = archived ? "workspace/archiveSession" : "workspace/unarchiveSession"
         let value: Value = try await rpc(method, Payload(sessionId: sessionId))
         return Set(value.archivedSessionIds)
     }
 
     func history(sessionId: String, beforeSeq: Int? = nil) async throws -> MobileHistory {
         struct Payload: Encodable, Sendable { let sessionId: String; let beforeSeq: Int?; let maxMessages = 100 }
-        return try await rpc("session.history", Payload(sessionId: sessionId, beforeSeq: beforeSeq))
+        return try await rpc("xNative/history", Payload(sessionId: sessionId, beforeSeq: beforeSeq))
     }
 
     func attachmentData(sessionId: String, attachmentId: String) async throws -> Data {
         struct Payload: Encodable, Sendable { let sessionId: String; let attachmentId: String }
         struct Value: Decodable, Sendable { let data: String }
         let value: Value = try await rpc(
-            "session.attachment",
+            "session/attachment",
             Payload(sessionId: sessionId, attachmentId: attachmentId)
         )
         guard let data = Data(base64Encoded: value.data) else {
@@ -957,7 +1090,7 @@ public actor XIOSClient {
 
     func models(sessionId: String) async throws -> MobileSessionModels {
         struct Payload: Encodable, Sendable { let sessionId: String }
-        return try await rpc("session.models", Payload(sessionId: sessionId))
+        return try await rpc("session/models", Payload(sessionId: sessionId))
     }
 
     func selectModel(sessionId: String, selection: MobileModelSelection) async throws -> MobileModelSelection {
@@ -969,7 +1102,7 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let selected: MobileModelSelection }
         let value: Value = try await rpc(
-            "session.selectModel",
+            "session/selectModel",
             Payload(
                 sessionId: sessionId,
                 provider: selection.provider,
@@ -992,7 +1125,7 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let options: [MobileHarnessConfigOption] }
         let result: Value = try await rpc(
-            "session.setHarnessConfig",
+            "session/setHarnessConfig",
             Payload(sessionId: sessionId, configId: configId, value: value)
         )
         return result.options
@@ -1001,23 +1134,22 @@ public actor XIOSClient {
     func renameSession(_ sessionId: String, title: String) async throws -> (title: String, seq: Int) {
         struct Payload: Encodable, Sendable { let sessionId: String; let title: String }
         struct Value: Decodable, Sendable { let title: String; let seq: Int }
-        let value: Value = try await rpc("session.rename", Payload(sessionId: sessionId, title: title))
+        let value: Value = try await rpc("session/rename", Payload(sessionId: sessionId, title: title))
         return (value.title, value.seq)
     }
 
     func forkSession(_ sessionId: String) async throws -> String {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let sessionId: String }
-        let value: Value = try await rpc("session.fork", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("session/fork", Payload(sessionId: sessionId))
         return value.sessionId
     }
 
     func executeCommand(sessionId: String, line: String) async throws -> MobileCommandExecution {
         struct Arguments: Encodable, Sendable { let agentId: String; let line: String }
-        struct Payload: Encodable, Sendable { let args: Arguments }
-        return try await rpc(
+        return try await rpcDirect(
             "commands/execute",
-            Payload(args: Arguments(agentId: sessionId, line: line))
+            Arguments(agentId: sessionId, line: line)
         )
     }
 
@@ -1029,30 +1161,37 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let accepted: Bool }
         let value: Value = try await rpc(
-            "session.updateQueue",
+            "session/updateQueue",
             Payload(sessionId: sessionId, itemId: itemId, action: action)
         )
         guard value.accepted else { throw MobileApiError.host("queue-rejected", "Queue update was not accepted") }
     }
 
     func agentPresets() async throws -> MobileAgentPresetCatalog {
-        try await rpc("agentPreset.list", MobileEmpty())
+        struct Value: Decodable, Sendable {
+            let presets: [MobileAgentPreset]
+            let authorable: Bool
+        }
+        let value: Value = try await rpcEmpty("agentPresets/list")
+        return MobileAgentPresetCatalog(
+            presets: value.presets,
+            authorable: value.authorable,
+            hasDocument: false
+        )
     }
 
     func selectAgentPreset(sessionId: String, agentPreset: String) async throws -> String {
-        struct Payload: Encodable, Sendable { let sessionId: String; let agentPreset: String }
-        struct Value: Decodable, Sendable { let agentPreset: String }
-        let value: Value = try await rpc(
-            "agentPreset.select",
-            Payload(sessionId: sessionId, agentPreset: agentPreset)
+        struct Arguments: Encodable, Sendable { let agentId: String; let agentPreset: String }
+        return try await rpcDirect(
+            "agentPresets/select",
+            Arguments(agentId: sessionId, agentPreset: agentPreset)
         )
-        return value.agentPreset
     }
 
     func harnesses() async throws -> [MobileHarness] {
         struct Payload: Encodable, Sendable { let query: String? = nil }
         struct Value: Decodable, Sendable { let items: [MobileHarness] }
-        let value: Value = try await rpc("harness.list", Payload())
+        let value: Value = try await rpc("harness/list", Payload())
         return value.items
     }
 
@@ -1064,7 +1203,7 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let item: MobileHarness }
         let value: Value = try await rpc(
-            "harness.resolve",
+            "harness/resolve",
             Payload(id: id, version: version, authMethod: authMethod)
         )
         return value.item
@@ -1073,14 +1212,14 @@ public actor XIOSClient {
     func selectDefaultHarness(_ id: String) async throws -> [MobileHarness] {
         struct Payload: Encodable, Sendable { let action = "default"; let id: String; let authMethod: String? = nil; let pack: MobileJSONValue? = nil }
         struct Value: Decodable, Sendable { let items: [MobileHarness] }
-        let value: Value = try await rpc("harness.mutate", Payload(id: id))
+        let value: Value = try await rpc("harness/mutate", Payload(id: id))
         return value.items
     }
 
     func installHarness(_ id: String) async throws -> [MobileHarness] {
         struct Payload: Encodable, Sendable { let action = "install"; let id: String; let authMethod: String? = nil; let pack: MobileJSONValue? = nil }
         struct Value: Decodable, Sendable { let items: [MobileHarness] }
-        let value: Value = try await rpc("harness.mutate", Payload(id: id))
+        let value: Value = try await rpc("harness/mutate", Payload(id: id))
         return value.items
     }
 
@@ -1093,7 +1232,7 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let items: [MobileHarness] }
         let value: Value = try await rpc(
-            "harness.mutate",
+            "harness/mutate",
             Payload(action: action, id: id, authMethod: authMethod)
         )
         return value.items
@@ -1108,7 +1247,7 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String }
         let value: Value = try await rpc(
-            "session.create",
+            "session/create",
             Payload(
                 workspaceId: workspaceId,
                 noProject: workspaceId == nil ? true : nil,
@@ -1121,6 +1260,7 @@ public actor XIOSClient {
 
     func prompt(sessionId: String, text: String, images: [MobilePendingImage], mode: String) async throws {
         struct Payload: Encodable, Sendable {
+            let requestId: String
             let sessionId: String
             let mode: String
             let content: [MobileJSONValue]
@@ -1138,8 +1278,14 @@ public actor XIOSClient {
             ])
         })
         let value: Value = try await rpc(
-            "session.prompt",
-            Payload(sessionId: sessionId, mode: mode, content: content, clientTimeZone: TimeZone.current.identifier)
+            "session/prompt",
+            Payload(
+                requestId: UUID().uuidString,
+                sessionId: sessionId,
+                mode: mode,
+                content: content,
+                clientTimeZone: TimeZone.current.identifier
+            )
         )
         guard value.accepted else { throw MobileApiError.host("prompt-rejected", "Prompt was not accepted") }
     }
@@ -1147,28 +1293,27 @@ public actor XIOSClient {
     func cancel(sessionId: String) async throws {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let accepted: Bool }
-        let value: Value = try await rpc("session.cancel", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("session/cancel", Payload(sessionId: sessionId))
         guard value.accepted else { throw MobileApiError.host("cancel-rejected", "Cancel was not accepted") }
     }
 
     func skills(sessionId: String) async throws -> [MobileSkillEntry] {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let skills: [MobileSkillEntry] }
-        let value: Value = try await rpc("skill.list", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("skills/list", Payload(sessionId: sessionId))
         return value.skills
     }
 
     func commandDirectory(sessionId: String) async throws -> [MobileJSONValue] {
         struct Arguments: Encodable, Sendable { let agentId: String }
-        struct Payload: Encodable, Sendable { let args: Arguments }
-        return try await rpc("commands/list", Payload(args: Arguments(agentId: sessionId)))
+        return try await rpcDirect("commands/list", Arguments(agentId: sessionId))
     }
 
     func subagents(parentSessionId: String) async throws -> MobileSubagentCatalog {
-        struct Payload: Encodable, Sendable { let parentSessionId: String }
-        let value: MobileJSONValue = try await rpc(
-            "subagent.list",
-            Payload(parentSessionId: parentSessionId)
+        struct Arguments: Encodable, Sendable { let parentSessionId: String }
+        let value: MobileJSONValue = try await rpcDirect(
+            "subagents/list",
+            Arguments(parentSessionId: parentSessionId)
         )
         return MobileSubagentCatalog(
             entries: value["entries"]?.arrayValue?.compactMap(MobileSubagentEntry.init(json:)) ?? [],
@@ -1184,16 +1329,16 @@ public actor XIOSClient {
     ) async throws -> MobileHistory {
         struct Payload: Encodable, Sendable {
             let parentSessionId: String
-            let childSessionId: String
+            let sessionId: String
             let mode: String
             let beforeSeq: Int?
             let maxMessages = 100
         }
         return try await rpc(
-            "subagent.history",
+            "xNative/history",
             Payload(
                 parentSessionId: parentSessionId,
-                childSessionId: childSessionId,
+                sessionId: childSessionId,
                 mode: mode,
                 beforeSeq: beforeSeq
             )
@@ -1202,6 +1347,7 @@ public actor XIOSClient {
 
     func promptSubagent(parentSessionId: String, childSessionId: String, text: String) async throws {
         struct Payload: Encodable, Sendable {
+            let requestId: String
             let parentSessionId: String
             let childSessionId: String
             let mode = "continuable"
@@ -1210,8 +1356,9 @@ public actor XIOSClient {
         }
         struct Value: Decodable, Sendable { let messageId: String }
         let _: Value = try await rpc(
-            "subagent.prompt",
+            "subagents/prompt",
             Payload(
+                requestId: UUID().uuidString,
                 parentSessionId: parentSessionId,
                 childSessionId: childSessionId,
                 content: [.object(["type": .string("text"), "text": .string(text)])],
@@ -1221,15 +1368,15 @@ public actor XIOSClient {
     }
 
     func interruptSubagent(parentSessionId: String, childSessionId: String) async throws {
-        struct Payload: Encodable, Sendable {
+        struct Arguments: Encodable, Sendable {
             let parentSessionId: String
             let childSessionId: String
             let mode = "continuable"
         }
         struct Value: Decodable, Sendable { let accepted: Bool }
-        let value: Value = try await rpc(
-            "subagent.interrupt",
-            Payload(parentSessionId: parentSessionId, childSessionId: childSessionId)
+        let value: Value = try await rpcDirect(
+            "subagents/interruptByParent",
+            Arguments(parentSessionId: parentSessionId, childSessionId: childSessionId)
         )
         guard value.accepted else {
             throw MobileApiError.host("subagent-rejected", "The subagent interrupt was not accepted")
@@ -1237,40 +1384,42 @@ public actor XIOSClient {
     }
 
     func createGoal(sessionId: String, objective: String, maxRounds: Int?) async throws -> MobileGoalRef {
-        struct Payload: Encodable, Sendable {
-            let sessionId: String
-            let objective: String
-            let maxGoalRounds: Int?
-        }
+        struct Request: Encodable, Sendable { let objective: String; let maxGoalRounds: Int? }
+        struct Arguments: Encodable, Sendable { let agentId: String; let request: Request }
         struct Value: Decodable, Sendable { let ref: MobileGoalRef }
-        let value: Value = try await rpc(
-            "goal.create",
-            Payload(sessionId: sessionId, objective: objective, maxGoalRounds: maxRounds)
+        let value: Value = try await rpcDirect(
+            "goals/create",
+            Arguments(
+                agentId: sessionId,
+                request: Request(objective: objective, maxGoalRounds: maxRounds)
+            )
         )
         return value.ref
     }
 
     func mutateGoal(sessionId: String, verb: String, ref: MobileGoalRef) async throws -> MobileGoalRef? {
-        struct Payload: Encodable, Sendable { let sessionId: String; let ref: MobileGoalRef }
+        struct Arguments: Encodable, Sendable { let agentId: String; let ref: MobileGoalRef }
         if verb == "clear" {
-            struct Value: Decodable, Sendable { let cleared: Bool }
-            let _: Value = try await rpc("goal.clear", Payload(sessionId: sessionId, ref: ref))
+            let _: MobileGoalRef = try await rpcDirect(
+                "goals/clear",
+                Arguments(agentId: sessionId, ref: ref)
+            )
             return nil
         }
-        struct Value: Decodable, Sendable { let ref: MobileGoalRef }
-        let value: Value = try await rpc("goal.\(verb)", Payload(sessionId: sessionId, ref: ref))
-        return value.ref
+        struct Value: Decodable, Sendable { let id: String; let revision: Int }
+        let value: Value = try await rpcDirect(
+            "goals/\(verb)",
+            Arguments(agentId: sessionId, ref: ref)
+        )
+        return MobileGoalRef(id: value.id, revision: value.revision)
     }
 
     func configurableProviders() async throws -> [MobileConfigurableProvider] {
-        struct Value: Decodable, Sendable { let providers: [MobileConfigurableProvider] }
-        let value: Value = try await rpc("llm.providers", MobileEmpty())
-        return value.providers
+        try await rpcEmpty("llm/listConfigurableProviders")
     }
 
     func pluginInventory() async throws -> [MobilePluginInventoryEntry] {
-        struct Payload: Encodable, Sendable { let args: MobileJSONValue = .object([:]) }
-        let value: MobileJSONValue = try await rpc("pluginInventory/list", Payload())
+        let value: MobileJSONValue = try await rpcEmpty("pluginInventory/list")
         return value["entries"]?.arrayValue?.compactMap(MobilePluginInventoryEntry.init(json:)) ?? []
     }
 
@@ -1286,39 +1435,32 @@ public actor XIOSClient {
     }
 
     func answer(_ approval: MobileApproval, allow: Bool) async throws {
-        struct Value: Encodable, Sendable { let sessionId: String; let approvalId: String; let outcome: String }
-        let body = MobileClientResponse(
-            rpcId: approval.rpcId,
-            result: .init(value: Value(
-                sessionId: approval.sessionId,
-                approvalId: approval.approvalId,
-                outcome: allow ? "allowed-once" : "rejected"
-            ))
-        )
-        _ = try await request(
-            "/api/respond",
-            method: "POST",
-            body: JSONEncoder().encode(body),
-            authorize: true
-        )
+        struct Outcome: Encodable, Sendable { let kind = "result"; let value: String }
+        struct Arguments: Encodable, Sendable {
+            let clientId: String
+            let eventId: String
+            let outcome: Outcome
+        }
+        try await rpcDirectVoid("$events/result", Arguments(
+            clientId: approval.clientId,
+            eventId: approval.rpcId,
+            outcome: Outcome(value: allow ? "allowed-once" : "rejected")
+        ))
     }
 
     func answer(_ question: MobilePendingQuestion, answers: [MobileQuestionAnswer]) async throws {
-        struct Wrapped: Encodable, Sendable { let answers: [MobileQuestionAnswer] }
-        struct Value: Encodable, Sendable { let sessionId: String; let answer: Wrapped }
-        let body = MobileClientResponse(
-            rpcId: question.rpcId,
-            result: .init(value: Value(
-                sessionId: question.sessionId,
-                answer: Wrapped(answers: answers)
-            ))
-        )
-        _ = try await request(
-            "/api/respond",
-            method: "POST",
-            body: JSONEncoder().encode(body),
-            authorize: true
-        )
+        struct Answer: Encodable, Sendable { let answers: [MobileQuestionAnswer] }
+        struct Outcome: Encodable, Sendable { let kind = "result"; let value: Answer }
+        struct Arguments: Encodable, Sendable {
+            let clientId: String
+            let eventId: String
+            let outcome: Outcome
+        }
+        try await rpcDirectVoid("$events/result", Arguments(
+            clientId: question.clientId,
+            eventId: question.rpcId,
+            outcome: Outcome(value: Answer(answers: answers))
+        ))
     }
 
     func importFiles(_ files: [(String, Data)], workspaceId: String?) async throws -> [MobileImportItem] {
@@ -1326,7 +1468,7 @@ public actor XIOSClient {
         struct Payload: Encodable, Sendable { let workspaceId: String?; let format = "auto"; let files: [File] }
         struct Value: Decodable, Sendable { let items: [MobileImportItem] }
         let value: Value = try await rpc(
-            "session.import",
+            "xNative/import",
             Payload(
                 workspaceId: workspaceId,
                 files: files.map { File(name: $0.0, data: $0.1.base64EncodedString()) }

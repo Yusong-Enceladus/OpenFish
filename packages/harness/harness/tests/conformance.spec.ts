@@ -10,6 +10,30 @@ const candidate = parseHarnessPack({
   graph: { level: 'opaque', nodes: [{ id: 'runtime', kind: 'harness-runtime', title: 'Future runtime', editable: false }], edges: [] },
 })
 
+const composableCandidate = parseHarnessPack({
+  schemaVersion: 0, id: 'future.composable', name: 'Future Composable', version: '1.0.0', publisher: 'Fixture',
+  verified: false, protocol: 'future-protocol', source: 'user',
+  distribution: { kind: 'executable', command: '/usr/bin/true', args: [], env: {} },
+  graph: {
+    level: 'composable', boundary: 'Future composable process',
+    evidence: [{ kind: 'declared', source: 'Future conformance fixture' }],
+    nodes: [{
+      id: 'step', kind: 'future-step', title: 'Future step', editable: true,
+      responsibility: 'Applies one future Driver setting.',
+      evidence: [{ kind: 'declared', source: 'Future conformance fixture' }],
+      configSchema: {
+        version: 1,
+        fields: [{
+          id: 'enabled', name: 'Enabled', type: 'boolean', required: true,
+          binding: { kind: 'future-setting', target: 'step.enabled' },
+        }],
+      },
+      config: { enabled: true },
+    }],
+    edges: [],
+  },
+})
+
 function driver(capabilities: HarnessDriver['capabilities']): HarnessDriver {
   return {
     apiVersion: 1, protocol: 'future-protocol', capabilities,
@@ -83,6 +107,41 @@ describe('Harness Driver API v1 conformance', () => {
     for (const method of ['capabilities', 'available', 'create', 'resume', 'dispose']) {
       expect(report.issues.join(' ')).toContain(`required method "${method}"`)
     }
+  })
+
+  it('turns malformed runtime capability data into an incompatible report instead of throwing', async () => {
+    const malformed = driver(async () => ({ session: 'create' }) as never)
+    const report = await inspectHarnessDriver(malformed, candidate)
+
+    expect(report).toMatchObject({
+      compatible: false,
+      capabilities: [],
+    })
+    expect(report.issues.join(' ')).toContain('capabilities result must be an array')
+    expect(report.issues.join(' ')).toContain('Required capability "session.create" is missing')
+  })
+
+  it('normalizes malformed Builder schema data without exposing it to clients', async () => {
+    const malformed = driver(async () => [
+      { id: 'session.create', status: 'supported', source: 'driver' },
+      { id: 'session.resume', status: 'supported', source: 'driver' },
+      { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+      { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      { id: 'architecture.edit', status: 'supported', source: 'driver' },
+    ])
+    malformed.authoring = async () => ({
+      nodeKinds: [{ kind: 42, editable: 'yes', inputs: null }],
+      bindingKinds: 'not-an-array',
+    }) as never
+    malformed.validatePack = async () => ({ valid: true }) as never
+
+    const report = await inspectHarnessDriver(malformed, composableCandidate)
+
+    expect(report.compatible).toBe(false)
+    expect(report.authoring).toEqual({ nodeKinds: [], bindingKinds: [] })
+    expect(report.issues.join(' ')).toContain('nodeKinds and bindingKinds arrays')
+    expect(report.issues.join(' ')).toContain('validation result must be a text array')
+    expect(report.issues.join(' ')).toContain('unregistered Driver node kind')
   })
 
   it('rejects older and newer Driver APIs with an actionable Host range', async () => {

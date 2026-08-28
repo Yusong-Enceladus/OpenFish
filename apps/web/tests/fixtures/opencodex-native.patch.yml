@@ -7,8 +7,17 @@
     - id: voice-apple
       name: '@deepseek-ai/dsh-voice-apple'
       inject: [voice]
+    - id: openfish-harnesses
+      name: '@deepseek-ai/dsh-harness'
+      config: {}
+    - id: openfish-harness-controller
+      name: '@deepseek-ai/dsh-api-harness-controller'
+      inject: [typert, harnesses]
+    - id: openfish-harness-acp
+      name: '@deepseek-ai/dsh-harness-acp'
+      inject: [harnesses, agents, sessions, subprocess, sandbox, sandboxPolicy, approval, userQuestions, credentials, attachments]
     - id: x-native
       name: '@deepseek-ai/dsh-bundle-x-native'
-      inject: [webServer, connection]
+      inject: [webServer, connection, typert, typertGateway, sessionController, workspaceController]
       config:
         protocolVersion: v2

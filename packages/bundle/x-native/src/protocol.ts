@@ -9,6 +9,15 @@
  */
 
 import type { VoiceCapabilities } from '@deepseek-ai/dsh-voice'
+import type { JsonValue } from '@deepseek-ai/dsh-session/types'
+import type {
+  SessionControlFrame,
+  SessionEventEntry,
+  SessionFollowFrame,
+  SessionProjectionBaseline,
+  SessionWireEvent,
+} from '@deepseek-ai/dsh-api-session-controller'
+import type { WorkspaceFollowFrame } from '@deepseek-ai/dsh-api-workspace-controller'
 
 /** Liveness and protocol-negotiation facts returned by the bootstrap health route. */
 export interface NativeHandshake {
@@ -50,6 +59,126 @@ export interface NativeMethod {
   cancellation?: string
   /** Context projection replacing one lookup parameter, when present. */
   scope?: { context: string; wire: string }
+  /** Invocation carrier selected by the live Typert descriptor. */
+  mode?: 'unary' | 'stream'
+}
+
+/** Session optionally joined to one native reconnect generation. */
+export interface NativeFollowRequest {
+  readonly sessionId?: string
+  /** Durable parent proof when following a subagent child. */
+  readonly parentSessionId?: string
+  /** Provider lifecycle recorded for an addressed subagent child. */
+  readonly mode?: 'one-shot' | 'continuable'
+  readonly maxMessages?: number
+}
+
+type SessionFollowSnapshot = Extract<SessionFollowFrame, { readonly type: 'snapshot' }>
+
+/**
+ * Session follow form consumed by native transcript renderers. Storage-only
+ * chunk rows are expanded at the Host boundary so every native surface sees
+ * the same durable event vocabulary as unary history.
+ */
+export type NativeSessionFollowFrame =
+  | {
+    readonly type: 'snapshot'
+    readonly header: SessionFollowSnapshot['header']
+    readonly cursor: number
+    readonly events: readonly SessionEventEntry[]
+    readonly hasMore: boolean
+    readonly projections: SessionProjectionBaseline
+  }
+  | SessionEventEntry
+
+/**
+ * Forwarded Host event after the Gateway has enforced lossless JSON. Native
+ * clients never receive the Gateway's internal `unknown` implementation type.
+ */
+export type NativeRemoteEventFrame =
+  | {
+    readonly type: 'ready'
+    readonly clientId: string
+    readonly host: { readonly home: string }
+  }
+  | { readonly type: 'emit'; readonly event: string; readonly args: readonly JsonValue[] }
+  | {
+    readonly type: 'waterfall'
+    readonly event: string
+    readonly eventId: string
+    readonly agentId: string
+    readonly request: Readonly<Record<string, JsonValue>>
+  }
+  | { readonly type: 'cancel'; readonly eventId: string }
+
+/**
+ * One capability-neutral native feed item. The channel identifies the owning
+ * Host contract; its value remains that contract's canonical wire shape.
+ */
+export type NativeFollowFrame =
+  | { readonly channel: 'remote-events'; readonly value: NativeRemoteEventFrame }
+  | { readonly channel: 'workspace'; readonly value: WorkspaceFollowFrame }
+  | { readonly channel: 'control'; readonly value: SessionControlFrame }
+  | { readonly channel: 'session'; readonly sessionId: string; readonly value: NativeSessionFollowFrame }
+
+/** Backward-history request used by both native surfaces. */
+export interface NativeHistoryRequest {
+  readonly sessionId: string
+  /** Durable parent proof when `sessionId` names a subagent child. */
+  readonly parentSessionId?: string
+  /** Provider lifecycle recorded for an addressed subagent child. */
+  readonly mode?: 'one-shot' | 'continuable'
+  readonly beforeSeq?: number
+  readonly maxMessages?: number
+}
+
+/** Raw-event history projection consumed by the native transcript renderer. */
+export interface NativeHistoryValue {
+  readonly events: readonly {
+    readonly event: SessionWireEvent
+  }[]
+  readonly hasMore: boolean
+  readonly projections?: SessionProjectionBaseline
+}
+
+/** Privacy-minimized Host facts used by the native diagnostics surface. */
+export interface NativeHostDescription {
+  readonly version: string
+  /** Intentionally empty: paired clients never receive the Host launch directory. */
+  readonly cwd: ''
+  readonly provider?: string
+  readonly model?: string
+  readonly attachedSessions: number
+  readonly canOpenPath: boolean
+}
+
+/** Archive encodings accepted by the native migration boundary. */
+export type NativeImportFormat = 'auto' | 'dsh-jsonl' | 'dsh-zip' | 'codex-jsonl' | 'codex-zip'
+
+/** One in-memory import attachment. Bytes are base64 so every native surface shares one wire shape. */
+export interface NativeImportFile {
+  readonly name: string
+  readonly data: string
+}
+
+/** Bounded transcript import request. Imported tasks use the chosen Workspace or first-class No Project storage. */
+export interface NativeImportRequest {
+  readonly workspaceId?: string
+  readonly format: NativeImportFormat
+  readonly files: readonly NativeImportFile[]
+}
+
+/** One newly-created replayable task and its source identity. */
+export interface NativeImportItem {
+  readonly sessionId: string
+  readonly sourceSessionId?: string
+  readonly source: 'codex' | 'dsh'
+  readonly root: boolean
+}
+
+/** Complete import result after every source was parsed before the first task mutation. */
+export interface NativeImportValue {
+  readonly items: readonly NativeImportItem[]
 }
 
 /** Static surface facts reported by `/x-native/v2/capabilities`. */
@@ -61,12 +190,20 @@ export interface NativeCapabilities {
   /** The existing unified API transport a native client should use. */
   api: {
     base: string
-    hostEvents: string
-    muxEvents: string
+    /** Gateway WebSocket carrying every logical Remote stream. */
+    remoteMux: string
+    /** Logical Gateway stream carrying forwarded Host events and interactions. */
+    remoteEvents: '$events'
+    /** Logical stream merging canonical contracts for native clients. */
+    nativeFeed: 'xNative/follow'
+    /** Deprecated v1 paths retained as absent protocol facts for old decoders. */
+    hostEvents?: string
+    muxEvents?: string
   }
   /** Capability facts derived from the live composition. */
   features: {
     apiProxy: boolean
+    gateway: boolean
     typert: boolean
     remotePlugin: boolean
     voicePlugin: boolean
@@ -141,6 +278,8 @@ export interface PairResponse {
   expiresAt: number
   /** Creation epoch milliseconds. */
   createdAt: number
+  /** Stable TLS Host address clients should persist instead of a transient LAN IP. */
+  hostURL?: string
 }
 
 /** Public row of one registered native device (token never returned). */
@@ -182,6 +321,9 @@ export function toNativeMethod(value: unknown): NativeMethod | undefined {
       .filter((wire: string | undefined): wire is string => wire !== undefined)
     : []
   const result: NativeMethod = { endpoint: `${namespace}/${method}`, service, namespace, method, parameters }
+  const mode = record.mode
+  if (mode === 'stream') result.mode = 'stream'
+  else result.mode = 'unary'
   const implementation = record.implementation
   if (typeof implementation === 'string') result.implementation = implementation
   const cancellation = record.cancellation

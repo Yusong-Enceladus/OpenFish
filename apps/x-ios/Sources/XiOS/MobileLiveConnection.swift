@@ -18,8 +18,8 @@ enum MobileLiveUpdate: Sendable {
     case state(MobileConnectionState)
     /// The saved device credential was explicitly rejected by the Host.
     case authorizationRevoked
-    case host(MobileServerRequest)
-    case mux(MobileServerRequest)
+    /// One canonical frame from the Host-owned `xNative/follow` contract.
+    case feed(MobileJSONValue)
 }
 
 private enum MobileLiveConnectionError: Error {
@@ -27,12 +27,51 @@ private enum MobileLiveConnectionError: Error {
     case streamEnded
     case socketClosedBeforeOpen
     case socketOpenTimedOut
+    case invalidBaseURL
+    case invalidEnvelope
+    case remoteFailure(String)
 }
 
-/// Bridges URLSession's WebSocket-open callback into async readiness. DSH's
-/// event sockets are strictly downlink-only, so sending an application frame
-/// (or relying on `sendPing` before the HTTP upgrade finishes) is not a valid
-/// readiness probe on every Apple network stack.
+private struct MobileNativeFollowRequest: Encodable {
+    let sessionId: String?
+    let parentSessionId: String?
+    let mode: String?
+    let maxMessages: Int
+}
+
+private struct MobileNativeFollowArguments: Encodable {
+    let request: MobileNativeFollowRequest
+}
+
+private struct MobileNativeFollowPayload: Encodable {
+    let args: MobileNativeFollowArguments
+}
+
+private struct MobileRemoteStreamOpen: Encodable {
+    let type = "open"
+    let streamId: String
+    let endpoint = "xNative/follow"
+    let payload: MobileNativeFollowPayload
+}
+
+private struct MobileRemoteStreamCancel: Encodable {
+    let type = "cancel"
+    let streamId: String
+}
+
+private struct MobileRemoteStreamFailure: Decodable {
+    let code: String
+    let message: String
+}
+
+private struct MobileRemoteStreamFrame: Decodable {
+    let type: String
+    let streamId: String
+    let value: MobileJSONValue?
+    let error: MobileRemoteStreamFailure?
+}
+
+/// Bridges URLSession's WebSocket-open callback into async readiness.
 private final class MobileWebSocketDelegate: MobileTLSDelegate, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let openLock = NSLock()
     private var opened: Set<Int> = []
@@ -55,11 +94,6 @@ private final class MobileWebSocketDelegate: MobileTLSDelegate, URLSessionWebSoc
             }
             waiters[identifier] = continuation
             openLock.unlock()
-            // waitsForConnectivity is desirable for ordinary network changes,
-            // but an attempt created while the Host is between processes can
-            // otherwise wait forever even after the listener returns. Bound
-            // one generation so the owner can cancel both downlinks and retry
-            // them against the new Host process.
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.timeOutOpenWaiter(for: identifier)
             }
@@ -103,9 +137,7 @@ private final class MobileWebSocketDelegate: MobileTLSDelegate, URLSessionWebSoc
         openLock.lock()
         let waiter = waiters.removeValue(forKey: identifier)
         let wasOpen = opened.remove(identifier) != nil
-        if waiter == nil, !wasOpen {
-            failures[identifier] = failure
-        }
+        if waiter == nil, !wasOpen { failures[identifier] = failure }
         openLock.unlock()
         waiter?.resume(throwing: failure)
     }
@@ -118,6 +150,7 @@ private final class MobileWebSocketDelegate: MobileTLSDelegate, URLSessionWebSoc
     }
 }
 
+/// One authenticated Gateway carrier for Host-wide and selected-task live data.
 actor MobileLiveConnection {
     nonisolated let updates: AsyncStream<MobileLiveUpdate>
     private let baseURL: URL
@@ -126,7 +159,11 @@ actor MobileLiveConnection {
     private let trustDelegate: MobileWebSocketDelegate
     private let session: URLSession
     private var task: Task<Void, Never>?
-    private var sockets: [URLSessionWebSocketTask] = []
+    private var activeSocket: URLSessionWebSocketTask?
+    private var activeStreamId: String?
+    private var selectedSessionId: String?
+    private var selectedParentSessionId: String?
+    private var selectedMode: String?
 
     init(baseURL: URL, token: String?, tlsFingerprint: String? = nil) {
         self.baseURL = baseURL
@@ -150,43 +187,52 @@ actor MobileLiveConnection {
     func stop() {
         task?.cancel()
         task = nil
-        sockets.forEach { $0.cancel(with: .goingAway, reason: nil) }
-        sockets = []
+        activeStreamId = nil
+        activeSocket?.cancel(with: .goingAway, reason: nil)
+        activeSocket = nil
+    }
+
+    func selectSession(
+        _ sessionId: String?,
+        parentSessionId: String? = nil,
+        mode: String? = nil
+    ) async {
+        let parentSessionId = sessionId == nil ? nil : parentSessionId
+        let mode = parentSessionId == nil ? nil : mode
+        guard selectedSessionId != sessionId
+                || selectedParentSessionId != parentSessionId
+                || selectedMode != mode else { return }
+        selectedSessionId = sessionId
+        selectedParentSessionId = parentSessionId
+        selectedMode = mode
+        guard let socket = activeSocket, activeStreamId != nil else { return }
+        do {
+            try await replaceFollowStream(on: socket)
+        } catch {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
     }
 
     private func run() async {
         var attempt = 0
         while !Task.isCancelled {
             do {
-                let host = try socket("/api/events.host")
-                let mux = try socket("/api/events.mux")
-                sockets = [host, mux]
-                host.resume()
-                mux.resume()
-                // `resume()` only schedules a WebSocket task. Confirm the
-                // authenticated HTTP upgrade through URLSession's open callback
-                // before publishing Connected. A pre-open `sendPing` can hang
-                // indefinitely on a physical iPhone even after REST pairing
-                // succeeded, leaving the app permanently at Connecting.
-                async let hostReady: Void = trustDelegate.waitUntilOpen(host)
-                async let muxReady: Void = trustDelegate.waitUntilOpen(mux)
-                _ = try await (hostReady, muxReady)
+                let socket = try makeSocket()
+                activeSocket = socket
+                socket.resume()
+                try await trustDelegate.waitUntilOpen(socket)
+                try await replaceFollowStream(on: socket)
                 attempt = 0
-                continuation.yield(.state(.connected))
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    group.addTask { try await Self.pump(host, map: MobileLiveUpdate.host, into: self.continuation) }
-                    group.addTask { try await Self.pump(mux, map: MobileLiveUpdate.mux, into: self.continuation) }
-                    _ = try await group.next()
-                    group.cancelAll()
-                }
-                throw URLError(.networkConnectionLost)
+                try publish(.state(.connected))
+                try await pump(socket)
             } catch {
-                let authorizationRevoked = sockets.contains { socket in
-                    guard let response = socket.response as? HTTPURLResponse else { return false }
+                let authorizationRevoked: Bool = {
+                    guard let response = activeSocket?.response as? HTTPURLResponse else { return false }
                     return response.statusCode == 401 || response.statusCode == 403
-                }
-                sockets.forEach { $0.cancel(with: .goingAway, reason: nil) }
-                sockets = []
+                }()
+                activeStreamId = nil
+                activeSocket?.cancel(with: .goingAway, reason: nil)
+                activeSocket = nil
                 if Task.isCancelled { return }
                 if authorizationRevoked {
                     continuation.yield(.authorizationRevoked)
@@ -200,44 +246,85 @@ actor MobileLiveConnection {
         }
     }
 
-    private func socket(_ path: String) throws -> URLSessionWebSocketTask {
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw URLError(.badURL)
+    private func publish(_ update: MobileLiveUpdate) throws {
+        switch continuation.yield(update) {
+        case .enqueued: return
+        case .dropped: throw MobileLiveConnectionError.bufferOverflow
+        case .terminated: throw MobileLiveConnectionError.streamEnded
+        @unknown default: throw MobileLiveConnectionError.streamEnded
         }
-        components.scheme = components.scheme == "https" ? "wss" : "ws"
-        components.path = path
+    }
+
+    private func makeSocket() throws -> URLSessionWebSocketTask {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw MobileLiveConnectionError.invalidBaseURL
+        }
+        switch components.scheme {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        default: throw MobileLiveConnectionError.invalidBaseURL
+        }
+        components.path = "/api/remote.mux"
         components.query = nil
-        guard let url = components.url else { throw URLError(.badURL) }
+        components.fragment = nil
+        guard let url = components.url else { throw MobileLiveConnectionError.invalidBaseURL }
         var request = URLRequest(url: url)
-        if let token, !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization") }
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
+        }
         return session.webSocketTask(with: request)
     }
 
-    private static func pump(
-        _ socket: URLSessionWebSocketTask,
-        map: @Sendable (MobileServerRequest) -> MobileLiveUpdate,
-        into continuation: AsyncStream<MobileLiveUpdate>.Continuation
-    ) async throws {
+    private func replaceFollowStream(on socket: URLSessionWebSocketTask) async throws {
+        if let oldStreamId = activeStreamId {
+            try await send(MobileRemoteStreamCancel(streamId: oldStreamId), on: socket)
+        }
+        let streamId = UUID().uuidString.lowercased()
+        activeStreamId = streamId
+        try await send(MobileRemoteStreamOpen(
+            streamId: streamId,
+            payload: MobileNativeFollowPayload(args: MobileNativeFollowArguments(request: MobileNativeFollowRequest(
+                sessionId: selectedSessionId,
+                parentSessionId: selectedParentSessionId,
+                mode: selectedMode,
+                maxMessages: 100
+            )))
+        ), on: socket)
+    }
+
+    private func send<Value: Encodable>(_ value: Value, on socket: URLSessionWebSocketTask) async throws {
+        let data = try JSONEncoder().encode(value)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw MobileLiveConnectionError.invalidEnvelope
+        }
+        try await socket.send(.string(text))
+    }
+
+    private func pump(_ socket: URLSessionWebSocketTask) async throws {
+        let decoder = JSONDecoder()
         while !Task.isCancelled {
             let message = try await socket.receive()
             let data: Data
             switch message {
             case let .data(value): data = value
             case let .string(value): data = Data(value.utf8)
-            @unknown default: continue
+            @unknown default: throw MobileLiveConnectionError.invalidEnvelope
             }
-            let envelope = try JSONDecoder().decode(MobileServerRequest.self, from: data)
-            switch continuation.yield(map(envelope)) {
-            case .enqueued:
-                break
-            case .dropped:
-                throw MobileLiveConnectionError.bufferOverflow
-            case .terminated:
+            let frame = try decoder.decode(MobileRemoteStreamFrame.self, from: data)
+            guard frame.streamId == activeStreamId else { continue }
+            switch frame.type {
+            case "item":
+                if let value = frame.value { try publish(.feed(value)) }
+            case "error":
+                let failure = frame.error
+                throw MobileLiveConnectionError.remoteFailure(
+                    [failure?.code, failure?.message].compactMap { $0 }.joined(separator: ": ")
+                )
+            case "end":
                 throw MobileLiveConnectionError.streamEnded
-            @unknown default:
-                throw MobileLiveConnectionError.streamEnded
+            default:
+                throw MobileLiveConnectionError.invalidEnvelope
             }
         }
     }
-
 }

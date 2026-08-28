@@ -94,13 +94,12 @@ export async function hostRequest(
   return fetch(`${base}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers })
 }
 
-/** Invoke one DSH unary method and unwrap its four-quadrant response. */
-export async function rpc<T>(method: string, payload: unknown, base = normalizeApiBase()): Promise<T> {
+async function invoke<T>(method: string, args: unknown, base = normalizeApiBase()): Promise<T> {
   const rpcId = randomUUID()
   const response = await hostRequest(`/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+    body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args } }),
   }, base)
   const text = await response.text()
   if (!response.ok) throw new Error(`${method}: HTTP ${response.status}: ${text.slice(0, 240)}`)
@@ -129,12 +128,27 @@ export async function rpc<T>(method: string, payload: unknown, base = normalizeA
   })
 }
 
+/** Invoke a request-object Typert method. */
+export function rpc<T>(method: string, request: unknown, base = normalizeApiBase()): Promise<T> {
+  return invoke(method, { request }, base)
+}
+
+/** Invoke a Typert method whose public parameters are direct wire fields. */
+export function rpcDirect<T>(method: string, args: unknown, base = normalizeApiBase()): Promise<T> {
+  return invoke(method, args, base)
+}
+
+/** Invoke a parameterless Typert method. */
+export function rpcEmpty<T>(method: string, base = normalizeApiBase()): Promise<T> {
+  return invoke(method, {}, base)
+}
+
 export async function listSessions(): Promise<SessionSummaryView[]> {
-  return (await rpc<{ items: SessionSummaryView[] }>('session.list', {})).items
+  return (await rpcEmpty<{ items: SessionSummaryView[] }>('session/list')).items
 }
 
 export async function listWorkspaces(): Promise<{ items: WorkspaceView[]; archivedSessionIds: string[] }> {
-  return rpc('workspace.list', {})
+  return rpcEmpty('workspace/list')
 }
 
 export function projectedTitle(session: SessionSummaryView): string | undefined {
@@ -165,7 +179,7 @@ export async function fullHistory(sessionId: string): Promise<HistoryEntryView[]
   const pages: HistoryEntryView[][] = []
   let beforeSeq: number | undefined
   do {
-    const page = await rpc<HistoryView>('session.history', {
+    const page = await rpc<HistoryView>('xNative/history', {
       sessionId,
       ...(beforeSeq === undefined ? {} : { beforeSeq }),
       maxMessages: 200,
@@ -212,59 +226,6 @@ export function imagePart(path: string): { type: 'image'; mediaType: string; dat
   return { type: 'image', mediaType, data: readFileSync(path).toString('base64'), name: path.split(/[\\/]/).pop() ?? path }
 }
 
-type DownlinkChannel = 'mux' | 'host'
-
-interface DownlinkEnvelope {
-  type: 'server-request'
-  rpcId: string
-  method: string
-  payload: Record<string, unknown>
-}
-
-type DownlinkItem =
-  | { kind: 'frame'; channel: DownlinkChannel; envelope: DownlinkEnvelope }
-  | { kind: 'ended'; error?: Error }
-
-/** Small bounded handoff used only while one CLI invocation follows a turn. */
-class DownlinkQueue {
-  private readonly buffered: DownlinkItem[] = []
-  private readonly waiting: Array<(item: DownlinkItem) => void> = []
-
-  push(item: DownlinkItem): void {
-    const waiter = this.waiting.shift()
-    if (waiter !== undefined) {
-      waiter(item)
-      return
-    }
-    // A turn cannot legitimately produce an unbounded number of frames while
-    // this process is unable to consume them. Fail the generation instead of
-    // turning a disconnected terminal into an unbounded client-side store.
-    if (this.buffered.length >= 4_096) {
-      this.buffered.length = 0
-      this.buffered.push({ kind: 'ended', error: new Error('DSH event buffer overflow') })
-      return
-    }
-    this.buffered.push(item)
-  }
-
-  async next(remainingMs: number): Promise<DownlinkItem> {
-    const ready = this.buffered.shift()
-    if (ready !== undefined) return ready
-    return new Promise<DownlinkItem>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const index = this.waiting.indexOf(deliver)
-        if (index >= 0) this.waiting.splice(index, 1)
-        reject(new Error('task exceeded the 24 hour CLI wait limit'))
-      }, remainingMs)
-      const deliver = (item: DownlinkItem): void => {
-        clearTimeout(timer)
-        resolve(item)
-      }
-      this.waiting.push(deliver)
-    })
-  }
-}
-
 function websocketURL(path: string): string {
   const url = new URL(normalizeApiBase())
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -274,94 +235,151 @@ function websocketURL(path: string): string {
   return url.href
 }
 
-function parseDownlink(value: unknown): DownlinkEnvelope {
-  if (typeof value !== 'string') throw new Error('DSH downlink returned a non-text frame')
-  const decoded: unknown = JSON.parse(value)
-  if (typeof decoded !== 'object' || decoded === null) throw new Error('DSH downlink returned an invalid envelope')
-  const envelope = decoded as Record<string, unknown>
-  const payload = envelope.payload
-  if (envelope.type !== 'server-request' || typeof envelope.rpcId !== 'string'
-    || typeof envelope.method !== 'string' || typeof payload !== 'object' || payload === null) {
-    throw new Error('DSH downlink returned an invalid envelope')
-  }
-  const frame = payload as Record<string, unknown>
-  if (frame.type !== envelope.method) throw new Error('DSH downlink method does not match its payload')
-  return {
-    type: 'server-request',
-    rpcId: envelope.rpcId,
-    method: envelope.method,
-    payload: frame,
-  }
-}
-
-function openDownlink(channel: DownlinkChannel, queue: DownlinkQueue): Promise<WebSocket> {
-  const token = configuredToken()
-  const protocols = token === undefined ? [] : [`opencodex.bearer.${token}`]
-  const socket = new WebSocket(websocketURL(`/api/events.${channel}`), protocols)
-  socket.addEventListener('message', (event) => {
-    try {
-      queue.push({ kind: 'frame', channel, envelope: parseDownlink(event.data) })
-    } catch (error) {
-      queue.push({ kind: 'ended', error: error instanceof Error ? error : new Error(String(error)) })
-      socket.close(1002, 'invalid DSH frame')
-    }
-  })
-  socket.addEventListener('close', () => { queue.push({ kind: 'ended' }) }, { once: true })
-  return new Promise((resolve, reject) => {
-    socket.addEventListener('open', () => { resolve(socket) }, { once: true })
-    socket.addEventListener('error', () => {
-      if (socket.readyState !== WebSocket.OPEN) reject(new Error(`could not open DSH ${channel} event stream`))
-      else queue.push({ kind: 'ended', error: new Error(`DSH ${channel} event stream failed`) })
-    }, { once: true })
-  })
-}
-
-async function openDownlinkPair(queue: DownlinkQueue): Promise<WebSocket[]> {
-  const opened = await Promise.allSettled([
-    openDownlink('mux', queue),
-    openDownlink('host', queue),
-  ])
-  const sockets = opened.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
-  const rejected = opened.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-  if (rejected !== undefined) {
-    closeDownlinks(sockets)
-    throw rejected.reason
-  }
-  return sockets
-}
-
-function closeDownlinks(sockets: readonly WebSocket[]): void {
-  for (const socket of sockets) {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close(1000, 'CLI turn complete')
-    }
-  }
-}
-
-function historyEntryFromFrame(payload: Record<string, unknown>): HistoryEntryView | undefined {
-  const event = payload.event
-  if (typeof event !== 'object' || event === null) return undefined
-  const record = event as Record<string, unknown>
-  if (typeof record.type !== 'string' || typeof record.seq !== 'number'
-    || typeof record.time !== 'number' || typeof record.data !== 'object' || record.data === null) return undefined
-  return {
-    event: {
-      type: record.type,
-      seq: record.seq,
-      time: record.time,
-      data: record.data as Record<string, unknown>,
-    },
-    ...(payload.view === undefined ? {} : { view: payload.view }),
-  }
-}
-
 function retryableCarrierFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   return error instanceof TypeError
     || /could not open DSH|event stream failed|fetch failed|ECONN|ENOTFOUND|network|socket|closed/i.test(error.message)
 }
 
-/** Wait for a turn newer than `afterSeq` and return its complete durable log. */
+type NativeFeedItem =
+  | { kind: 'frame'; frame: Record<string, unknown> }
+  | { kind: 'ended'; error?: Error }
+
+class NativeFeedQueue {
+  private readonly buffered: NativeFeedItem[] = []
+  private readonly waiting: Array<(item: NativeFeedItem) => void> = []
+
+  push(item: NativeFeedItem): void {
+    const waiter = this.waiting.shift()
+    if (waiter !== undefined) {
+      waiter(item)
+      return
+    }
+    if (this.buffered.length >= 4_096) {
+      this.buffered.length = 0
+      this.buffered.push({ kind: 'ended', error: new Error('OpenFish native feed buffer overflow') })
+      return
+    }
+    this.buffered.push(item)
+  }
+
+  async next(remainingMs: number): Promise<NativeFeedItem> {
+    const ready = this.buffered.shift()
+    if (ready !== undefined) return ready
+    return new Promise<NativeFeedItem>((resolve, reject) => {
+      const deliver = (item: NativeFeedItem): void => {
+        clearTimeout(timer)
+        resolve(item)
+      }
+      const timer = setTimeout(() => {
+        const index = this.waiting.indexOf(deliver)
+        if (index >= 0) this.waiting.splice(index, 1)
+        reject(new Error('task exceeded the 24 hour CLI wait limit'))
+      }, remainingMs)
+      this.waiting.push(deliver)
+    })
+  }
+}
+
+interface NativeFeedSocket {
+  socket: WebSocket
+  streamId: string
+}
+
+function openNativeFeed(sessionId: string, queue: NativeFeedQueue): Promise<NativeFeedSocket> {
+  const token = configuredToken()
+  const protocols = token === undefined ? [] : [`opencodex.bearer.${token}`]
+  const socket = new WebSocket(websocketURL('/api/remote.mux'), protocols)
+  const streamId = randomUUID()
+  socket.addEventListener('message', (event) => {
+    try {
+      if (typeof event.data !== 'string') throw new Error('Gateway returned a non-text stream frame')
+      const decoded: unknown = JSON.parse(event.data)
+      if (typeof decoded !== 'object' || decoded === null) throw new Error('Gateway returned an invalid stream frame')
+      const envelope = decoded as Record<string, unknown>
+      if (envelope.streamId !== streamId) return
+      if (envelope.type === 'item') {
+        if (typeof envelope.value !== 'object' || envelope.value === null) {
+          throw new Error('Gateway native feed item is not an object')
+        }
+        queue.push({ kind: 'frame', frame: envelope.value as Record<string, unknown> })
+        return
+      }
+      if (envelope.type === 'error') {
+        const failure = typeof envelope.error === 'object' && envelope.error !== null
+          ? envelope.error as Record<string, unknown>
+          : {}
+        queue.push({
+          kind: 'ended',
+          error: new Error(typeof failure.message === 'string' ? failure.message : 'Gateway native feed failed'),
+        })
+        return
+      }
+      if (envelope.type === 'end') queue.push({ kind: 'ended' })
+    } catch (error) {
+      queue.push({ kind: 'ended', error: error instanceof Error ? error : new Error(String(error)) })
+      socket.close(1002, 'invalid Gateway frame')
+    }
+  })
+  socket.addEventListener('close', () => { queue.push({ kind: 'ended' }) }, { once: true })
+  return new Promise((resolve, reject) => {
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({
+        type: 'open',
+        streamId,
+        endpoint: 'xNative/follow',
+        payload: { args: { request: { sessionId, maxMessages: 200 } } },
+      }))
+      resolve({ socket, streamId })
+    }, { once: true })
+    socket.addEventListener('error', () => {
+      if (socket.readyState !== WebSocket.OPEN) reject(new Error('could not open OpenFish Gateway event stream'))
+      else queue.push({ kind: 'ended', error: new Error('OpenFish Gateway event stream failed') })
+    }, { once: true })
+  })
+}
+
+function closeNativeFeed(active: NativeFeedSocket | undefined): void {
+  if (active === undefined) return
+  if (active.socket.readyState === WebSocket.OPEN) {
+    active.socket.send(JSON.stringify({ type: 'cancel', streamId: active.streamId }))
+    active.socket.close(1000, 'CLI turn complete')
+  } else if (active.socket.readyState === WebSocket.CONNECTING) {
+    active.socket.close(1000, 'CLI turn complete')
+  }
+}
+
+function nativeSessionEntries(frame: Record<string, unknown>, sessionId: string): HistoryEntryView[] {
+  if (frame.channel !== 'session' || frame.sessionId !== sessionId
+    || typeof frame.value !== 'object' || frame.value === null) return []
+  const value = frame.value as Record<string, unknown>
+  const entries = value.type === 'snapshot' && Array.isArray(value.events)
+    ? value.events
+    : value.type === 'event' ? [value] : []
+  return entries.flatMap((entry): HistoryEntryView[] => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const event = (entry as Record<string, unknown>).event
+    if (typeof event !== 'object' || event === null) return []
+    const record = event as Record<string, unknown>
+    if (typeof record.type !== 'string' || typeof record.seq !== 'number'
+      || typeof record.time !== 'number' || typeof record.data !== 'object' || record.data === null) return []
+    return [{ event: {
+      type: record.type,
+      seq: record.seq,
+      time: record.time,
+      data: record.data as Record<string, unknown>,
+    } }]
+  })
+}
+
+function nativeStatus(frame: Record<string, unknown>, sessionId: string): boolean | undefined {
+  if (frame.channel !== 'remote-events' || typeof frame.value !== 'object' || frame.value === null) return undefined
+  const value = frame.value as Record<string, unknown>
+  if (value.type !== 'emit' || value.event !== 'api-session/status' || !Array.isArray(value.args)) return undefined
+  return value.args[0] === sessionId && typeof value.args[1] === 'boolean' ? value.args[1] : undefined
+}
+
+/** Wait for a turn through the same reconnect-safe native Gateway feed as Mac and iPhone. */
 export async function waitForTurn(
   sessionId: string,
   afterSeq: number,
@@ -389,50 +407,32 @@ export async function waitForTurn(
   }
 
   while (Date.now() < deadline) {
-    const queue = new DownlinkQueue()
-    const sockets: WebSocket[] = []
+    const queue = new NativeFeedQueue()
+    let active: NativeFeedSocket | undefined
     try {
-      sockets.push(...await openDownlinkPair(queue))
+      active = await openNativeFeed(sessionId, queue)
       reconnectAttempt = 0
-
-      // Sockets are opened before the baseline fetch. Frames racing that fetch
-      // stay buffered, while seq de-duplication makes the overlap harmless.
       const baseline = await synchronize()
       if (baseline.complete) return baseline.history
 
-      let reconnect = false
-      while (!reconnect) {
+      while (true) {
         const item = await queue.next(Math.max(1, deadline - Date.now()))
         if (item.kind === 'ended') {
           if (item.error !== undefined) throw item.error
-          reconnect = true
-          continue
+          break
         }
-        const payload = item.envelope.payload
-        const type = payload.type
-        if (type === 'stream/error') {
-          const error = payload.error
-          const message = typeof error === 'object' && error !== null
-            && typeof (error as Record<string, unknown>).message === 'string'
-            ? (error as Record<string, unknown>).message as string
-            : 'DSH event stream failed'
-          throw new Error(message)
+        const status = nativeStatus(item.frame, sessionId)
+        if (status === true) seenRunning = true
+        if (status === false && seenRunning) {
+          const final = await synchronize()
+          if (final.complete) return final.history
         }
-        if (payload.sessionId !== sessionId) continue
-        if (item.channel === 'host' && type === 'host/session-status') {
-          if (payload.running === true) seenRunning = true
-          if (payload.running === false && seenRunning) {
-            const final = await synchronize()
-            if (final.complete) return final.history
-          }
-          continue
-        }
-        if (item.channel !== 'mux' || type !== 'session/event') continue
-        const entry = historyEntryFromFrame(payload)
-        if (entry === undefined || entry.event.seq <= deliveredSeq) continue
-        deliveredSeq = entry.event.seq
-        onEvents?.([entry])
-        if (entry.event.type === 'turn/end' && entry.event.seq > afterSeq) {
+        const entries = nativeSessionEntries(item.frame, sessionId)
+          .filter(entry => entry.event.seq > deliveredSeq)
+        if (entries.length === 0) continue
+        deliveredSeq = entries.at(-1)?.event.seq ?? deliveredSeq
+        onEvents?.(entries)
+        if (entries.some(entry => entry.event.type === 'turn/end' && entry.event.seq > afterSeq)) {
           return (await synchronize()).history
         }
       }
@@ -442,25 +442,18 @@ export async function waitForTurn(
       if (!retryableCarrierFailure(error)) throw error
       reconnectAttempt += 1
       if (reconnectAttempt >= 3) {
-        let hostReachable = false
         try {
-          await rpc('host.describe', {})
-          hostReachable = true
+          await rpcEmpty('xNative/describe')
+          throw new Error(`DSH Host is reachable but its Gateway event stream cannot be opened: ${String(error)}`)
         } catch (probeError) {
           if (!retryableCarrierFailure(probeError)) throw probeError
-        }
-        if (hostReachable) {
-          throw new Error(`DSH Host is reachable but its event streams cannot be opened: ${String(error)}`)
         }
       }
       const cap = Math.min(10_000, 250 * (2 ** Math.min(reconnectAttempt, 5)))
       const delay = Math.min(remaining, Math.max(100, Math.floor(cap / 2 + Math.random() * cap / 2)))
       await new Promise(resolve => setTimeout(resolve, delay))
-      // A transient carrier failure is repaired by a new pair of streams and
-      // the next history baseline. Permanent Host/RPC errors surface there.
-      void error
     } finally {
-      closeDownlinks(sockets)
+      closeNativeFeed(active)
     }
   }
   throw new Error('task exceeded the 24 hour CLI wait limit')

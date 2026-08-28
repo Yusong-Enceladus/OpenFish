@@ -1,4 +1,5 @@
 import { Readable, Writable } from 'node:stream'
+import { existsSync, writeFileSync } from 'node:fs'
 import {
   AgentSideConnection,
   ndJsonStream,
@@ -64,10 +65,21 @@ function makeAgent(connection: AgentSideConnection): Agent {
     },
     authenticate(): Promise<void> { return Promise.resolve() },
     async prompt(params): Promise<PromptResponse> {
+      const crashMarker = process.env.OPENFISH_ACP_CRASH_ONCE_MARKER
+      if (crashMarker !== undefined && !existsSync(crashMarker)) {
+        writeFileSync(crashMarker, 'crashed-once\n', { mode: 0o600 })
+        process.exit(72)
+      }
       const prompt = params.prompt
         .filter(block => block.type === 'text')
         .map(block => block.text)
         .join('')
+      if (prompt === 'auth-expired') {
+        throw new Error('authentication expired; access_token=sk-test-supersecret123456')
+      }
+      if (prompt === 'quota-failure') {
+        throw new Error('provider quota exceeded; authorization=Bearer sk-test-supersecret123456')
+      }
       await connection.sessionUpdate({
         sessionId: params.sessionId,
         update: {

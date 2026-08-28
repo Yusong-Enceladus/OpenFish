@@ -20,7 +20,7 @@ OpenCodex 使用自己的名称和资产，Codex 则提供行为、信息架构�
 
 ### 运行时所有权
 
-DSH 是 OpenCodex 运行时，而不是隐藏在平行 X 运行时之后的依赖。新行为遵循 [DSH 架构](../../../../docs/architecture.md)中的扩展规则和 [GUI 分层决策](../../implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md)中已有的 Host／Client 划分。
+DSH 是 OpenCodex 运行时，而不是隐藏在平行 X 运行时之后的依赖。新行为遵循 [DSH 架构](../../../../docs/architecture.zh.md)中的扩展规则和 [GUI Web Client 架构](../../implemented/architecture/2026-07-19-gui-web-client-architecture.zh.md)中已有的 Host／Client 划分。
 
 | 关注点 | 权威所有者 | 客户端规则 |
 |---|---|---|

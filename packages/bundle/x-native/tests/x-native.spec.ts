@@ -16,15 +16,16 @@ import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
+import { NativeFeedQueue, NATIVE_FEED_QUEUE_CAPACITY } from '../src/feed.ts'
 import { XNative } from '../src/index.ts'
 import { PairingStore } from '../src/pairing.ts'
-import { toNativeMethod } from '../src/protocol.ts'
+import { toNativeMethod, type NativeFollowFrame } from '../src/protocol.ts'
 
-function fakeWebServer(routes: WebRoute[]): WebServer {
+function fakeWebServer(routes: WebRoute[], remotePort?: number): WebServer {
   return {
     host: '127.0.0.1',
-    remotePort: undefined,
-    exposesSecureRemote: false,
+    remotePort,
+    exposesSecureRemote: remotePort !== undefined,
     remoteCertificateFingerprint: undefined,
     register(route: WebRoute) {
       routes.push(route)
@@ -68,7 +69,9 @@ describe('x-native bundle patch', () => {
     expect(rows.filter(row => row.id === 'x-native')).toHaveLength(1)
     const row = rows.find(candidate => candidate.id === 'x-native')!
     expect(row.name).toBe('@deepseek-ai/dsh-bundle-x-native')
-    expect(row.inject).toEqual(['webServer', 'connection'])
+    expect(row.inject).toEqual([
+      'webServer', 'connection', 'typert', 'typertGateway', 'sessionController', 'workspaceController',
+    ])
     expect(row.config).toEqual({ protocolVersion: 'v2' })
   })
 })
@@ -90,6 +93,7 @@ describe('toNativeMethod', () => {
       service: 'sessions',
       namespace: 'sessions',
       method: 'create',
+      mode: 'unary',
       parameters: ['payload'],
     })
   })
@@ -100,7 +104,73 @@ describe('toNativeMethod', () => {
   })
 })
 
+describe('native feed backpressure', () => {
+  const frame = { channel: 'remote-events', value: {} } as NativeFollowFrame
+
+  it('delivers queued frames in order and exits when its generation is cancelled', async () => {
+    const queue = new NativeFeedQueue()
+    const abort = new AbortController()
+    const values: NativeFollowFrame[] = []
+    queue.push(frame)
+    const reading = (async () => {
+      for await (const value of queue.read(abort.signal)) {
+        values.push(value)
+        abort.abort()
+      }
+    })()
+    await reading
+    expect(values).toEqual([frame])
+  })
+
+  it('fails closed and requires a durable reconnect when a suspended client falls behind', async () => {
+    const queue = new NativeFeedQueue()
+    for (let index = 0; index <= NATIVE_FEED_QUEUE_CAPACITY; index += 1) queue.push(frame)
+    await expect((async () => {
+      for await (const _value of queue.read(new AbortController().signal)) void _value
+    })()).rejects.toThrow(`fell behind by more than ${NATIVE_FEED_QUEUE_CAPACITY} frames`)
+  })
+})
+
 describe('x-native HTTP validation', () => {
+  it('returns a stable TLS hostname for a newly paired remote profile', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'x-native-stable-host-'))
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    ctx.provide('webServer', fakeWebServer(routes, 3081))
+    ctx.provide('connection', {
+      security: {
+        isTrusted: () => true,
+        isLoopback: () => true,
+        isSecure: () => false,
+        authenticate: async () => false,
+        registerAuthenticator: () => async () => {},
+        hasAuthenticator: false,
+      },
+    } as unknown as Context['connection'])
+    new XNative(ctx, { protocolVersion: 'v2', dataDir: dir })
+    const route = routes.find(candidate => candidate.path === '/x-native/v2/pair')
+    if (route === undefined) throw new Error('pair route did not register')
+    const server = await serveRoute(route)
+
+    try {
+      const response = await fetch(`${server.origin}/x-native/v2/pair`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ surface: 'iphone', deviceName: 'test phone', appVersion: '0.1.0' }),
+      })
+      expect(response.status).toBe(201)
+      await expect(response.json()).resolves.toMatchObject({
+        deviceId: expect.any(String),
+        token: expect.any(String),
+        hostURL: expect.stringMatching(/^https:\/\/[A-Za-z0-9-]+\.local:3081$/u),
+      })
+    } finally {
+      await server.close()
+      await ctx.fiber.dispose()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('rejects a missing device identity without committing a registration', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'x-native-route-'))
     const ctx = new Context()
@@ -260,6 +330,50 @@ describe('PairingStore', () => {
       expect(await store.verify(paired.token)).toEqual(expect.objectContaining({ deviceId: paired.deviceId }))
       await expect(store.redeemTlsProof({ ...request, proof: secretProof }, certificateFingerprint))
         .rejects.toThrow(/invalid or expired/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes concurrent device actions so one pairing code can create exactly one credential', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'x-native-pair-race-'))
+    try {
+      const store = new PairingStore(join(dir, 'devices.json'))
+      const minted = store.createPairingCode()
+      const secret = minted.code.replace(/[^A-Za-z0-9]/gu, '').toUpperCase()
+      const certificateFingerprint = 'cd'.repeat(32)
+      const request = {
+        surface: 'iphone' as const,
+        deviceName: 'concurrent phone',
+        appVersion: '0.1.0',
+        codeId: minted.codeId,
+        clientNonce: Buffer.alloc(24, 9).toString('base64url'),
+      }
+      const message = [
+        'openfish-pair-v1', certificateFingerprint, request.clientNonce,
+        request.surface, request.deviceName, request.appVersion,
+      ].join('\0')
+      const proof = createHmac('sha256', secret).update(message).digest('hex')
+
+      const attempts = await Promise.allSettled([
+        store.redeemTlsProof({ ...request, proof }, certificateFingerprint),
+        store.redeemTlsProof({ ...request, proof }, certificateFingerprint),
+      ])
+      expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+      expect(attempts.filter(result => result.status === 'rejected')).toHaveLength(1)
+      expect(await store.list()).toEqual([
+        expect.objectContaining({ name: 'concurrent phone', surface: 'iphone' }),
+      ])
+
+      const paired = attempts.find(result => result.status === 'fulfilled')
+      if (paired?.status !== 'fulfilled') throw new Error('one concurrent pairing must succeed')
+      const revokeAndVerify = await Promise.all([
+        store.revoke(paired.value.deviceId),
+        store.verify(paired.value.token),
+      ])
+      expect(revokeAndVerify[0]).toBe(true)
+      expect(await store.verify(paired.value.token)).toBeUndefined()
+      expect(await store.list()).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

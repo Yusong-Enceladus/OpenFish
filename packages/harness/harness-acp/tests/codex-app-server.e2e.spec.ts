@@ -1,12 +1,20 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
-import { HarnessService, type HarnessId } from '@deepseek-ai/dsh-harness'
+import type {
+  CredentialInfo,
+  CredentialKey,
+  CredentialRecord,
+  CredentialRecordEntry,
+  CredentialRecordInfo,
+  CredentialRef,
+  ResolvedCredential,
+} from '@deepseek-ai/dsh-credentials'
+import { HarnessService, type HarnessAuthMethod, type HarnessId } from '@deepseek-ai/dsh-harness'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
@@ -16,7 +24,7 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import LocalSubprocessRuntime from '../../../subprocess/subprocess-local/src/index.ts'
 import { parseHarnessPack } from '../../harness/src/manifest.ts'
-import { CodexHarnessAgent } from '../src/codex-agent.ts'
+import { CodexHarnessAgent, codexAuthenticationEnvironment } from '../src/codex-agent.ts'
 import * as AcpHarnessDriver from '../src/index.ts'
 
 const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.ts', import.meta.url))
@@ -57,12 +65,26 @@ afterEach(async () => {
 })
 
 class EmptyCredentials extends CredentialProvider {
-  override resolve(_ref: CredentialRef): Promise<ResolvedCredential | undefined> { return Promise.resolve(undefined) }
+  constructor(ctx: Context, private readonly values: Readonly<Record<string, string>> = {}) { super(ctx) }
+  override resolve(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
+    const value = this.values[String(ref)]
+    return Promise.resolve(value === undefined ? undefined : { value, source: 'test' })
+  }
   override describe(_ref: CredentialRef): Promise<CredentialInfo> {
     return Promise.resolve({ configured: false, writable: true })
   }
   override set(_ref: CredentialRef, _value: string): Promise<void> { return Promise.resolve() }
   override unset(_ref: CredentialRef): Promise<void> { return Promise.resolve() }
+  override readRecord(_key: CredentialKey): Promise<CredentialRecord | undefined> { return Promise.resolve(undefined) }
+  override describeRecord(_key: CredentialKey): Promise<CredentialRecordInfo> {
+    return Promise.resolve({ configured: false, writable: true })
+  }
+  override listRecords(): Promise<readonly CredentialRecordEntry[]> { return Promise.resolve([]) }
+  override modifyRecord(
+    _key: CredentialKey,
+    mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+  ): Promise<CredentialRecord | undefined> { return mutate(undefined) }
+  override deleteRecord(_key: CredentialKey): Promise<void> { return Promise.resolve() }
 }
 
 /** Protocol tests exercise the Driver; resident isolation has its own real-provider E2E suite. */
@@ -88,6 +110,47 @@ function prompt(text: string) {
 }
 
 describe('official Codex app-server Harness contract', () => {
+  it('copies a custom CA file into the private runtime before exposing its environment path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openfish-codex-ca-'))
+    const source = join(root, 'selected-ca.pem')
+    const runtimeDirectory = join(root, 'runtime')
+    const pem = '-----BEGIN CERTIFICATE-----\nsynthetic-public-certificate\n-----END CERTIFICATE-----\n'
+    await writeFile(source, pem, { mode: 0o644 })
+    const ctx = new Context()
+    void new EmptyCredentials(ctx, {
+      OPENFISH_CODEX_CA_CERTIFICATE: source,
+      OPENAI_API_KEY: 'synthetic-test-key',
+    })
+    fibers.push(ctx.fiber)
+    const method: HarnessAuthMethod = {
+      id: 'codex-api-key', name: 'API key', kind: 'environment',
+      fields: [
+        { ref: 'OPENAI_API_KEY', name: 'API key', env: 'OPENAI_API_KEY', required: true, secret: true },
+        {
+          ref: 'OPENFISH_CODEX_CA_CERTIFICATE', name: 'Custom CA', env: 'CODEX_CA_CERTIFICATE',
+          required: false, secret: false,
+        },
+      ],
+    }
+    try {
+      const environments = await Promise.all(Array.from(
+        { length: 8 },
+        () => codexAuthenticationEnvironment(ctx, method, runtimeDirectory),
+      ))
+      const [environment] = environments
+      expect(environment).toBeDefined()
+      if (environment === undefined) throw new Error('Codex CA environment was not produced')
+      expect(new Set(environments.map(item => item.CODEX_CA_CERTIFICATE)).size).toBe(1)
+      expect(environment.OPENAI_API_KEY).toBe('synthetic-test-key')
+      expect(environment.CODEX_CA_CERTIFICATE).not.toBe(source)
+      expect(environment.CODEX_CA_CERTIFICATE?.startsWith(runtimeDirectory)).toBe(true)
+      expect(await readFile(environment.CODEX_CA_CERTIFICATE as string, 'utf8')).toBe(pem)
+      expect((await stat(environment.CODEX_CA_CERTIFICATE as string)).mode & 0o777).toBe(0o600)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('permanently discards the exact prepared blank thread through official thread/delete', async () => {
     const ctx = await runtime()
     const noProject = await mkdtemp(join(tmpdir(), 'openfish-codex-discard-'))
@@ -172,6 +235,128 @@ describe('official Codex app-server Harness contract', () => {
       expect(resumedSession.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
         .toContainEqual({ type: 'text', text: 'codex:again' })
       await resumed.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it('recovers the exact pinned thread after an app-server crash without replaying the uncertain prompt', async () => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), 'openfish-codex-crash-recovery-'))
+    const marker = join(noProject, 'crashed-once')
+    const trace = join(noProject, 'app-server-methods.log')
+    const crashPack = parseHarnessPack({
+      ...pack,
+      distribution: {
+        ...pack.distribution,
+        env: {
+          OPENFISH_CODEX_FIXTURE_CRASH_ONCE_MARKER: marker,
+          OPENFISH_CODEX_FIXTURE_TRACE: trace,
+        },
+      },
+    })
+    try {
+      const session = ctx.sessions.create(SessionId('codex-crash-recovery'), { meta: { cwd: noProject } })
+      const agent = new CodexHarnessAgent(
+        ctx, session.id, session, crashPack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+      await agent.selectHarnessModel('gpt-test', 'low')
+
+      agent.followup(prompt('uncertain operation'))
+      await agent.whenIdle()
+      expect(session.events.filter(event => event.type === 'assistant/message')).toHaveLength(0)
+      expect(session.events.findLast(event => event.type === 'turn/end')?.data.reason).toMatchObject({
+        kind: 'error',
+        error: { code: 'CODEX_APP_SERVER_ERROR' },
+      })
+      expect(JSON.stringify(session.events.findLast(event => event.type === 'turn/end')))
+        .toContain('retry this turn because the interrupted prompt may have reached Codex')
+
+      agent.followup(prompt('safe retry'))
+      await agent.whenIdle()
+      expect(agent.harnessModelCatalog()).toMatchObject({
+        current: 'gpt-test', currentReasoningEffort: 'low',
+      })
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'codex:safe retry' })
+      const methods = (await readFile(trace, 'utf8')).trim().split('\n')
+      expect(methods.filter(method => method === 'turn/start')).toHaveLength(2)
+      expect(methods.filter(method => method === 'thread/resume')).toHaveLength(1)
+      await agent.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves the visible model and effort while permissions restart the pinned Codex thread', async () => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), 'openfish-codex-permission-change-'))
+    const trace = join(noProject, 'app-server-methods.log')
+    const tracedPack = parseHarnessPack({
+      ...pack,
+      distribution: {
+        ...pack.distribution,
+        env: { OPENFISH_CODEX_FIXTURE_TRACE: trace },
+      },
+    })
+    try {
+      const session = ctx.sessions.create(SessionId('codex-permission-change'), { meta: { cwd: noProject } })
+      const agent = new CodexHarnessAgent(
+        ctx, session.id, session, tracedPack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+      await agent.selectHarnessModel('gpt-test', 'low')
+
+      await agent.sandboxAuthority.reconfigure('read-only')
+      expect(agent.sandboxAuthority.mode).toBe('read-only')
+      expect(agent.harnessModelCatalog()).toMatchObject({
+        current: 'gpt-test', currentReasoningEffort: 'low',
+      })
+      expect(session.events.filter(event => event.type === 'harness/selected')).toHaveLength(1)
+
+      agent.followup(prompt('after permission change'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'codex:after permission change' })
+      const methods = (await readFile(trace, 'utf8')).trim().split('\n')
+      expect(methods.filter(method => method === 'thread/resume')).toHaveLength(1)
+      await agent.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['auth-expired', 'authentication expired'],
+    ['quota-failure', 'provider quota exceeded'],
+  ])('surfaces a redacted Codex %s failure and keeps the thread usable', async (failurePrompt, expected) => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), `openfish-codex-${failurePrompt}-`))
+    try {
+      const session = ctx.sessions.create(SessionId(`codex-${failurePrompt}`), { meta: { cwd: noProject } })
+      const agent = new CodexHarnessAgent(
+        ctx, session.id, session, pack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+
+      agent.followup(prompt(failurePrompt))
+      await agent.whenIdle()
+      const failure = session.events.findLast(event => event.type === 'turn/end')
+      expect(failure?.data.reason).toMatchObject({
+        kind: 'error',
+        error: { code: 'CODEX_APP_SERVER_ERROR', message: expect.stringContaining(expected) },
+      })
+      expect(JSON.stringify(failure)).not.toContain('sk-test-supersecret123456')
+
+      agent.followup(prompt('after provider failure'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'codex:after provider failure' })
+      await agent.dispose()
     } finally {
       await rm(noProject, { recursive: true, force: true })
     }

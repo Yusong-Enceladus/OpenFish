@@ -12,6 +12,7 @@ PROJECT="$ROOT_DIR/apps/x-ios/OpenCodexIOS.xcodeproj"
 SCHEME="OpenFishIOS"
 BUNDLE_ID="${OPENFISH_IOS_BUNDLE_ID:-app.openfish.ios}"
 DEVICE_ID="${OPENCODEX_IOS_DEVICE_ID:-}"
+SIMULATOR_ID="${OPENCODEX_IOS_SIMULATOR_ID:-}"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 unregister_ios_build_product() {
@@ -41,15 +42,31 @@ if [[ "$MODE" == "simulator" || "$MODE" == "--simulator" ]]; then
     -destination 'generic/platform=iOS Simulator' \
     -derivedDataPath "$DERIVED_DATA" \
     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-    CODE_SIGNING_ALLOWED=NO \
     build
 
-  xcrun simctl bootstatus booted -b >/dev/null 2>&1 || open -a Simulator
-  xcrun simctl bootstatus booted -b
+  if [[ -z "$SIMULATOR_ID" ]]; then
+    SIMULATOR_TMP="$(mktemp -d "$OPENFISH_TEMP_ROOT/opencodex-ios-simulator.XXXXXX")"
+    trap 'rm -rf "$SIMULATOR_TMP"' EXIT
+    SIMULATOR_JSON="$SIMULATOR_TMP/devices.json"
+    xcrun simctl list devices booted --json > "$SIMULATOR_JSON"
+    SIMULATOR_ID="$(SIMULATOR_JSON="$SIMULATOR_JSON" node --input-type=module - <<'NODE'
+import { readFileSync } from 'node:fs'
+const runtimes = JSON.parse(readFileSync(process.env.SIMULATOR_JSON, 'utf8')).devices ?? {}
+const devices = Object.values(runtimes).flat().filter(device =>
+  device.state === 'Booted' && device.isAvailable !== false && device.udid)
+if (devices.length === 1) process.stdout.write(devices[0].udid)
+NODE
+)"
+    if [[ -z "$SIMULATOR_ID" ]]; then
+      echo "Boot exactly one simulator, or set OPENCODEX_IOS_SIMULATOR_ID." >&2
+      exit 1
+    fi
+  fi
+  xcrun simctl bootstatus "$SIMULATOR_ID" -b
   SIMULATOR_APP="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/OpenFish.app"
-  xcrun simctl install booted "$SIMULATOR_APP"
+  xcrun simctl install "$SIMULATOR_ID" "$SIMULATOR_APP"
   unregister_ios_build_product "$SIMULATOR_APP"
-  xcrun simctl launch booted "$BUNDLE_ID"
+  xcrun simctl launch "$SIMULATOR_ID" "$BUNDLE_ID"
   exit
 fi
 

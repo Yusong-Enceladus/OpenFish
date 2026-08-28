@@ -14,29 +14,61 @@ struct BehaviorSmoke {
         let workspace: String? = workspaceArgument == "--no-project" ? nil : workspaceArgument
         let promptFile = CommandLine.arguments[3]
         UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
-        defer { UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId") }
+        UserDefaults.standard.removeObject(forKey: "OpenFish.defaultHarnessId")
+        defer {
+            UserDefaults.standard.removeObject(forKey: "OpenCodex.lastSessionId")
+            UserDefaults.standard.removeObject(forKey: "OpenFish.defaultHarnessId")
+        }
 
         do {
             let prompt = try String(contentsOfFile: promptFile, encoding: .utf8)
             let api = DshApiClient(baseURL: baseURL)
-            let sessionId = try await api.createSession(cwd: workspace)
-
             let store = OpenCodexStore(baseURL: baseURL)
             await store.boot()
             guard store.errorBanner == nil else {
                 throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "native bootstrap failed")
             }
-            await store.selectSession(sessionId)
-            guard store.errorBanner == nil else {
-                throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "session selection failed")
+
+            // A clean Host deliberately has no fabricated default Harness.
+            // Exercise the same native onboarding action a first-time user
+            // takes before asking the Host to create either kind of task.
+            await store.loadHarnessCatalogForOnboarding()
+            guard store.harnessCatalogError == nil else {
+                throw BehaviorSmokeError.storeFailure(store.harnessCatalogError ?? "Harness catalog failed")
+            }
+            guard let dsh = store.harnesses.first(where: { $0.id == "dsh" }) else {
+                throw BehaviorSmokeError.missingDSHHarness
+            }
+            await store.selectDefaultHarness(dsh, completesOnboarding: true)
+            guard store.errorBanner == nil,
+                  store.selectedHarnessId == dsh.id,
+                  !store.needsHarnessOnboarding else {
+                throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "default Harness onboarding did not complete")
+            }
+
+            let workspaceId: String?
+            if let workspace {
+                workspaceId = try await api.createWorkspace(path: workspace).workspaceId
+            } else {
+                workspaceId = nil
+            }
+            store.beginNewTask(in: workspaceId)
+            try await waitUntil("prepared native draft") {
+                guard let draftSessionId = store.draftSessionId else { return false }
+                return store.sessions.contains(where: { $0.sessionId == draftSessionId })
+                    && store.currentPermissions != nil
+                    && store.sessionModels != nil
+            }
+            guard let sessionId = store.draftSessionId else {
+                throw BehaviorSmokeError.missingPreparedDraft
             }
             try await waitUntil("permissions projection") { store.currentPermissions != nil }
-            guard let effectiveWorkspace = store.currentSession?.cwd,
+            guard let effectiveWorkspace = store.sessions.first(where: { $0.sessionId == sessionId })?.cwd,
                   !effectiveWorkspace.isEmpty else {
                 throw BehaviorSmokeError.missingEffectiveWorkspace
             }
             if workspace == nil {
-                guard effectiveWorkspace.contains("/openfish/no-project/\(sessionId)") else {
+                guard effectiveWorkspace.contains("/openfish/sessions/no-workspace/\(sessionId)") else {
                     throw BehaviorSmokeError.invalidNoProjectWorkspace(effectiveWorkspace)
                 }
             }
@@ -91,17 +123,28 @@ struct BehaviorSmoke {
             guard store.errorBanner == nil else {
                 throw BehaviorSmokeError.storeFailure(store.errorBanner ?? "approval failed")
             }
-            try await waitUntil("completed tool and final answer", timeoutSeconds: 60) {
-                store.selectedApprovals.isEmpty
-                    && store.currentSession?.running == false
-                    && store.conversation.contains {
-                        $0.kind == .activity && $0.activityState == .completed
-                    }
-                    && store.conversation.contains {
-                        $0.kind == .assistant
-                            && !$0.isStreaming
-                            && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == "DONE"
-                    }
+            do {
+                try await waitUntil("completed tool and final answer", timeoutSeconds: 60) {
+                    store.selectedApprovals.isEmpty
+                        && store.currentSession?.running == false
+                        && store.conversation.contains {
+                            $0.kind == .activity && $0.activityState == .completed
+                        }
+                        && store.conversation.contains {
+                            $0.kind == .assistant
+                                && !$0.isStreaming
+                                && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == "DONE"
+                        }
+                }
+            } catch {
+                let tail = store.conversation.suffix(12).map { item in
+                    let text = item.text.replacingOccurrences(of: "\n", with: " ").prefix(120)
+                    return "seq=\(item.seq) kind=\(item.kind) state=\(String(describing: item.activityState)) streaming=\(item.isStreaming) text=\(text)"
+                }.joined(separator: " | ")
+                let banner = store.errorBanner ?? "none"
+                throw BehaviorSmokeError.storeFailure(
+                    "\(error); session=\(sessionId) running=\(String(describing: store.currentSession?.running)) approvals=\(store.selectedApprovals.count) banner=\(banner) transcript=[\(tail)]"
+                )
             }
             await store.shutdown()
 
@@ -147,6 +190,8 @@ struct BehaviorSmoke {
 }
 
 private enum BehaviorSmokeError: Error, CustomStringConvertible {
+    case missingDSHHarness
+    case missingPreparedDraft
     case missingReadOnlyPreset
     case missingRoutableModel
     case missingEffectiveWorkspace
@@ -158,6 +203,8 @@ private enum BehaviorSmokeError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
+        case .missingDSHHarness: return "the clean Host did not advertise the built-in DSH Harness"
+        case .missingPreparedDraft: return "the native new-task flow did not retain its prepared session identity"
         case .missingReadOnlyPreset: return "DSH did not advertise the read-only permission preset"
         case .missingRoutableModel: return "DSH did not advertise a routable model for the replay fixture"
         case .missingEffectiveWorkspace: return "the created session did not expose an effective working directory"

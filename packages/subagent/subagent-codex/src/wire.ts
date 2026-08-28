@@ -1,5 +1,5 @@
 /**
- * Minimal Codex app-server 0.147.0 protocol adapter. The shared JSON-RPC
+ * Minimal Codex app-server 0.150.1 protocol adapter. The shared JSON-RPC
  * transport owns framing and request correlation; this module owns only the
  * product methods, current thread/turn association, unattended approval
  * responses, and terminal-answer selection.
@@ -14,11 +14,19 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type { CodexPermissionMode } from './run.ts'
 
 type JsonObject = Record<string, unknown>
+const MAXIMUM_EARLY_TURN_NOTIFICATIONS = 256
 
 /** Product facts owned by the Codex wire after publication. */
 export interface CodexWireFailureFacts {
   readonly stage: 'turn-start' | 'turn'
-  readonly category: string
+  readonly category:
+    | 'limit'
+    | 'access-policy'
+    | 'service'
+    | 'transport'
+    | 'product-error'
+    | 'invalid-result'
+    | 'unknown'
   readonly httpStatus?: number | undefined
 }
 
@@ -93,40 +101,6 @@ const THREAD_PERMISSION_PARAMS: Readonly<Record<CodexPermissionMode, JsonObject>
   },
 }
 
-const STDERR_PERMISSION_SIGNATURES = [
-  {
-    text: 'approval policy is Never; reject command',
-    request: 'command execution',
-    decision: 'denied',
-    reason: 'Codex rejected an escalation because the selected policy never asks for approval',
-  },
-  {
-    text: 'recorded sandbox violation:',
-    request: 'sandbox execution',
-    decision: 'failed',
-    reason: 'Codex reported a sandbox violation',
-  },
-] as const
-
-const STDERR_SIGNATURE_TAIL_CHARS = Math.max(
-  ...STDERR_PERMISSION_SIGNATURES.map(signature => signature.text.length),
-) - 1
-
-function stderrSignatureTail(value: string): string {
-  for (
-    let length = Math.min(STDERR_SIGNATURE_TAIL_CHARS, value.length)
-    ; length > 0
-    ; length -= 1
-  ) {
-    const tail = value.slice(-length)
-    if (STDERR_PERMISSION_SIGNATURES.some(signature =>
-      tail.length < signature.text.length && signature.text.startsWith(tail))) {
-      return tail
-    }
-  }
-  return ''
-}
-
 function object(value: unknown, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
@@ -135,7 +109,25 @@ function object(value: unknown, label: string): JsonObject {
 }
 
 function string(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== 'string' || value.length === 0 || Array.from(value).length > 4_096
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
+    throw new Error(`subagent-codex: app-server returned invalid ${label}`)
+  }
+  return value
+}
+
+function boundedString(value: unknown, label: string, maximum = 2_048): string {
+  const accepted = string(value, label)
+  if (Array.from(accepted).length > maximum || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(accepted)) {
+    throw new Error(`subagent-codex: app-server returned unbounded ${label}`)
+  }
+  return accepted
+}
+
+function boundedOptionalString(value: unknown, label: string, maximum = 2_048): string {
+  if (typeof value !== 'string'
+    || Array.from(value).length > maximum
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
   }
   return value
@@ -160,10 +152,14 @@ function numericHttpStatus(value: unknown): number | undefined {
     : undefined
 }
 
-function objectFailureInfo(value: JsonObject): {
-  readonly category: string
+interface ParsedFailureInfo {
+  readonly category: CodexWireFailureFacts['category']
   readonly httpStatus?: number | undefined
-} {
+  readonly maxTokens?: true
+  readonly sandboxFailure?: true
+}
+
+function objectFailureInfo(value: JsonObject): ParsedFailureInfo {
   const keys = Object.keys(value)
   const category = keys[0]
   if (keys.length !== 1 || category === undefined) {
@@ -182,20 +178,17 @@ function objectFailureInfo(value: JsonObject): {
     {
       const httpStatus = numericHttpStatus(fields.httpStatusCode)
       return httpStatus === undefined
-        ? { category }
-        : { category, httpStatus }
+        ? { category: 'transport' }
+        : { category: 'transport', httpStatus }
     }
     case 'activeTurnNotSteerable':
-      return { category }
+      return { category: 'product-error' }
     default:
       return { category: 'unknown' }
   }
 }
 
-function failureInfo(turn: JsonObject): {
-  readonly category: string
-  readonly httpStatus?: number | undefined
-} {
+function failureInfo(turn: JsonObject): ParsedFailureInfo {
   if (turn.status !== 'failed') return { category: 'unknown' }
   const error = turn.error
   if (error === null || typeof error !== 'object' || Array.isArray(error)) {
@@ -205,17 +198,23 @@ function failureInfo(turn: JsonObject): {
   if (typeof info === 'string') {
     switch (info) {
       case 'contextWindowExceeded':
+        return { category: 'limit', maxTokens: true }
       case 'sessionBudgetExceeded':
       case 'usageLimitExceeded':
+        return { category: 'limit' }
       case 'serverOverloaded':
-      case 'cyberPolicy':
       case 'internalServerError':
+        return { category: 'service' }
+      case 'cyberPolicy':
+      case 'misalignmentPolicyViolation':
       case 'unauthorized':
+        return { category: 'access-policy' }
       case 'badRequest':
       case 'threadRollbackFailed':
-      case 'sandboxError':
       case 'other':
-        return { category: info }
+        return { category: 'product-error' }
+      case 'sandboxError':
+        return { category: 'access-policy', sandboxFailure: true }
       default:
         return { category: 'unknown' }
     }
@@ -294,17 +293,21 @@ export class CodexAppServerWire {
     readonly decision: Parameters<typeof unattendedDiagnostic>[2]
     readonly reason: string
   } | undefined
-  private stderrTail = ''
   private inputEnded = false
   private terminalObserved = false
   private closed = false
+  private readonly model: string | undefined
+  private readonly hooks: CodexAppServerWireHooks
 
   constructor(
     private readonly input: Readable,
     output: Writable,
     private readonly permissionMode: CodexPermissionMode,
-    private readonly hooks: CodexAppServerWireHooks = {},
+    modelOrHooks?: string | CodexAppServerWireHooks,
+    hooks: CodexAppServerWireHooks = {},
   ) {
+    this.model = typeof modelOrHooks === 'string' ? modelOrHooks : undefined
+    this.hooks = typeof modelOrHooks === 'string' ? hooks : modelOrHooks ?? hooks
     this.transport = new JsonRpcLineTransport(input, output)
     // Fatal protocol state can arrive after the current guarded operation has
     // already settled. Keep the shared rejection observed without inserting
@@ -368,6 +371,7 @@ export class CodexAppServerWire {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
       ephemeral: true,
+      ...this.model === undefined ? {} : { model: this.model },
       ...THREAD_PERMISSION_PARAMS[this.permissionMode],
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
@@ -454,27 +458,54 @@ export class CodexAppServerWire {
     const response = object(await this.guarded(this.transport.request('model/list', {
       includeHidden: false,
     }, signal), signal), 'model/list response')
-    if (!Array.isArray(response.data)) throw new Error('subagent-codex: app-server returned invalid model/list data')
-    return response.data.map((raw): CodexAppServerModel => {
+    if (!Array.isArray(response.data) || response.data.length > 512) {
+      throw new Error('subagent-codex: app-server returned invalid model/list data')
+    }
+    const models = response.data.map((raw): CodexAppServerModel => {
       const model = object(raw, 'model/list model')
+      if (Array.isArray(model.supportedReasoningEfforts) && model.supportedReasoningEfforts.length > 32) {
+        throw new Error('subagent-codex: app-server returned too many reasoning efforts')
+      }
       const efforts = Array.isArray(model.supportedReasoningEfforts)
         ? model.supportedReasoningEfforts.map((rawEffort) => {
           const effort = object(rawEffort, 'model reasoning effort')
           return {
-            reasoningEffort: string(effort.reasoningEffort, 'model reasoning effort id'),
-            ...(typeof effort.description === 'string' ? { description: effort.description } : {}),
+            reasoningEffort: boundedString(effort.reasoningEffort, 'model reasoning effort id', 128),
+            ...(typeof effort.description === 'string'
+              ? { description: boundedOptionalString(effort.description, 'model reasoning effort description') }
+              : {}),
           }
         })
         : []
+      const effortIds = efforts.map(effort => effort.reasoningEffort)
+      if (new Set(effortIds).size !== effortIds.length) {
+        throw new Error('subagent-codex: app-server returned duplicate model reasoning efforts')
+      }
+      const id = boundedString(model.id, 'model id', 256)
+      const defaultReasoningEffort = typeof model.defaultReasoningEffort === 'string'
+        ? boundedString(model.defaultReasoningEffort, 'default model reasoning effort', 128)
+        : undefined
+      if (defaultReasoningEffort !== undefined && !effortIds.includes(defaultReasoningEffort)) {
+        throw new Error(`subagent-codex: app-server model "${id}" defaulted to an unadvertised reasoning effort`)
+      }
       return {
-        id: string(model.id, 'model id'),
-        displayName: typeof model.displayName === 'string' ? model.displayName : string(model.id, 'model id'),
-        ...(typeof model.description === 'string' ? { description: model.description } : {}),
-        ...(typeof model.defaultReasoningEffort === 'string' ? { defaultReasoningEffort: model.defaultReasoningEffort } : {}),
+        id,
+        displayName: typeof model.displayName === 'string'
+          ? boundedString(model.displayName, 'model display name', 256)
+          : id,
+        ...(typeof model.description === 'string'
+          ? { description: boundedOptionalString(model.description, 'model description') }
+          : {}),
+        ...(defaultReasoningEffort === undefined ? {} : { defaultReasoningEffort }),
         supportedReasoningEfforts: efforts,
         ...(typeof model.isDefault === 'boolean' ? { isDefault: model.isDefault } : {}),
       }
     })
+    const modelIds = models.map(model => model.id)
+    if (new Set(modelIds).size !== modelIds.length || models.filter(model => model.isDefault === true).length > 1) {
+      throw new Error('subagent-codex: app-server returned an ambiguous model directory')
+    }
+    return models
   }
 
   /**
@@ -491,9 +522,9 @@ export class CodexAppServerWire {
     if (response.account === null || response.account === undefined) return undefined
     const account = object(response.account, 'account/read account')
     return {
-      type: string(account.type, 'account type'),
+      type: boundedString(account.type, 'account type', 128),
       ...(typeof account.planType === 'string' && account.planType.length > 0
-        ? { planType: account.planType }
+        ? { planType: boundedString(account.planType, 'account plan type', 128) }
         : {}),
       requiresOpenaiAuth: response.requiresOpenaiAuth === true,
     }
@@ -562,7 +593,7 @@ export class CodexAppServerWire {
           category: parsed.category,
           httpStatus: parsed.httpStatus,
         })
-      if (parsed.category === 'sandboxError') {
+      if (parsed.sandboxFailure) {
         this.recordDiagnostic(
           'sandbox execution',
           'failed',
@@ -570,7 +601,7 @@ export class CodexAppServerWire {
           completed.order,
         )
       }
-      if (parsed.category === 'contextWindowExceeded') {
+      if (parsed.maxTokens) {
         return { output: this.collectOutput(), stopReason: 'max-tokens' }
       }
       const detail = status === 'failed' ? `: ${parsed.category}` : ''
@@ -578,7 +609,7 @@ export class CodexAppServerWire {
     }
     const output = this.collectOutput()
     if (output.length === 0) {
-      this.recordFailure({ stage: 'turn', category: 'unknown' })
+      this.recordFailure({ stage: 'turn', category: 'invalid-result' })
       throw new Error('subagent-codex: Codex completed without a final answer')
     }
     return { output, stopReason: 'completed' }
@@ -622,28 +653,6 @@ export class CodexAppServerWire {
    */
   collectFailure(): CodexWireFailureFacts {
     return this.failure as CodexWireFailureFacts
-  }
-
-  /**
-   * Observe product stderr while retaining only enough tail to recognize fixed
-   * permission signatures. The raw text is never copied into the diagnostic.
-   * @param chunk - one decoded stderr chunk already forwarded to the host.
-   */
-  observeStderr(chunk: string): void {
-    const observed = `${this.stderrTail}${chunk}`
-    let latestIndex = -1
-    let latest: (typeof STDERR_PERMISSION_SIGNATURES)[number] | undefined
-    for (const signature of STDERR_PERMISSION_SIGNATURES) {
-      const index = observed.lastIndexOf(signature.text)
-      if (index > latestIndex) {
-        latestIndex = index
-        latest = signature
-      }
-    }
-    if (latest !== undefined) {
-      this.recordDiagnostic(latest.request, latest.decision, latest.reason)
-    }
-    this.stderrTail = stderrSignatureTail(observed)
   }
 
   /** Detach JSON-RPC listeners and reject outstanding requests. Idempotent. */
@@ -877,6 +886,7 @@ export class CodexAppServerWire {
     params: JsonObject,
     order?: number,
   ): void {
+    boundedString(method, 'notification method', 256)
     this.hooks.notification?.(method, params)
     if (method === 'turn/started') {
       const threadId = string(params.threadId, 'turn/started thread id')
@@ -894,6 +904,9 @@ export class CodexAppServerWire {
       if (this.turnId === undefined) {
         if (this.turnCompleted !== undefined) {
           this.observePendingTurnId(id)
+          if (this.earlyTurnNotifications.length >= MAXIMUM_EARLY_TURN_NOTIFICATIONS) {
+            throw new Error('subagent-codex: app-server emitted too many early turn notifications')
+          }
           this.earlyTurnNotifications.push({
             method,
             params,
@@ -927,6 +940,9 @@ export class CodexAppServerWire {
     if (turnCompleted === undefined) return
     if (this.turnId === undefined) {
       this.observePendingTurnId(id)
+      if (this.earlyTurnNotifications.length >= MAXIMUM_EARLY_TURN_NOTIFICATIONS) {
+        throw new Error('subagent-codex: app-server emitted too many early turn notifications')
+      }
       this.earlyTurnNotifications.push({
         method,
         params,

@@ -31,12 +31,16 @@ struct NativeBootstrapCapabilities: Codable {
 
     struct ApiFacts: Codable {
         let base: String
-        let hostEvents: String
-        let muxEvents: String
+        let remoteMux: String
+        let remoteEvents: String
+        let nativeFeed: String
+        let hostEvents: String?
+        let muxEvents: String?
     }
 
     struct FeatureFacts: Codable {
         let apiProxy: Bool
+        let gateway: Bool
         let typert: Bool
         let remotePlugin: Bool
         let voicePlugin: Bool
@@ -97,6 +101,7 @@ struct NativePairingReceipt: Codable, Equatable, Sendable {
     let token: String
     let expiresAt: Double
     let createdAt: Double
+    let hostURL: String?
 }
 
 struct NativePairingResult: Sendable {
@@ -125,6 +130,7 @@ struct BootstrapMethod: Codable, Identifiable {
     let parameters: [String]
     let implementation: String?
     let cancellation: String?
+    let mode: String?
     let scope: Scope?
 
     struct Scope: Codable {

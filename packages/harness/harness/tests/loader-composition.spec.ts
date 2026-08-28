@@ -19,12 +19,16 @@ import {
 
 let root: string | undefined
 let context: Context | undefined
+const driverCalls = { create: 0, resume: 0, dispose: 0 }
 
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
+  driverCalls.create = 0
+  driverCalls.resume = 0
+  driverCalls.dispose = 0
   vi.unstubAllGlobals()
 })
 
@@ -36,14 +40,45 @@ const futureDriver = defineHarnessDriver({
     { id: 'session.resume', status: 'supported', source: 'driver' },
     { id: 'workspace.no-project', status: 'supported', source: 'driver' },
     { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+    { id: 'architecture.edit', status: 'supported', source: 'driver' },
+    { id: 'builder.manifest', status: 'supported', source: 'driver' },
   ],
+  authoring: async () => ({
+    nodeKinds: [{
+      kind: 'future-step', name: 'Future step', description: 'A fixture step owned by the future Driver.',
+      responsibility: 'Applies one future Driver setting.', editable: true,
+      inputs: ['request'], outputs: ['result'], observes: ['driver.future-protocol.turn-dispatched'],
+    }],
+    bindingKinds: [{
+      kind: 'future-setting', name: 'Future setting', description: 'A setting interpreted by the future Driver.',
+      fieldTypes: ['boolean'], targetLabel: 'Setting id', targetPattern: '^[a-z][a-z0-9-]*$',
+    }],
+  }),
+  validatePack: async pack => pack.graph.nodes.some(node => node.editable
+    && node.configSchema?.fields.some(field => field.binding.kind === 'future-setting') === true)
+    ? [] : ['Future Driver requires one executable future-setting binding.'],
   runtimeSignals: event => event.type === 'turn/start'
     ? [{ signal: 'driver.future-protocol.turn-dispatched', status: 'active' }]
     : [],
   available: async () => undefined,
-  create: async request => ({ id: request.sessionId }) as Agent,
-  resume: async request => ({ id: request.sessionId }) as Agent,
-  dispose: async () => undefined,
+  create: async (request) => {
+    driverCalls.create++
+    if (context === undefined) throw new Error('fixture context is not ready')
+    const session = context.sessions.create(request.sessionId, { meta: { cwd: request.cwd } })
+    session.append('harness/selected', {
+      harnessId: request.harnessId, version: request.version ?? '1.0.0', protocol: 'future-protocol',
+      ...(request.workspaceMode === undefined ? {} : { workspaceMode: request.workspaceMode }),
+      capabilities: request.capabilities ?? [],
+    })
+    return { id: request.sessionId, session } as Agent
+  },
+  resume: async (request) => {
+    driverCalls.resume++
+    const session = context?.sessions.get(request.sessionId)
+    if (session === undefined) throw new Error('fixture session was not persisted')
+    return { id: request.sessionId, session } as Agent
+  },
+  dispose: async () => { driverCalls.dispose++ },
 } satisfies HarnessDriver)
 
 const futureDriverPlugin = {
@@ -65,10 +100,18 @@ const futurePack = {
   source: 'user',
   distribution: { kind: 'executable', command: '/usr/bin/true', args: [], env: {} },
   graph: {
-    level: 'opaque',
+    level: 'composable', boundary: 'Future Driver process',
+    evidence: [{ kind: 'declared', source: 'Future Driver fixture' }],
     nodes: [{
-      id: 'runtime', kind: 'harness-runtime', title: 'Future runtime', editable: false,
+      id: 'runtime', kind: 'future-step', title: 'Future runtime', editable: true,
+      responsibility: 'Applies the future Driver fixture setting.',
+      evidence: [{ kind: 'declared', source: 'Future Driver fixture' }],
       observes: ['driver.future-protocol.turn-dispatched'],
+      configSchema: { version: 1, fields: [{
+        id: 'enabled', name: 'Enabled', type: 'boolean', required: true,
+        binding: { kind: 'future-setting', target: 'enabled' },
+      }] },
+      config: { enabled: true },
     }],
     edges: [],
   },
@@ -127,7 +170,32 @@ describe('Harness real Loader composition', () => {
     expect((await ctx.harnesses.list()).find(item => item.id === 'future.driver')).toMatchObject({
       available: true,
       driver: { apiVersion: 1, protocol: 'future-protocol', loaded: true, authorization: 'not-required' },
+      authoring: {
+        nodeKinds: [{ kind: 'future-step', editable: true }],
+        bindingKinds: [{ kind: 'future-setting', fieldTypes: ['boolean'] }],
+      },
     })
+
+    const created = await ctx.harnesses.create(
+      'future.driver' as never,
+      SessionId('future-driver-created'),
+      root as string,
+      'no-project',
+    )
+    expect(created.session.events.findLast(event => event.type === 'harness/selected')?.data).toMatchObject({
+      harnessId: 'future.driver', version: '1.0.0', protocol: 'future-protocol', workspaceMode: 'no-project',
+    })
+    await ctx.harnesses.disposeSession('future.driver' as never, created.session.id, '1.0.0')
+    const resumed = await ctx.harnesses.resume(
+      'future.driver' as never,
+      created.session.id,
+      root as string,
+      '1.0.0',
+      undefined,
+      'no-project',
+    )
+    expect(resumed.session.id).toBe(created.session.id)
+    expect(driverCalls).toEqual({ create: 1, resume: 1, dispose: 1 })
 
     const dshSession = ctx.sessions.create(SessionId('loader-observation'))
     dshSession.append('turn/start', { turn: 1 })

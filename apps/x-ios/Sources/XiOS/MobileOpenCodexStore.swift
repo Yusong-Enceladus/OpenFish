@@ -8,6 +8,13 @@ private struct MobileOpenFishDemoHarnessCatalog: Decodable {
 
 private func isOpenFishCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
+    if let apiError = error as? MobileApiError {
+        switch apiError {
+        case let .host(code, _): if code == "cancelled" { return true }
+        case let .transport(message): if message.localizedCaseInsensitiveContains("cancelled") { return true }
+        case .invalidResponse: break
+        }
+    }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }
@@ -123,6 +130,7 @@ final class MobileOpenCodexStore: ObservableObject {
     @Published private(set) var agentPresets: MobileAgentPresetCatalog?
     @Published private(set) var harnesses: [MobileHarness] = []
     @Published private(set) var harnessOperationId: String?
+    @Published private(set) var harnessOperationPhase: String?
     @Published private(set) var selectedHarnessId = ""
     @Published private(set) var draftHarnessId: String?
     @Published private(set) var skills: [MobileSkillEntry] = []
@@ -140,9 +148,36 @@ final class MobileOpenCodexStore: ObservableObject {
     @Published private(set) var isBrowsingDirectories = false
     @Published private(set) var isLoadingSettings = false
     @Published var selectedWorkspaceId: String?
-    @Published var selectedSessionId: String?
+    @Published var selectedSessionId: String? {
+        didSet {
+            guard booted else { return }
+            scheduleCache()
+            guard activeSubagent == nil else { return }
+            let selected = selectedSessionId
+            let liveConnection = connection
+            Task { await liveConnection.selectSession(selected) }
+        }
+    }
     @Published private(set) var draftSessionId: String?
-    @Published var activeSubagent: MobileActiveSubagent?
+    @Published var activeSubagent: MobileActiveSubagent? {
+        didSet {
+            guard booted else { return }
+            let selection = activeSubagent
+            let parent = selectedSessionId
+            let liveConnection = connection
+            Task {
+                if let selection {
+                    await liveConnection.selectSession(
+                        selection.childSessionId,
+                        parentSessionId: selection.parentSessionId,
+                        mode: selection.mode
+                    )
+                } else {
+                    await liveConnection.selectSession(parent)
+                }
+            }
+        }
+    }
     @Published var draft = ""
     @Published var pendingImages: [MobilePendingImage] = []
     @Published var promptMode = "queue"
@@ -160,12 +195,14 @@ final class MobileOpenCodexStore: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var cacheTask: Task<Void, Never>?
     private var draftPreparationTask: Task<Void, Never>?
+    private var harnessOperationCancellation: (() -> Void)?
     private var draftPreparationGeneration = 0
     private var records: [String: [MobileEventRecord]] = [:]
     private var historyHasMore: [String: Bool] = [:]
     private var projections: [String: [String: MobileJSONValue]] = [:]
     private var harnessesBySession: [String: MobileHarness] = [:]
     private var booted = false
+    private var remoteEventClientId: String?
     private var voiceConversationSessionId: String?
     private var lastVoiceTurnEndSeq = -1
     private var loadingAttachments: Set<String> = []
@@ -186,6 +223,58 @@ final class MobileOpenCodexStore: ObservableObject {
             token: profile.bearerToken,
             tlsFingerprint: profile.tlsFingerprint
         )
+    }
+
+    func cancelHarnessOperation() {
+        guard let cancel = harnessOperationCancellation else { return }
+        harnessOperationPhase = "Cancelling safely…"
+        cancel()
+    }
+
+    var canCancelHarnessOperation: Bool { harnessOperationCancellation != nil }
+
+    private func runHarnessOperationStep<Value: Sendable>(
+        _ phase: String,
+        pollInstallationFor harnessId: String? = nil,
+        cancellable: Bool = true,
+        operation: @escaping @MainActor () async throws -> Value
+    ) async throws -> Value {
+        harnessOperationPhase = phase
+        let poller: Task<Void, Never>? = harnessId.map { id in
+            Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled, let self else { return }
+                    guard let rows = try? await self.api.harnesses(),
+                          let detail = rows.first(where: { $0.id == id })?.installation.operationDetail else { continue }
+                    self.harnessOperationPhase = detail
+                }
+            }
+        }
+        let task = Task { @MainActor in try await operation() }
+        harnessOperationCancellation = cancellable ? { task.cancel() } : nil
+        defer {
+            poller?.cancel()
+            harnessOperationCancellation = nil
+        }
+        return try await task.value
+    }
+
+    private func livePreflightIfNeeded(_ harness: MobileHarness) async throws -> MobileHarness {
+        if harness.compatibility.status == "compatible" { return harness }
+        let rows = try await runHarnessOperationStep(
+            "Checking \(harness.name) against its live protocol…"
+        ) {
+            try await self.api.mutateHarness(action: "probe", id: harness.id)
+        }
+        harnesses = rows
+        guard let verified = rows.first(where: { $0.id == harness.id }) else {
+            throw MobileApiError.host(
+                "harness-missing-after-preflight",
+                "The checked Harness disappeared from the Host catalog."
+            )
+        }
+        return verified
     }
 
     /// Deterministic, network-isolated state for screenshots and product demos.
@@ -343,6 +432,7 @@ final class MobileOpenCodexStore: ObservableObject {
         let store = visualFixture()
         let sessionId = "session-sync"
         store.approvals["approval-demo"] = MobileApproval(
+            clientId: "demo",
             rpcId: "rpc-approval-demo",
             sessionId: sessionId,
             approvalId: "approval-demo",
@@ -350,6 +440,7 @@ final class MobileOpenCodexStore: ObservableObject {
             reason: "This demo action would update a file in the selected project."
         )
         store.questions["rpc-question-demo"] = MobilePendingQuestion(
+            clientId: "demo",
             rpcId: "rpc-question-demo",
             sessionId: sessionId,
             questions: [
@@ -513,7 +604,11 @@ final class MobileOpenCodexStore: ObservableObject {
     }
 
     var currentModelName: String {
-        guard let sessionModels else { return "Default model" }
+        guard let sessionModels else {
+            if isLoadingSessionModels { return "Discovering models…" }
+            if sessionModelsError != nil { return "Models unavailable" }
+            return "Model not discovered"
+        }
         let advertised = sessionModels.groups
             .first(where: { $0.id == sessionModels.current.provider })?
             .models.first(where: { $0.id == sessionModels.current.model })?.name
@@ -548,6 +643,14 @@ final class MobileOpenCodexStore: ObservableObject {
     var currentReasoningName: String? {
         guard let effort = sessionModels?.current.reasoningEffort else { return nil }
         return currentReasoningOptions.first(where: { $0.id == effort })?.name ?? effort
+    }
+
+    var currentReasoningLabel: String {
+        if let currentReasoningName { return currentReasoningName }
+        if isLoadingSessionModels, sessionModels == nil { return "Discovering reasoning…" }
+        if sessionModelsError != nil { return "Reasoning unavailable" }
+        if sessionModels == nil { return "Reasoning not discovered" }
+        return currentReasoningOptions.isEmpty ? "Reasoning fixed by Harness" : "Reasoning"
     }
 
     var selectedQuestions: [MobilePendingQuestion] {
@@ -597,13 +700,26 @@ final class MobileOpenCodexStore: ObservableObject {
         }
         guard let workspace else {
             let known = Set(workspaces.flatMap(\.sessionIds))
-            return visible.filter { !known.contains($0.sessionId) }.sorted { $0.updatedAt > $1.updatedAt }
+            return visible.filter {
+                !known.contains($0.sessionId) && $0.workspaceMode == "no-project"
+            }.sorted { $0.updatedAt > $1.updatedAt }
         }
         let byId = visible.reduce(into: [String: MobileSession]()) { result, session in
             if let current = result[session.sessionId], current.updatedAt > session.updatedAt { return }
             result[session.sessionId] = session
         }
         return workspace.sessionIds.compactMap { byId[$0] }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var otherLocationSessions: [MobileSession] {
+        let known = Set(workspaces.flatMap(\.sessionIds))
+        return sessions.filter {
+            $0.origin != "subagent"
+                && !$0.blank
+                && !archived.contains($0.sessionId)
+                && !known.contains($0.sessionId)
+                && $0.workspaceMode != "no-project"
+        }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var orderedWorkspaces: [MobileWorkspace] {
@@ -616,7 +732,7 @@ final class MobileOpenCodexStore: ObservableObject {
     }
 
     var visibleSessionsByRecency: [MobileSession] {
-        (orderedWorkspaces.flatMap { sessions(in: $0) } + sessions(in: nil))
+        (orderedWorkspaces.flatMap { sessions(in: $0) } + sessions(in: nil) + otherLocationSessions)
             .reduce(into: [String: MobileSession]()) { $0[$1.sessionId] = $1 }
             .values.sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -638,7 +754,15 @@ final class MobileOpenCodexStore: ObservableObject {
     }
 
     func workspaceTitle(for session: MobileSession) -> String {
-        workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title ?? "No Project"
+        if let title = workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title {
+            return title
+        }
+        if session.workspaceMode == "no-project" { return "No Project" }
+        if let cwd = session.cwd {
+            let base = cwd.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init)
+            if let base, !base.isEmpty { return "External · \(base)" }
+        }
+        return "Unfiled"
     }
 
     var archivedSessions: [MobileSession] {
@@ -749,8 +873,6 @@ final class MobileOpenCodexStore: ObservableObject {
     func enteredBackground() async {
         recordConnectionDiagnostic("lifecycle:background")
         stopVoiceConversation()
-        connectionTask?.cancel()
-        connectionTask = nil
         cacheTask?.cancel()
         draftPreparationTask?.cancel()
         await cache.save(cacheSnapshot())
@@ -759,14 +881,13 @@ final class MobileOpenCodexStore: ObservableObject {
 
     func becameActive() async {
         recordConnectionDiagnostic("lifecycle:active")
-        guard booted, connectionTask == nil else { return }
+        guard booted else { return }
         connectionState = .connecting
         hasLiveBaseline = false
         await startConnection()
-        // The live connection publishes Connected only after both event
-        // sockets complete their authenticated WebSocket upgrades. Its state
-        // handler owns the authoritative baseline refresh, avoiding a
-        // guaranteed early HTTP race here.
+        // The live connection publishes Connected only after its authenticated
+        // Gateway stream is open. Its state handler owns the authoritative
+        // baseline refresh, avoiding a guaranteed early HTTP race here.
     }
 
 #if DEBUG
@@ -812,11 +933,14 @@ final class MobileOpenCodexStore: ObservableObject {
             )
             return
         }
-        let stream = connection.updates
-        connectionTask = Task { [weak self] in
-            for await update in stream { await self?.handle(update) }
+        if connectionTask == nil {
+            let stream = connection.updates
+            connectionTask = Task { [weak self] in
+                for await update in stream { await self?.handle(update) }
+            }
         }
         recordConnectionDiagnostic("connection:sockets-starting")
+        await connection.selectSession(selectedSessionId)
         await connection.start()
     }
 
@@ -844,7 +968,7 @@ final class MobileOpenCodexStore: ObservableObject {
                   capabilities.host == "dsh",
                   capabilities.surface == "native",
                   capabilities.protocolVersion == "v2",
-                  capabilities.features.apiProxy,
+                  capabilities.features.gateway,
                   capabilities.features.typert,
                   capabilities.contracts.sessions,
                   capabilities.contracts.workspaces,
@@ -1543,17 +1667,29 @@ final class MobileOpenCodexStore: ObservableObject {
             return
         }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) on the connected Mac…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let current = harnesses.first(where: { $0.id == harness.id }) ?? harness
             if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.installHarness(harness.id)
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version) on the Host Mac…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.installHarness(harness.id)
+                }
             }
-            let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
+            var configured = harnesses.first(where: { $0.id == harness.id }) ?? current
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
                 errorMessage = "Configure \(harness.name) authentication on your Mac first."
                 return
             }
+            configured = try await livePreflightIfNeeded(configured)
+            harnessOperationPhase = "Preparing a task pinned to \(configured.name) \(configured.version)…"
             draftPreparationTask?.cancel()
             draftPreparationGeneration += 1
             if let abandonedDraft = draftSessionId { try? await api.discardSession(abandonedDraft) }
@@ -1570,7 +1706,12 @@ final class MobileOpenCodexStore: ObservableObject {
             }
             errorMessage = nil
         } catch {
-            errorMessage = "Could not use \(harness.name) for this task: \(error.localizedDescription)"
+            if isOpenFishCancellation(error) {
+                errorMessage = nil
+            } else {
+                errorMessage = "Could not use \(harness.name) for this task: \(error.localizedDescription)"
+            }
+            harnesses = (try? await api.harnesses()) ?? harnesses
         }
     }
 
@@ -1585,21 +1726,42 @@ final class MobileOpenCodexStore: ObservableObject {
             return
         }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) on the connected Mac…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             if harness.installation.status != "builtin" && harness.installation.status != "installed" {
-                harnesses = try await api.installHarness(harness.id)
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version) on the Host Mac…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.installHarness(harness.id)
+                }
             }
-            let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
+            var configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
                 errorMessage = "Configure \(harness.name) authentication on your Mac first."
                 return
             }
-            harnesses = try await api.selectDefaultHarness(harness.id)
+            configured = try await livePreflightIfNeeded(configured)
+            harnesses = try await runHarnessOperationStep(
+                "Saving \(configured.name) as the default Harness…",
+                cancellable: false
+            ) {
+                try await self.api.selectDefaultHarness(configured.id)
+            }
             selectedHarnessId = harness.id
             errorMessage = nil
         } catch {
-            errorMessage = "Could not select \(harness.name): \(error.localizedDescription)"
+            if isOpenFishCancellation(error) {
+                errorMessage = nil
+            } else {
+                errorMessage = "Could not select \(harness.name): \(error.localizedDescription)"
+            }
+            harnesses = (try? await api.harnesses()) ?? harnesses
         }
     }
 
@@ -1623,28 +1785,53 @@ final class MobileOpenCodexStore: ObservableObject {
             return false
         }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) on the connected Mac…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let current = harnesses.first(where: { $0.id == harness.id }) ?? harness
             if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.installHarness(harness.id)
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version) on the Host Mac…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.installHarness(harness.id)
+                }
             }
-            harnesses = try await api.mutateHarness(action: "auth", id: harness.id, authMethod: method.id)
-            guard harnesses.first(where: { $0.id == harness.id })?.auth.status == "configured" else {
+            harnesses = try await runHarnessOperationStep(
+                "Confirming \(method.name) on the Host Mac…",
+                cancellable: false
+            ) {
+                try await self.api.mutateHarness(action: "auth", id: harness.id, authMethod: method.id)
+            }
+            guard var configured = harnesses.first(where: { $0.id == harness.id }), configured.auth.status == "configured" else {
                 throw MobileApiError.host(
                     "credential-unavailable",
                     "The Host could not resolve all required credentials for \(harness.name)"
                 )
             }
+            configured = try await livePreflightIfNeeded(configured)
             if makeDefault {
-                harnesses = try await api.selectDefaultHarness(harness.id)
+                harnesses = try await runHarnessOperationStep(
+                    "Saving \(configured.name) as the default Harness…",
+                    cancellable: false
+                ) {
+                    try await self.api.selectDefaultHarness(configured.id)
+                }
                 selectedHarnessId = harness.id
             }
             errorMessage = nil
             scheduleCache()
             return true
         } catch {
-            errorMessage = "Could not configure \(harness.name): \(error.localizedDescription)"
+            if isOpenFishCancellation(error) {
+                errorMessage = nil
+            } else {
+                errorMessage = "Could not configure \(harness.name): \(error.localizedDescription)"
+            }
             harnesses = (try? await api.harnesses()) ?? harnesses
             return false
         }
@@ -2052,6 +2239,7 @@ final class MobileOpenCodexStore: ObservableObject {
             let code = pairingCode.trimmingCharacters(in: .whitespacesAndNewlines)
             let token: String?
             let tlsFingerprint: String?
+            var persistentURL = url
             if !code.isEmpty {
                 stage = "request"
                 recordConnectionDiagnostic("pair:request-started")
@@ -2066,6 +2254,13 @@ final class MobileOpenCodexStore: ObservableObject {
                 recordConnectionDiagnostic("pair:receipt-received")
                 token = result.receipt.token
                 tlsFingerprint = result.tlsFingerprint
+                if let advertised = result.receipt.hostURL {
+                    guard let canonical = MobileConnectionProfile.normalizedURL(advertised),
+                          canonical.scheme == "https" else {
+                        throw MobileApiError.transport("The paired Host returned an invalid persistent address.")
+                    }
+                    persistentURL = canonical
+                }
             } else if url == MobileConnectionProfile.local.baseURL {
                 token = nil
                 tlsFingerprint = nil
@@ -2073,12 +2268,15 @@ final class MobileOpenCodexStore: ObservableObject {
                 throw MobileApiError.host("pairing-required", "Enter the one-time code shown by OpenFish on the Host Mac.")
             }
             let next = MobileConnectionProfile(
-                baseURL: url,
+                baseURL: persistentURL,
                 bearerToken: token,
                 tlsFingerprint: tlsFingerprint
             )
             stage = "persist"
             try next.persist()
+            if persistentURL != url {
+                MobileConnectionProfile.removeAuthorization(for: url)
+            }
             recordConnectionDiagnostic("pair:profile-persisted")
             stage = "reconfigure"
             await reconfigure(next)
@@ -2224,9 +2422,219 @@ final class MobileOpenCodexStore: ObservableObject {
                     await select(selected)
                 }
             }
-        case let .host(envelope): handleHost(envelope)
-        case let .mux(envelope): handleMux(envelope)
+        case let .feed(frame):
+            handleFeed(frame)
+            scheduleCache()
         }
+    }
+
+    private func handleFeed(_ frame: MobileJSONValue) {
+        guard let channel = frame["channel"]?.stringValue,
+              let value = frame["value"] else { return }
+        switch channel {
+        case "remote-events": handleRemoteEvents(value)
+        case "workspace": handleWorkspaceFeed(value)
+        case "control": handleControlFeed(value)
+        case "session":
+            guard let sessionId = frame["sessionId"]?.stringValue else { return }
+            handleSessionFeed(value, sessionId: sessionId)
+        default: break
+        }
+    }
+
+    private func handleRemoteEvents(_ frame: MobileJSONValue) {
+        switch frame["type"]?.stringValue {
+        case "ready":
+            remoteEventClientId = frame["clientId"]?.stringValue
+            approvals.removeAll(keepingCapacity: true)
+            questions.removeAll(keepingCapacity: true)
+        case "emit":
+            guard let event = frame["event"]?.stringValue else { return }
+            let args = frame["args"]?.arrayValue ?? []
+            switch event {
+            case "api-session/added":
+                guard let value = args.first, let session = try? value.decode(MobileSession.self) else { return }
+                if let index = sessions.firstIndex(where: { $0.sessionId == session.sessionId }) {
+                    sessions[index] = session
+                } else {
+                    sessions.append(session)
+                }
+            case "api-session/removed":
+                guard let id = args.first?.stringValue else { return }
+                removeSessionProjection(id)
+            case "api-session/status":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      let running = args[1].boolValue,
+                      let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
+                let wasRunning = sessions[index].running
+                sessions[index].running = running
+                if running { sessions[index].blank = false }
+                sessions[index].updatedAt = Date().timeIntervalSince1970 * 1_000
+                if wasRunning && !running && UIApplication.shared.applicationState != .active {
+                    let taskTitle = title(for: sessions[index])
+                    Task { await notifications.post(title: taskTitle, body: "Task finished", sessionId: id) }
+                }
+            case "api-session/activity":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      case let .number(updatedAt) = args[1],
+                      let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
+                sessions[index].updatedAt = updatedAt
+                sessions[index].blank = false
+            case "api-session/error":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      let message = args[1].stringValue else { return }
+                if id == selectedSessionId { errorMessage = message }
+                if id == voiceConversationSessionId { voiceConversationStatus = "Task failed" }
+            case "agent-preset/selected", "commands/change", "credentials/reference-updated",
+                 "llm/adapters-updated":
+                Task { await refreshLiveCatalogs(after: event) }
+            default: break
+            }
+        case "waterfall":
+            guard let clientId = remoteEventClientId,
+                  let event = frame["event"]?.stringValue,
+                  let eventId = frame["eventId"]?.stringValue,
+                  let sessionId = frame["agentId"]?.stringValue,
+                  let request = frame["request"] else { return }
+            switch event {
+            case "approval/request":
+                guard let toolName = request["toolName"]?.stringValue else { return }
+                approvals[eventId] = MobileApproval(
+                    clientId: clientId,
+                    rpcId: eventId,
+                    sessionId: sessionId,
+                    approvalId: eventId,
+                    toolName: toolName,
+                    reason: request["reason"]?.stringValue
+                )
+                if sessionId == voiceConversationSessionId {
+                    voiceConversationStatus = "Approval required"
+                    voice.stopSpeaking()
+                }
+            case "user-questions/request":
+                let values = request["questions"]
+                let decoded = (try? values?.decode([MobileQuestion].self)) ?? []
+                questions[eventId] = MobilePendingQuestion(
+                    clientId: clientId,
+                    rpcId: eventId,
+                    sessionId: sessionId,
+                    questions: decoded
+                )
+                if sessionId == voiceConversationSessionId {
+                    voiceConversationStatus = "Answer required"
+                    voice.stopSpeaking()
+                }
+            default: break
+            }
+        case "cancel":
+            guard let eventId = frame["eventId"]?.stringValue else { return }
+            approvals[eventId] = nil
+            questions[eventId] = nil
+        default: break
+        }
+    }
+
+    private func refreshLiveCatalogs(after event: String) async {
+        switch event {
+        case "agent-preset/selected": agentPresets = try? await api.agentPresets()
+        case "commands/change":
+            if let sessionId = controlSessionId { commands = (try? await api.commandDirectory(sessionId: sessionId)) ?? [] }
+        case "credentials/reference-updated": providers = (try? await api.configurableProviders()) ?? providers
+        case "llm/adapters-updated":
+            if let sessionId = controlSessionId { await loadModels(sessionId: sessionId) }
+        default: break
+        }
+    }
+
+    private func handleWorkspaceFeed(_ frame: MobileJSONValue) {
+        switch frame["type"]?.stringValue {
+        case "baseline":
+            guard let value = frame["value"] else { return }
+            workspaces = value["items"]?.arrayValue?.compactMap { try? $0.decode(MobileWorkspace.self) } ?? []
+            archived = Set(value["archivedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        case "upsert":
+            guard let value = frame["workspace"], let workspace = try? value.decode(MobileWorkspace.self) else { return }
+            if let index = workspaces.firstIndex(where: { $0.workspaceId == workspace.workspaceId }) {
+                workspaces[index] = workspace
+            } else {
+                workspaces.append(workspace)
+            }
+        case "remove":
+            guard let id = frame["workspaceId"]?.stringValue else { return }
+            workspaces.removeAll { $0.workspaceId == id }
+            if selectedWorkspaceId == id { selectedWorkspaceId = nil }
+        case "order":
+            guard let ids = frame["workspaceIds"]?.arrayValue?.compactMap(\.stringValue) else { return }
+            let byId = workspaces.reduce(into: [String: MobileWorkspace]()) { $0[$1.workspaceId] = $1 }
+            workspaces = ids.compactMap { byId[$0] }
+        case "archived":
+            archived = Set(frame["archivedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        default: break
+        }
+    }
+
+    private func handleControlFeed(_ frame: MobileJSONValue) {
+        switch frame["type"]?.stringValue {
+        case "baseline":
+            guard let value = frame["value"] else { return }
+            queuedItems = (value["queues"]?.objectValue ?? [:]).mapValues {
+                $0.arrayValue?.compactMap(MobileQueuedItem.init(json:)) ?? []
+            }
+            for (sessionId, blockValue) in value["projections"]?.objectValue ?? [:] {
+                if let block = try? blockValue.decode(MobileProjectionBlock.self) {
+                    projections[sessionId, default: [:]].merge(block.values) { _, new in new }
+                }
+            }
+        case "queue":
+            guard let id = frame["sessionId"]?.stringValue else { return }
+            queuedItems[id] = frame["items"]?.arrayValue?.compactMap(MobileQueuedItem.init(json:)) ?? []
+        case "projection":
+            guard let id = frame["sessionId"]?.stringValue,
+                  let key = frame["key"]?.stringValue,
+                  let value = frame["value"] else { return }
+            projections[id, default: [:]][key] = value
+            objectWillChange.send()
+        default: break
+        }
+    }
+
+    private func handleSessionFeed(_ frame: MobileJSONValue, sessionId: String) {
+        switch frame["type"]?.stringValue {
+        case "snapshot":
+            let incoming = frame["events"]?.arrayValue?.compactMap { entry -> MobileEventRecord? in
+                guard let value = entry["event"], let event = try? value.decode(MobileSessionEvent.self) else { return nil }
+                return MobileEventRecord(event: event, view: nil)
+            } ?? []
+            records[sessionId] = merge(incoming, records[sessionId] ?? [])
+            historyHasMore[sessionId] = frame["hasMore"]?.boolValue ?? false
+            if let value = frame["projections"], let block = try? value.decode(MobileProjectionBlock.self) {
+                projections[sessionId, default: [:]].merge(block.values) { _, new in new }
+            }
+        case "event":
+            guard let value = frame["event"], let event = try? value.decode(MobileSessionEvent.self) else { return }
+            records[sessionId] = merge(records[sessionId] ?? [], [MobileEventRecord(event: event, view: nil)])
+            if let index = sessions.firstIndex(where: { $0.sessionId == sessionId }) {
+                sessions[index].updatedAt = event.time
+                if event.type == "turn/start" || event.type == "user/message" { sessions[index].blank = false }
+            }
+            if event.type == "turn/end" { finishVoiceTurn(sessionId: sessionId, endSeq: event.seq) }
+        default: return
+        }
+        objectWillChange.send()
+    }
+
+    private func removeSessionProjection(_ id: String) {
+        sessions.removeAll { $0.sessionId == id }
+        records[id] = nil
+        historyHasMore[id] = nil
+        projections[id] = nil
+        approvals = approvals.filter { $0.value.sessionId != id }
+        questions = questions.filter { $0.value.sessionId != id }
+        queuedItems[id] = nil
+        if selectedSessionId == id { newTask(in: selectedWorkspaceId) }
     }
 
     private func recordConnectionDiagnostic(_ state: String) {
@@ -2339,6 +2747,7 @@ final class MobileOpenCodexStore: ObservableObject {
                   let approvalId = frame["approvalId"]?.stringValue,
                   let toolName = frame["toolName"]?.stringValue else { return }
             approvals[approvalId] = MobileApproval(
+                clientId: remoteEventClientId ?? "",
                 rpcId: envelope.rpcId,
                 sessionId: sessionId,
                 approvalId: approvalId,
@@ -2356,6 +2765,7 @@ final class MobileOpenCodexStore: ObservableObject {
                   let values = frame["questions"],
                   let decoded = try? values.decode([MobileQuestion].self) else { return }
             questions[envelope.rpcId] = MobilePendingQuestion(
+                clientId: remoteEventClientId ?? "",
                 rpcId: envelope.rpcId,
                 sessionId: sessionId,
                 questions: decoded
@@ -2405,6 +2815,7 @@ final class MobileOpenCodexStore: ObservableObject {
     }
 
     private func purgeHostProjection() {
+        remoteEventClientId = nil
         workspaces = []
         sessions = []
         archived = []

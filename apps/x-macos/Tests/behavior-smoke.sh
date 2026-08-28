@@ -25,11 +25,15 @@ swiftc -parse-as-library \
   Sources/XMac/LocalVoiceService.swift \
   Sources/XMac/MacProjectionCache.swift \
   Sources/XMac/NativeConnectionProfile.swift \
+  Sources/XMac/OpenFishHostRuntime.swift \
   Sources/XMac/OpenCodexStore.swift \
   Sources/XMac/XNativeClient.swift \
   Sources/XMac/IdleGuard.swift \
   Tests/BehaviorSmoke.swift
 
 cd "$ROOT_DIR"
+if [[ ! -f "$ROOT_DIR/apps/web/dist/index.html" ]]; then
+  pnpm run build:web
+fi
 OPENCODEX_BEHAVIOR_BINARY="$TEST_BUILD_ROOT/opencodex-behavior-smoke" \
   pnpm vitest run apps/web/tests/opencodex-native-behavior.spec.ts

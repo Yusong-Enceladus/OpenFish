@@ -20,7 +20,7 @@ OpenCodex uses its own name and assets, while Codex supplies the behavior, infor
 
 ### Runtime ownership
 
-DSH is the OpenCodex runtime, not a dependency hidden behind a parallel X runtime. New behavior follows the extension rules in [the DSH architecture](../../../../docs/architecture.md) and the existing Host/Client split in [the GUI layering decision](../../implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md).
+DSH is the OpenCodex runtime, not a dependency hidden behind a parallel X runtime. New behavior follows the extension rules in [the DSH architecture](../../../../docs/architecture.md) and the existing Host/Client split in [the GUI web-client architecture](../../implemented/architecture/2026-07-19-gui-web-client-architecture.md).
 
 | Concern | Authoritative owner | Client rule |
 |---|---|---|

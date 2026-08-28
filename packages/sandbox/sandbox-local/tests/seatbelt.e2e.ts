@@ -144,4 +144,36 @@ describe.skipIf(!seatbeltUsable)('sandbox-local: real Seatbelt confinement throu
     expect(denied.result.status).not.toBe(0)
     expect(denied.result.stdout).not.toContain('must-not-read')
   })
+
+  it('resident isolation lets Node realpath an allowed descendant without listing its protected parent', async () => {
+    const workspace = await tempDir(homedir())
+    const target = join(workspace, 'entry.js')
+    writeFileSync(target, 'allowed')
+    const sandbox = await provider()
+    const policy: SandboxPolicy = {
+      mode: 'read-only',
+      workspaceRoot: workspace,
+      isolation: {
+        protectedReadRoots: [homedir()],
+        readableRoots: [workspace],
+        denyNetworkInbound: true,
+        denyHostProcessControl: true,
+        denyHostInterprocessCommunication: true,
+      },
+    }
+    const allowed = runConfined(
+      sandbox,
+      `${process.execPath} -e 'const fs=require("node:fs"); process.stdout.write(fs.realpathSync(${JSON.stringify(target)}))'`,
+      policy,
+    )
+    expect(allowed.result.status).toBe(0)
+    expect(allowed.result.stdout).toBe(target)
+
+    const denied = runConfined(
+      sandbox,
+      `${process.execPath} -e 'require("node:fs").readdirSync(${JSON.stringify(homedir())})'`,
+      policy,
+    )
+    expect(denied.result.status).not.toBe(0)
+  })
 })

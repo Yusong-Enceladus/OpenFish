@@ -467,7 +467,7 @@
       "schemaVersion": 0,
       "id": "codex",
       "name": "Codex",
-      "version": "0.149.0",
+      "version": "0.150.1",
       "description": "Official Codex Harness through the OpenAI app-server protocol.",
       "publisher": "OpenAI",
       "repository": "https://github.com/openai/codex",
@@ -488,7 +488,16 @@
           "id": "codex-local-login",
           "name": "Existing Codex login",
           "kind": "agent",
-          "fields": [],
+          "fields": [
+            {
+              "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+              "name": "Custom CA bundle (optional)",
+              "env": "CODEX_CA_CERTIFICATE",
+              "required": false,
+              "secret": false,
+              "placeholder": "/absolute/path/to/ca-bundle.pem"
+            }
+          ],
           "account": {
             "label": "Existing Codex account",
             "billing": "harness-managed",
@@ -499,7 +508,16 @@
           "id": "codex-managed-login",
           "name": "Sign in with ChatGPT",
           "kind": "terminal",
-          "fields": [],
+          "fields": [
+            {
+              "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+              "name": "Custom CA bundle (optional)",
+              "env": "CODEX_CA_CERTIFICATE",
+              "required": false,
+              "secret": false,
+              "placeholder": "/absolute/path/to/ca-bundle.pem"
+            }
+          ],
           "account": {
             "label": "ChatGPT · Codex plan",
             "billing": "subscription",
@@ -521,6 +539,14 @@
               "env": "OPENAI_API_KEY",
               "required": true,
               "secret": true
+            },
+            {
+              "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+              "name": "Custom CA bundle (optional)",
+              "env": "CODEX_CA_CERTIFICATE",
+              "required": false,
+              "secret": false,
+              "placeholder": "/absolute/path/to/ca-bundle.pem"
             }
           ],
           "account": {
@@ -532,7 +558,7 @@
       ],
       "distribution": {
         "kind": "npx",
-        "package": "@openai/codex@0.149.0",
+        "package": "@openai/codex@0.150.1",
         "args": [
           "app-server",
           "--stdio"
@@ -547,7 +573,7 @@
           {
             "kind": "source-derived",
             "source": "https://github.com/openai/codex/tree/main/codex-rs/app-server",
-            "version": "0.149.0"
+            "version": "0.150.1"
           }
         ],
         "nodes": [
@@ -561,7 +587,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/app-server",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -578,7 +604,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/app-server-protocol",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -598,7 +624,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/core",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ]
           },
@@ -612,7 +638,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/core",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -629,7 +655,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/core",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -646,7 +672,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/core",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ]
           },
@@ -660,7 +686,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/app-server",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -678,7 +704,7 @@
               {
                 "kind": "source-derived",
                 "source": "codex-rs/app-server-protocol",
-                "version": "0.149.0"
+                "version": "0.150.1"
               }
             ],
             "observes": [
@@ -761,12 +787,12 @@
       "available": true,
       "installation": {
         "status": "installed",
-        "installedVersion": "0.149.0",
-        "availableVersion": "0.149.0",
+        "installedVersion": "0.150.1",
+        "availableVersion": "0.150.1",
         "previousVersions": [],
         "integrity": {
           "status": "version-pinned",
-          "source": "@openai/codex@0.149.0",
+          "source": "@openai/codex@0.150.1",
           "detail": "Demo package identity is pinned to the exact live Pack version; this is not a checksum claim."
         }
       },
@@ -776,7 +802,16 @@
             "id": "codex-local-login",
             "name": "Existing Codex login",
             "kind": "agent",
-            "fields": [],
+            "fields": [
+              {
+                "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+                "name": "Custom CA bundle (optional)",
+                "env": "CODEX_CA_CERTIFICATE",
+                "required": false,
+                "secret": false,
+                "placeholder": "/absolute/path/to/ca-bundle.pem"
+              }
+            ],
             "account": {
               "label": "Existing Codex account",
               "billing": "harness-managed",
@@ -787,7 +822,16 @@
             "id": "codex-managed-login",
             "name": "Sign in with ChatGPT",
             "kind": "terminal",
-            "fields": [],
+            "fields": [
+              {
+                "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+                "name": "Custom CA bundle (optional)",
+                "env": "CODEX_CA_CERTIFICATE",
+                "required": false,
+                "secret": false,
+                "placeholder": "/absolute/path/to/ca-bundle.pem"
+              }
+            ],
             "account": {
               "label": "ChatGPT · Codex plan",
               "billing": "subscription",
@@ -809,6 +853,14 @@
                 "env": "OPENAI_API_KEY",
                 "required": true,
                 "secret": true
+              },
+              {
+                "ref": "OPENFISH_CODEX_CA_CERTIFICATE",
+                "name": "Custom CA bundle (optional)",
+                "env": "CODEX_CA_CERTIFICATE",
+                "required": false,
+                "secret": false,
+                "placeholder": "/absolute/path/to/ca-bundle.pem"
               }
             ],
             "account": {
@@ -982,7 +1034,7 @@
       "schemaVersion": 0,
       "id": "oh-my-pi",
       "name": "Oh My Pi",
-      "version": "18.0.3",
+      "version": "18.0.9",
       "description": "Community Harness with native ACP mode and advanced coding tools.",
       "publisher": "Oh My Pi contributors",
       "repository": "https://github.com/can1357/oh-my-pi",
@@ -1020,7 +1072,7 @@
       ],
       "distribution": {
         "kind": "bunx",
-        "package": "@oh-my-pi/pi-coding-agent@18.0.3",
+        "package": "@oh-my-pi/pi-coding-agent@18.0.9",
         "args": [
           "acp"
         ],
@@ -1034,7 +1086,7 @@
           {
             "kind": "source-derived",
             "source": "https://github.com/can1357/oh-my-pi",
-            "version": "18.0.3"
+            "version": "18.0.9"
           }
         ],
         "nodes": [
@@ -1055,7 +1107,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/tree/main/packages/coding-agent/src",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ]
           },
@@ -1077,7 +1129,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/agent-session.ts",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ],
             "observes": [
@@ -1105,7 +1157,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/config/model-registry.ts",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ],
             "observes": [
@@ -1129,7 +1181,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ],
             "observes": [
@@ -1153,7 +1205,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ],
             "observes": [
@@ -1178,7 +1230,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ]
           },
@@ -1198,7 +1250,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ]
           },
@@ -1218,7 +1270,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/session-manager.ts",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ]
           },
@@ -1239,7 +1291,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
-                "version": "18.0.3"
+                "version": "18.0.9"
               }
             ],
             "observes": [
@@ -1338,11 +1390,11 @@
       "available": true,
       "installation": {
         "status": "not-installed",
-        "availableVersion": "18.0.3",
+        "availableVersion": "18.0.9",
         "previousVersions": [],
         "integrity": {
           "status": "version-pinned",
-          "source": "@oh-my-pi/pi-coding-agent@18.0.3",
+          "source": "@oh-my-pi/pi-coding-agent@18.0.9",
           "detail": "Demo package identity is pinned to the exact live Pack version; this is not a checksum claim."
         }
       },

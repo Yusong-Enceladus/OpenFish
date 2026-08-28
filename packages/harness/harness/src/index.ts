@@ -5,7 +5,6 @@ import Schema from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -14,10 +13,12 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import { openFishCommunityCatalog, packsFromAcpRegistry, parseHarnessPack, prepareHarnessPublication, type OpenFishCommunityRevocation } from './manifest.ts'
 import { harnessRuntimeProjectionDefinition } from './projection.ts'
-import { assertHarnessDriverConformance, negotiateHarnessDriverApi } from './conformance.ts'
+import { inspectHarnessDriver, negotiateHarnessDriverApi } from './conformance.ts'
+import { safeHarnessDiagnostic } from './diagnostic.ts'
 import { observeHarnessRuntime } from './runtime.ts'
 import type {
   HarnessAuthMethod,
+  HarnessAuthoringContract,
   HarnessCapability,
   HarnessCatalogEntry,
   HarnessCommunitySubmissionRecord,
@@ -28,12 +29,14 @@ import type {
   HarnessId,
   HarnessInstallation,
   HarnessPack,
+  HarnessPreflightResult,
   HarnessSessionRequest,
 } from './types.ts'
 
 export * from './manifest.ts'
 export * from './projection.ts'
 export * from './conformance.ts'
+export * from './diagnostic.ts'
 export * from './runtime.ts'
 export type * from './projection.types.ts'
 export type * from './types.ts'
@@ -56,7 +59,7 @@ export const BUILTIN_DSH_VERSION = (createRequire(import.meta.url)('../package.j
  * @param driver - Public protocol Driver to register.
  */
 export function registerHarnessDriver(ctx: Context, driver: HarnessDriver): void {
-  ctx.effect(() => ctx.harnesses.registerDriver(driver), `harness-driver:${driver.protocol}`)
+  ctx.effect(() => ctx.harnesses.registerDriver(driver), 'harness-driver')
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -137,37 +140,39 @@ const HOST_ARCHIVE_CAPABILITY: HarnessCapability = {
   detail: 'OpenFish archives the task without deleting its Harness session or durable transcript.',
 }
 
-const HARNESS_DIAGNOSTIC_MAX_CODE_POINTS = 800
-
-function replaceHarnessDiagnosticLiteral(message: string, literal: string, replacement: string): string {
-  return literal.length === 0 || literal === '/' ? message : message.split(literal).join(replacement)
-}
-
 function abortSignalIsAborted(signal: AbortSignal): boolean {
   return signal.aborted
 }
 
-/** Sanitize Driver- and process-owned diagnostics before persistence or client projection. */
-function safeHarnessDiagnostic(error: unknown, fallback: string): string {
-  const raw = error instanceof Error ? error.message : String(error)
-  let message = raw.trim().length > 0 ? raw : fallback
-  for (const [name, value] of Object.entries(process.env)) {
-    if (!/(?:api[_-]?key|token|secret|password|authorization|cookie)/iu.test(name)) continue
-    if (value === undefined || value.length < 6) continue
-    message = replaceHarnessDiagnosticLiteral(message, value, '[redacted]')
+/** Convert an untrusted Driver availability probe into one client-safe result. */
+async function inspectDriverAvailability(driver: HarnessDriver, pack: HarnessPack): Promise<string | undefined> {
+  try {
+    const result: unknown = await driver.available(pack)
+    if (result === undefined) return undefined
+    if (typeof result !== 'string' || result.trim() === '') {
+      return 'Harness Driver returned an invalid availability result.'
+    }
+    return safeHarnessDiagnostic(result, 'Harness launch prerequisites are unavailable')
+  } catch (error: unknown) {
+    return safeHarnessDiagnostic(error, 'Harness availability check failed')
   }
-  message = message
-    .replace(/\bBearer\s+[a-z0-9._~+/=-]{6,}\b/giu, 'Bearer [redacted]')
-    .replace(/\b(?:sk|gh[opushr]|github_pat|xox[aboprs])[-_][a-z0-9_-]{8,}\b/giu, '[redacted]')
-    .replace(/\bAIza[A-Za-z0-9_-]{20,}\b/gu, '[redacted]')
-    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, '[redacted]')
-    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1[redacted]@')
-    .replace(/((?:api[-_ ]?key|token|secret|password|authorization|cookie)\s*(?:[:=]\s*|["']\s+))(?:Bearer\s+)?[^\s,;)}\]]+/giu, '$1[redacted]')
-  message = replaceHarnessDiagnosticLiteral(message, dshHomePath(), '$DSH_HOME')
-  message = replaceHarnessDiagnosticLiteral(message, homedir(), '~')
-  message = message.replace(/[\r\n\t]+/gu, ' ').replace(/\s{2,}/gu, ' ').trim()
-  if (message.length === 0) message = fallback
-  return Array.from(message).slice(0, HARNESS_DIAGNOSTIC_MAX_CODE_POINTS).join('')
+}
+
+/** Admit one untrusted Driver without allowing its diagnostics to escape the Host boundary. */
+async function requireConformantDriver(driver: HarnessDriver, pack: HarnessPack): Promise<HarnessCapability[]> {
+  let inspection
+  try {
+    inspection = await inspectHarnessDriver(driver, pack)
+  } catch (error: unknown) {
+    throw new Error(safeHarnessDiagnostic(error, 'Harness Driver inspection failed'))
+  }
+  if (!inspection.compatible) {
+    throw new Error(safeHarnessDiagnostic(
+      `Harness Driver conformance failed: ${inspection.issues.join(' ')}`,
+      'Harness Driver conformance failed',
+    ))
+  }
+  return inspection.capabilities
 }
 
 /** Remove one Host-owned Harness directory without following a replaced link. */
@@ -251,6 +256,8 @@ interface StoredInstall {
   active?: HarnessPack
   previous: HarnessPack[]
   authMethod?: string
+  /** Exact Pack versions whose installed Driver completed authentication discovery. */
+  authDiscoveries?: Record<string, string>
   compatibility?: { status: 'ready' | 'compatible' | 'failed'; checkedAt: string; message?: string }
 }
 
@@ -270,7 +277,7 @@ interface StoredDriverAuthorization {
 }
 
 interface StoredHarnessState {
-  version: 6
+  version: 7
   defaultHarnessId?: string
   customPacks: HarnessPack[]
   registryPacks: HarnessPack[]
@@ -283,7 +290,7 @@ interface StoredHarnessState {
 }
 
 interface StoredHarnessStateCandidate {
-  version: 1 | 2 | 3 | 4 | 5 | 6
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7
   defaultHarnessId?: string
   customPacks: HarnessPack[]
   registryPacks?: HarnessPack[]
@@ -296,7 +303,7 @@ interface StoredHarnessStateCandidate {
 }
 
 const EMPTY_STATE: StoredHarnessState = {
-  version: 6,
+  version: 7,
   customPacks: [],
   registryPacks: [],
   communityPacks: [],
@@ -305,6 +312,14 @@ const EMPTY_STATE: StoredHarnessState = {
   communityRevocationSubmissions: [],
   driverAuthorizations: {},
   installs: {},
+}
+
+function storedAuthenticationDiscoveries(input: unknown): Record<string, string> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return {}
+  return Object.fromEntries(Object.entries(input).filter(([version, completedAt]) =>
+    /^[0-9A-Za-z][0-9A-Za-z._+-]*$/u.test(version)
+      && typeof completedAt === 'string'
+      && !Number.isNaN(Date.parse(completedAt))))
 }
 
 function storedDriverAuthorizations(input: unknown): Record<string, StoredDriverAuthorization> {
@@ -340,6 +355,48 @@ function storedCommunitySubmission(input: unknown): StoredCommunitySubmission | 
     branch: candidate.branch,
     submittedAt: candidate.submittedAt,
     review: candidate.review as StoredCommunitySubmission['review'],
+  }
+}
+
+async function boundedJsonResponse(response: Response, maximumBytes: number, label: string): Promise<unknown> {
+  const declared = response.headers.get('content-length')
+  if (declared !== null && (!/^[0-9]+$/u.test(declared) || Number(declared) > maximumBytes)) {
+    throw new Error(`${label} exceeds the ${maximumBytes}-byte response limit`)
+  }
+  if (response.body === null) throw new Error(`${label} returned no response body`)
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      total += next.value.byteLength
+      if (total > maximumBytes) {
+        await reader.cancel(`${label} response exceeded its size limit`).catch(() => undefined)
+        throw new Error(`${label} exceeds the ${maximumBytes}-byte response limit`)
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch (error: unknown) {
+    throw new Error(`${label} is not valid UTF-8`, { cause: error })
+  }
+  try {
+    return JSON.parse(text) as unknown
+  } catch (error: unknown) {
+    throw new Error(`${label} is not valid JSON`, { cause: error })
   }
 }
 
@@ -444,6 +501,9 @@ function parseStoredHarnessPack(input: unknown, fallback?: HarnessPack): Harness
     ...(record.modelConfiguration === undefined && fallback?.modelConfiguration !== undefined
       ? { modelConfiguration: fallback.modelConfiguration }
       : {}),
+    ...(record.authenticationDiscovery === undefined && fallback?.authenticationDiscovery !== undefined
+      ? { authenticationDiscovery: fallback.authenticationDiscovery }
+      : {}),
     ...(methods === undefined ? {} : { authMethods: methods }),
   })
 }
@@ -469,6 +529,54 @@ function mergeDiscoveredAuthentication(
     ...merged,
     ...(declared ?? []).filter(method => !discovered.some(candidate => candidate.id === method.id)),
   ]
+}
+
+/** Admit Driver-discovered authentication through the same Pack schema as public manifests. */
+function withDiscoveredAuthentication(pack: HarnessPack, value: unknown): HarnessPack {
+  if (!Array.isArray(value)) throw new Error('Harness Driver authentication discovery result must be an array')
+  const discoveredPack = parseHarnessPack({ ...pack, authMethods: value })
+  return parseHarnessPack({
+    ...pack,
+    authMethods: mergeDiscoveredAuthentication(pack.authMethods, discoveredPack.authMethods ?? []),
+  })
+}
+
+/** Keep preflight reports content-free, bounded, and safe to persist or project. */
+function normalizeHarnessPreflightResult(value: unknown): HarnessPreflightResult | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Harness Driver preflight result must be an object')
+  }
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.message !== 'string' || candidate.message.trim() === '') {
+    throw new Error('Harness Driver preflight result requires a non-empty message')
+  }
+  if (candidate.modelCount !== undefined
+    && (!Number.isSafeInteger(candidate.modelCount) || Number(candidate.modelCount) < 0)) {
+    throw new Error('Harness Driver preflight model count must be a non-negative integer')
+  }
+  let configurationIds: string[] | undefined
+  if (candidate.configurationIds !== undefined) {
+    if (!Array.isArray(candidate.configurationIds)
+      || candidate.configurationIds.some(id => typeof id !== 'string'
+        || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(id))) {
+      throw new Error('Harness Driver preflight configuration ids are invalid')
+    }
+    configurationIds = [...new Set(candidate.configurationIds as string[])]
+  }
+  return {
+    message: safeHarnessDiagnostic(candidate.message, 'Harness live preflight passed'),
+    ...(candidate.modelCount === undefined ? {} : { modelCount: Number(candidate.modelCount) }),
+    ...(configurationIds === undefined ? {} : { configurationIds }),
+  }
+}
+
+/** Carry newly introduced non-executable auth discovery metadata onto an exact installed snapshot. */
+function withCurrentAuthenticationContract(catalog: HarnessPack, snapshot: HarnessPack): HarnessPack {
+  if (catalog.id !== snapshot.id || catalog.version !== snapshot.version
+    || snapshot.authenticationDiscovery !== undefined
+    || catalog.authenticationDiscovery === undefined) return snapshot
+  return { ...snapshot, authenticationDiscovery: catalog.authenticationDiscovery }
 }
 
 /** Downgrade legacy decorative graphs instead of preserving an unsupported observable claim. */
@@ -628,7 +736,18 @@ const BUILTIN_DSH = parseHarnessPack({
   source: 'builtin',
 })
 
-function curatedCodex(version = '0.149.0'): HarnessPack {
+function codexCaField() {
+  return {
+    ref: 'OPENFISH_CODEX_CA_CERTIFICATE',
+    name: 'Custom CA bundle (optional)',
+    env: 'CODEX_CA_CERTIFICATE',
+    required: false,
+    secret: false,
+    placeholder: '/absolute/path/to/ca-bundle.pem',
+  }
+}
+
+function curatedCodex(version = '0.150.1'): HarnessPack {
   return parseHarnessPack({
     schemaVersion: 0,
     id: 'codex',
@@ -650,14 +769,14 @@ function curatedCodex(version = '0.149.0'): HarnessPack {
     },
     authMethods: [
       {
-        id: 'codex-local-login', name: 'Existing Codex login', kind: 'agent', fields: [],
+        id: 'codex-local-login', name: 'Existing Codex login', kind: 'agent', fields: [codexCaField()],
         account: {
           label: 'Existing Codex account', billing: 'harness-managed',
           detail: 'After you confirm, OpenFish imports only the existing Codex auth.json into a private account-method profile; Codex task history, config, and logs remain outside the Harness boundary. The credential is never returned to the UI or stored in Pack/session state. At runtime app-server reports the actual account route so OpenFish does not guess billing.',
         },
       },
       {
-        id: 'codex-managed-login', name: 'Sign in with ChatGPT', kind: 'terminal', fields: [],
+        id: 'codex-managed-login', name: 'Sign in with ChatGPT', kind: 'terminal', fields: [codexCaField()],
         terminal: { args: [], env: {} },
         account: {
           label: 'ChatGPT · Codex plan', billing: 'subscription',
@@ -666,7 +785,10 @@ function curatedCodex(version = '0.149.0'): HarnessPack {
       },
       {
         id: 'codex-api-key', name: 'OpenAI API key', kind: 'environment',
-        fields: [{ ref: 'OPENAI_API_KEY', name: 'OpenAI API key', env: 'OPENAI_API_KEY', required: true, secret: true }],
+        fields: [
+          { ref: 'OPENAI_API_KEY', name: 'OpenAI API key', env: 'OPENAI_API_KEY', required: true, secret: true },
+          codexCaField(),
+        ],
         account: {
           label: 'OpenAI API billing', billing: 'usage',
           detail: 'Requests are billed to the OpenAI API project owning this key.',
@@ -706,7 +828,7 @@ function ompSource(kind: 'blob' | 'tree', ...segments: string[]): string {
   return `https://github.com/can1357/oh-my-pi/${kind}/main/${segments.join('/')}`
 }
 
-function curatedOmp(version = '18.0.3'): HarnessPack {
+function curatedOmp(version = '18.0.9'): HarnessPack {
   return parseHarnessPack({
     schemaVersion: 0,
     id: 'oh-my-pi',
@@ -930,7 +1052,12 @@ export class HarnessService extends Service {
   private readonly installRoot: string
   private readonly runtimeRoot: string
   private state: StoredHarnessState = structuredClone(EMPTY_STATE)
-  private readonly transient = new Map<HarnessId, { status: 'installing' | 'failed'; error?: string }>()
+  private readonly transient = new Map<HarnessId, {
+    status: 'installing' | 'failed'
+    phase?: NonNullable<HarnessInstallation['operationPhase']>
+    detail?: string
+    error?: string
+  }>()
   private mutation: Promise<void> = Promise.resolve()
 
   constructor(ctx: Context, private readonly config: HarnessConfig) {
@@ -985,7 +1112,7 @@ export class HarnessService extends Service {
     await ensureManagedDirectory(this.runtimeRoot, 'Harness runtime root')
     try {
       const parsed = JSON.parse(await readFile(this.stateFile, 'utf8')) as unknown
-      if (typeof parsed === 'object' && parsed !== null && [1, 2, 3, 4, 5, 6].includes(Number((parsed as { version?: unknown }).version))) {
+      if (typeof parsed === 'object' && parsed !== null && [1, 2, 3, 4, 5, 6, 7].includes(Number((parsed as { version?: unknown }).version))) {
         const candidate = parsed as StoredHarnessStateCandidate
         const customPacks = candidate.customPacks
           .map(pack => parseHarnessPack({ ...pack, source: 'user' }))
@@ -1019,11 +1146,14 @@ export class HarnessService extends Service {
             ...(install.active === undefined ? {} : { active: parseStoredHarnessPack(install.active, fallback) }),
             previous: install.previous.map(pack => parseStoredHarnessPack(pack, fallback)),
             ...(install.authMethod === undefined ? {} : { authMethod: install.authMethod }),
+            ...(Object.keys(storedAuthenticationDiscoveries(install.authDiscoveries)).length === 0
+              ? {}
+              : { authDiscoveries: storedAuthenticationDiscoveries(install.authDiscoveries) }),
             ...(install.compatibility === undefined ? {} : { compatibility: install.compatibility }),
           } satisfies StoredInstall]
         }))
         this.state = {
-          version: 6,
+          version: 7,
           // v1 always materialized DSH even when the user never chose it. Do
           // not mistake that compatibility default for consent during upgrade.
           ...(candidate.version >= 2 && candidate.defaultHarnessId !== undefined
@@ -1092,18 +1222,35 @@ export class HarnessService extends Service {
    * @returns Disposer that removes only this exact registration.
    */
   registerDriver(driver: HarnessDriver): () => void {
-    const api = negotiateHarnessDriverApi(driver.apiVersion)
-    if (!api.compatible) throw new Error(`Harness driver "${driver.protocol}" uses an unsupported API version: ${api.message}`)
-    if (!/^[a-z0-9][a-z0-9._-]*$/u.test(driver.protocol)) throw new Error(`Harness driver protocol "${driver.protocol}" is invalid`)
-    if (driver.protocol === 'dsh') throw new Error('The built-in DSH runtime is not a public Driver registration id')
+    let apiVersion: unknown
+    let protocol: unknown
+    try {
+      apiVersion = driver.apiVersion
+      protocol = driver.protocol
+    } catch (error: unknown) {
+      throw new Error(`Harness Driver identity could not be read: ${safeHarnessDiagnostic(error, 'identity access failed')}`)
+    }
+    const protocolLabel = typeof protocol === 'string' ? protocol : 'invalid'
+    const api = negotiateHarnessDriverApi(typeof apiVersion === 'number' ? apiVersion : Number.NaN)
+    if (!api.compatible) throw new Error(`Harness driver "${protocolLabel}" uses an unsupported API version: ${api.message}`)
+    if (typeof protocol !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/u.test(protocol)) {
+      throw new Error(`Harness driver protocol "${protocolLabel}" is invalid`)
+    }
+    if (protocol === 'dsh') throw new Error('The built-in DSH runtime is not a public Driver registration id')
     for (const method of ['capabilities', 'available', 'create', 'resume', 'dispose'] as const) {
-      if (typeof driver[method] !== 'function') {
-        throw new Error(`Harness driver "${driver.protocol}" is missing required method "${method}"`)
+      let implementation: unknown
+      try {
+        implementation = driver[method]
+      } catch (error: unknown) {
+        throw new Error(`Harness driver "${protocol}" member "${method}" could not be read: ${safeHarnessDiagnostic(error, 'member access failed')}`)
+      }
+      if (typeof implementation !== 'function') {
+        throw new Error(`Harness driver "${protocol}" is missing required method "${method}"`)
       }
     }
-    if (this.drivers.has(driver.protocol)) throw new Error(`Harness driver "${driver.protocol}" is already registered`)
-    this.drivers.set(driver.protocol, driver)
-    return () => { if (this.drivers.get(driver.protocol) === driver) this.drivers.delete(driver.protocol) }
+    if (this.drivers.has(protocol)) throw new Error(`Harness driver "${protocol}" is already registered`)
+    this.drivers.set(protocol, driver)
+    return () => { if (this.drivers.get(protocol) === driver) this.drivers.delete(protocol) }
   }
 
   private packAtVersion(id: HarnessId, version: string): HarnessPack | undefined {
@@ -1151,7 +1298,7 @@ export class HarnessService extends Service {
     }
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
-    await assertHarnessDriverConformance(driver, pack)
+    await requireConformantDriver(driver, pack)
     await this.serialize(async () => {
       this.state.driverAuthorizations[pack.protocol] = {
         package: bundle.package,
@@ -1178,7 +1325,11 @@ export class HarnessService extends Service {
     let registryPacks: HarnessPack[] | undefined
     if (response?.ok) {
       try {
-        registryPacks = packsFromAcpRegistry(await response.json()).filter((pack) => {
+        registryPacks = packsFromAcpRegistry(await boundedJsonResponse(
+          response,
+          16 * 1024 * 1024,
+          'ACP Registry',
+        )).filter((pack) => {
           const issue = customPackAdmissionIssue(pack)
           if (issue !== undefined) this.ctx.logger.warn(`Ignoring unsafe ACP Registry Pack: ${issue}`)
           return issue === undefined
@@ -1193,7 +1344,11 @@ export class HarnessService extends Service {
     let communityRevocations: OpenFishCommunityRevocation[] | undefined
     if (communityResponse?.ok) {
       try {
-        const catalog = openFishCommunityCatalog(await communityResponse.json())
+        const catalog = openFishCommunityCatalog(await boundedJsonResponse(
+          communityResponse,
+          4 * 1024 * 1024,
+          'OpenFish community catalog',
+        ))
         communityPacks = catalog.packs.filter((pack) => {
           const issue = customPackAdmissionIssue(pack)
           if (issue !== undefined) this.ctx.logger.warn(`Ignoring unsafe community Pack: ${issue}`)
@@ -1276,7 +1431,15 @@ export class HarnessService extends Service {
     await this.initialRefresh
     // Once a remote refresh has entered its atomic commit, keep the in-memory
     // catalog and its private state file on the same durable revision.
-    await this.mutation
+    // A managed install deliberately exposes a transient Host-owned phase to
+    // native clients. Waiting for the long install transaction here would
+    // make that progress unobservable and turn cancellation into a blind UI.
+    // The committed install state remains unchanged until activation; while
+    // the transient exists, catalogEntry() overlays only bounded public phase
+    // text on that last durable state.
+    if (![...this.transient.values()].some(item => item.status === 'installing')) {
+      await this.mutation
+    }
     return await Promise.all([...this.packs.values()].map(async (pack) => {
       const install = this.state.installs[pack.id]
       return await this.catalogEntry(pack, install?.active ?? pack, install?.authMethod)
@@ -1395,10 +1558,11 @@ export class HarnessService extends Service {
 
   private async catalogEntry(
     catalogPack: HarnessPack,
-    effectivePack: HarnessPack,
+    snapshotPack: HarnessPack,
     selectedAuthMethod: string | undefined,
     allowRevokedResume = false,
   ): Promise<HarnessCatalogEntry> {
+    const effectivePack = withCurrentAuthenticationContract(catalogPack, snapshotPack)
     const install = this.state.installs[catalogPack.id]
     const transient = this.transient.get(catalogPack.id)
     const driver = this.drivers.get(effectivePack.protocol)
@@ -1419,6 +1583,8 @@ export class HarnessService extends Service {
         ...(install?.active === undefined ? {} : { installedVersion: install.active.version }),
         availableVersion: catalogPack.version,
         previousVersions: install?.previous.map(item => item.version) ?? [],
+        ...(transient?.phase === undefined ? {} : { operationPhase: transient.phase }),
+        ...(transient?.detail === undefined ? {} : { operationDetail: transient.detail }),
         integrity: installationIntegrity(
           effectivePack,
           install?.active === undefined ? 'not-installed' : 'installed',
@@ -1483,31 +1649,51 @@ export class HarnessService extends Service {
         ? 'not-required' as const
         : driverAuthorizationIssue === undefined ? 'authorized' as const : 'required' as const,
     }
+    const emptyAuthoring: HarnessAuthoringContract = { nodeKinds: [], bindingKinds: [] }
     if (effectivePack.protocol === 'dsh') {
       return {
         ...effectivePack, ...publicationFields, isDefault, available: true, installation, auth, compatibility,
-        capabilities: [...builtinCapabilities], driver: driverInfo,
+        capabilities: [...builtinCapabilities], authoring: emptyAuthoring, driver: driverInfo,
       }
     }
     if (driver === undefined) {
       return {
         ...effectivePack, ...publicationFields, isDefault, available: false, unavailableReason: revokedReason ?? `No ${effectivePack.protocol} driver is loaded`, installation, auth, compatibility,
-        capabilities: withUserBuilderCapabilities(effectivePack, [{ id: 'architecture.manifest', status: 'supported', source: 'pack' }], false), driver: driverInfo,
+        capabilities: withUserBuilderCapabilities(effectivePack, [{ id: 'architecture.manifest', status: 'supported', source: 'pack' }], false), authoring: emptyAuthoring, driver: driverInfo,
       }
     }
     let capabilities: HarnessCapability[]
+    let authoring = emptyAuthoring
     try {
-      capabilities = withHostCapabilities(await assertHarnessDriverConformance(driver, effectivePack))
+      const inspection = await inspectHarnessDriver(driver, effectivePack)
+      capabilities = withHostCapabilities(inspection.capabilities)
+      if (!inspection.compatible) {
+        const reason = safeHarnessDiagnostic(
+          `Harness Driver conformance failed: ${inspection.issues.join(' ')}`,
+          'Driver conformance failed',
+        )
+        return {
+          ...effectivePack,
+          ...publicationFields,
+          isDefault,
+          available: false,
+          unavailableReason: revokedReason ?? reason,
+          installation,
+          auth,
+          compatibility: catalogCompatibility(effectivePack, { status: 'failed' as const, checkedAt: new Date().toISOString(), message: reason }),
+          capabilities: withUserBuilderCapabilities(effectivePack, capabilities, false),
+          authoring: emptyAuthoring,
+          driver: driverInfo,
+        }
+      }
+      authoring = inspection.authoring
     } catch (error: unknown) {
-      const reason = safeHarnessDiagnostic(error, 'Driver conformance failed')
+      const reason = safeHarnessDiagnostic(error, 'Driver inspection failed')
       return {
         ...effectivePack, ...publicationFields, isDefault, available: false, unavailableReason: revokedReason ?? reason, installation, auth,
         compatibility: catalogCompatibility(effectivePack, { status: 'failed' as const, checkedAt: new Date().toISOString(), message: reason }),
-        capabilities: withUserBuilderCapabilities(
-          effectivePack,
-          withHostCapabilities(await driver.capabilities(effectivePack).catch(() => [])),
-          false,
-        ),
+        capabilities: withUserBuilderCapabilities(effectivePack, withHostCapabilities([]), false),
+        authoring: emptyAuthoring,
         driver: driverInfo,
       }
     }
@@ -1520,18 +1706,16 @@ export class HarnessService extends Service {
         `Harness "${effectivePack.id}" ${effectivePack.version} installation snapshot`,
       )
       : undefined
-    const reportedUnavailableReason = await driver.available(effectivePack)
-    const driverUnavailableReason = reportedUnavailableReason === undefined
-      ? undefined
-      : safeHarnessDiagnostic(reportedUnavailableReason, 'Harness launch prerequisites are unavailable')
-    const unavailableReason = driverAuthorizationIssue ?? snapshotIssue ?? driverUnavailableReason
+    const driverUnavailableReason = await inspectDriverAvailability(driver, effectivePack)
+    const authenticationIssue = snapshotExpected && auth.status === 'unknown' ? auth.detail : undefined
+    const unavailableReason = driverAuthorizationIssue ?? snapshotIssue ?? driverUnavailableReason ?? authenticationIssue
     const effectiveUnavailableReason = revokedReason ?? unavailableReason
     return {
       ...effectivePack, ...publicationFields,
       isDefault,
       available: revokedReason === undefined && unavailableReason === undefined,
       ...(effectiveUnavailableReason === undefined ? {} : { unavailableReason: effectiveUnavailableReason }),
-      installation, auth, capabilities, driver: driverInfo,
+      installation, auth, capabilities, authoring, driver: driverInfo,
       compatibility: catalogCompatibility(effectivePack, install?.compatibility ?? (unavailableReason === undefined
         ? { status: 'ready' as const, message: 'Launch prerequisites are present; first session has not been verified yet.' }
         : { status: 'failed' as const, checkedAt: new Date().toISOString(), message: unavailableReason })),
@@ -1545,7 +1729,9 @@ export class HarnessService extends Service {
    */
   async install(id: HarnessId, signal?: AbortSignal): Promise<void> {
     await this.initialRefresh
+    signal?.throwIfAborted()
     await this.serialize(async () => {
+      signal?.throwIfAborted()
       const pack = this.require(id)
       if (pack.protocol === 'dsh') return
       if (this.isRevoked(pack)) {
@@ -1555,39 +1741,112 @@ export class HarnessService extends Service {
       const driver = this.drivers.get(pack.protocol)
       if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
       this.requireDriverAuthorization(pack)
+      await requireConformantDriver(driver, pack)
+      signal?.throwIfAborted()
       const existing = this.state.installs[pack.id]
       if (existing?.active?.version === pack.version) {
+        const installationDirectory = join(this.installRoot, pack.id, pack.version)
         const issue = await managedDirectoryIssue(
-          join(this.installRoot, pack.id, pack.version),
+          installationDirectory,
           `Harness "${pack.id}" ${pack.version} installation snapshot`,
         )
         if (issue === undefined) {
+          let activePack = withCurrentAuthenticationContract(pack, existing.active)
+          const needsAuthenticationDiscovery = pack.authenticationDiscovery?.source === 'runtime'
+            && existing.authDiscoveries?.[pack.version] === undefined
+          if (needsAuthenticationDiscovery && driver.discoverAuth !== undefined) {
+            activePack = withDiscoveredAuthentication(pack, await driver.discoverAuth(
+              pack,
+              installationDirectory,
+              await this.runtimeDirectory(pack),
+            ))
+            signal?.throwIfAborted()
+          }
+          await requireConformantDriver(driver, activePack)
+          signal?.throwIfAborted()
+          const unavailable = await inspectDriverAvailability(driver, activePack)
+          signal?.throwIfAborted()
+          if (unavailable !== undefined) throw new Error(unavailable)
+          const validAuthMethod = existing.authMethod === undefined
+            || (activePack.authMethods ?? []).some(method => method.id === existing.authMethod)
+          if (activePack !== existing.active || !validAuthMethod || needsAuthenticationDiscovery) {
+            const previousInstall = existing
+            this.state.installs[pack.id] = {
+              ...existing,
+              active: activePack,
+              ...(needsAuthenticationDiscovery
+                ? { authDiscoveries: { ...existing.authDiscoveries, [pack.version]: new Date().toISOString() } }
+                : {}),
+            }
+            if (!validAuthMethod) delete this.state.installs[pack.id]?.authMethod
+            try {
+              await this.saveState()
+            } catch (error: unknown) {
+              this.state.installs[pack.id] = previousInstall
+              throw error
+            }
+          }
           this.transient.delete(id)
           return
         }
       }
       const retained = existing?.previous.find(candidate => candidate.version === pack.version)
       if (retained !== undefined && existing?.active !== undefined) {
+        const retainedDirectory = join(this.installRoot, retained.id, retained.version)
         const issue = await managedDirectoryIssue(
-          join(this.installRoot, retained.id, retained.version),
+          retainedDirectory,
           `Harness "${retained.id}" ${retained.version} retained installation snapshot`,
         )
         if (issue === undefined) {
+          let retainedPack = withCurrentAuthenticationContract(pack, retained)
+          const needsAuthenticationDiscovery = pack.authenticationDiscovery?.source === 'runtime'
+            && existing.authDiscoveries?.[pack.version] === undefined
+          if (needsAuthenticationDiscovery && driver.discoverAuth !== undefined) {
+            retainedPack = withDiscoveredAuthentication(pack, await driver.discoverAuth(
+              pack,
+              retainedDirectory,
+              await this.runtimeDirectory(pack),
+            ))
+            signal?.throwIfAborted()
+          }
+          await requireConformantDriver(driver, retainedPack)
+          signal?.throwIfAborted()
+          const unavailable = await inspectDriverAvailability(driver, retainedPack)
+          signal?.throwIfAborted()
+          if (unavailable !== undefined) throw new Error(unavailable)
+          const authMethod = existing.authMethod !== undefined
+            && (retainedPack.authMethods ?? []).some(method => method.id === existing.authMethod)
+            ? existing.authMethod
+            : undefined
           this.state.installs[pack.id] = {
-            active: retained,
+            active: retainedPack,
             previous: [existing.active, ...existing.previous.filter(candidate => candidate.version !== retained.version)],
-            ...(existing.authMethod === undefined ? {} : { authMethod: existing.authMethod }),
+            ...(authMethod === undefined ? {} : { authMethod }),
+            ...(existing.authDiscoveries === undefined && !needsAuthenticationDiscovery
+              ? {}
+              : {
+                authDiscoveries: {
+                  ...existing.authDiscoveries,
+                  ...(needsAuthenticationDiscovery ? { [pack.version]: new Date().toISOString() } : {}),
+                },
+              }),
           }
           await this.saveState()
           this.transient.delete(id)
           return
         }
       }
-      this.transient.set(id, { status: 'installing' })
+      this.transient.set(id, {
+        status: 'installing', phase: 'staging',
+        detail: `Installing exact ${pack.name} ${pack.version} distribution in an isolated runtime…`,
+      })
       const parentDirectory = join(this.installRoot, pack.id)
       const installationDirectory = join(parentDirectory, pack.version)
       const stagingDirectory = join(parentDirectory, `.${pack.version}.installing-${randomUUID()}`)
+      const runtimeWasReferenced = existing?.active?.version === pack.version
+        || existing?.previous.some(candidate => candidate.version === pack.version) === true
       let promoted = false
+      let attemptedRuntimeDirectory: string | undefined
       try {
         await ensureManagedDirectory(this.installRoot, 'Harness installation root')
         await mkdir(parentDirectory, { recursive: true, mode: 0o700 })
@@ -1598,11 +1857,24 @@ export class HarnessService extends Service {
         // same lifecycle contract as package-backed Drivers.
         await mkdir(stagingDirectory, { recursive: true, mode: 0o700 })
         const runtimeDirectory = await this.runtimeDirectory(pack)
+        attemptedRuntimeDirectory = runtimeDirectory
         await driver.install?.(pack, stagingDirectory, runtimeDirectory, signal)
+        signal?.throwIfAborted()
+        this.transient.set(id, {
+          status: 'installing', phase: 'discovering-auth',
+          detail: `Discovering ${pack.name} authentication methods without reading secret values…`,
+        })
         const discoveredAuth = await driver.discoverAuth?.(pack, stagingDirectory, runtimeDirectory)
+        signal?.throwIfAborted()
         const installedPack = discoveredAuth === undefined
           ? pack
-          : { ...pack, authMethods: mergeDiscoveredAuthentication(pack.authMethods, discoveredAuth) }
+          : withDiscoveredAuthentication(pack, discoveredAuth)
+        this.transient.set(id, {
+          status: 'installing', phase: 'verifying',
+          detail: `Validating ${pack.name} against Driver API v1 and its declared capabilities…`,
+        })
+        await requireConformantDriver(driver, installedPack)
+        signal?.throwIfAborted()
         const previous = existing?.active === undefined || existing.active.version === pack.version
           ? existing?.previous ?? []
           : [existing.active, ...existing.previous]
@@ -1612,12 +1884,32 @@ export class HarnessService extends Service {
         // and retained snapshots returned above. Replace only an orphan left
         // by an interrupted pre-transaction build, then atomically promote.
         await rm(installationDirectory, { recursive: true, force: true })
+        this.transient.set(id, {
+          status: 'installing', phase: 'activating',
+          detail: `Activating the verified ${pack.name} ${pack.version} snapshot atomically…`,
+        })
         await rename(stagingDirectory, installationDirectory)
         promoted = true
+        signal?.throwIfAborted()
+        this.transient.set(id, {
+          status: 'installing', phase: 'health-check',
+          detail: `Checking ${pack.name} launch prerequisites before committing the update…`,
+        })
+        const unavailable = await inspectDriverAvailability(driver, installedPack)
+        signal?.throwIfAborted()
+        if (unavailable !== undefined) throw new Error(unavailable)
         this.state.installs[pack.id] = {
           active: installedPack,
           previous,
           ...(existing?.authMethod === undefined ? {} : { authMethod: existing.authMethod }),
+          ...(driver.discoverAuth === undefined
+            ? (existing?.authDiscoveries === undefined ? {} : { authDiscoveries: existing.authDiscoveries })
+            : {
+              authDiscoveries: {
+                ...existing?.authDiscoveries,
+                [pack.version]: new Date().toISOString(),
+              },
+            }),
         }
         await this.saveState()
         this.transient.delete(id)
@@ -1626,8 +1918,16 @@ export class HarnessService extends Service {
         else this.state.installs[pack.id] = existing
         await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined)
         if (promoted) await rm(installationDirectory, { recursive: true, force: true }).catch(() => undefined)
-        this.transient.set(id, { status: 'failed', error: safeHarnessDiagnostic(error, 'Harness installation failed') })
-        throw error
+        if (!runtimeWasReferenced && attemptedRuntimeDirectory !== undefined) {
+          await removeManagedHarnessDirectory(attemptedRuntimeDirectory).catch(() => undefined)
+        }
+        if (signal?.aborted === true) {
+          this.transient.delete(id)
+          throw error
+        }
+        const message = safeHarnessDiagnostic(error, 'Harness installation failed')
+        this.transient.set(id, { status: 'failed', error: message })
+        throw new Error(message)
       }
     })
   }
@@ -1640,8 +1940,8 @@ export class HarnessService extends Service {
    */
   async probe(id: HarnessId, signal?: AbortSignal): Promise<void> {
     await this.initialRefresh
-    const pack = this.require(id)
-    if (pack.protocol === 'dsh') {
+    const catalogPack = this.require(id)
+    if (catalogPack.protocol === 'dsh') {
       await this.recordCompatibility(id, { status: 'compatible', checkedAt: new Date().toISOString(), message: 'Built-in runtime and Driver API v1 are loaded.' })
       return
     }
@@ -1649,12 +1949,12 @@ export class HarnessService extends Service {
     if (install?.active === undefined) {
       throw new Error(`Harness "${id}" must be installed explicitly before preflight`)
     }
-    const effective = install.active
+    const effective = withCurrentAuthenticationContract(catalogPack, install.active)
     const driver = this.drivers.get(effective.protocol)
     if (driver === undefined) throw new Error(`No ${effective.protocol} Harness driver is loaded`)
     this.requireDriverAuthorization(effective)
-    await assertHarnessDriverConformance(driver, effective)
-    const unavailable = await driver.available(effective)
+    await requireConformantDriver(driver, effective)
+    const unavailable = await inspectDriverAvailability(driver, effective)
     if (unavailable !== undefined) throw new Error(unavailable)
     const selectedMethod = install.authMethod
     const auth = await this.authenticationState(effective, selectedMethod, driver)
@@ -1674,8 +1974,10 @@ export class HarnessService extends Service {
     const preflightDirectory = join(runtimeDirectory, 'preflight', randomUUID())
     await mkdir(preflightDirectory, { recursive: true, mode: 0o700 })
     try {
-      const capabilities = withHostCapabilities(await assertHarnessDriverConformance(driver, effective))
-      const result = await driver.preflight?.({
+      signal?.throwIfAborted()
+      const capabilities = withHostCapabilities(await requireConformantDriver(driver, effective))
+      signal?.throwIfAborted()
+      const result = normalizeHarnessPreflightResult(await driver.preflight?.({
         harnessId: effective.id,
         sessionId: SessionId(`openfish-preflight-${randomUUID()}`),
         cwd: preflightDirectory,
@@ -1685,12 +1987,20 @@ export class HarnessService extends Service {
         ...(selectedMethod === undefined ? {} : { authMethod: selectedMethod }),
         workspaceMode: 'no-project',
         capabilities,
-      }, effective, signal)
+      }, effective, signal))
+      signal?.throwIfAborted()
       const message = result?.message
         ?? 'Driver API, exact installation snapshot, launch prerequisites, and authentication checks passed. This Driver does not implement a live protocol preflight.'
       await this.recordCompatibility(id, {
         status: result === undefined ? 'ready' : 'compatible', checkedAt: new Date().toISOString(), message,
       })
+    } catch (error: unknown) {
+      if (signal?.aborted === true) throw error
+      const message = safeHarnessDiagnostic(error, 'Harness live preflight failed')
+      await this.recordCompatibilityWithoutMasking(id, {
+        status: 'failed', checkedAt: new Date().toISOString(), message,
+      })
+      throw new Error(message)
     } finally {
       await rm(preflightDirectory, { recursive: true, force: true }).catch(() => undefined)
     }
@@ -1742,12 +2052,21 @@ export class HarnessService extends Service {
       const previous = install?.previous[0]
       if (install?.active === undefined || previous === undefined) throw new Error(`Harness "${id}" has no rollback version`)
       this.requireDriverAuthorization(previous)
+      const driver = this.drivers.get(previous.protocol)
+      if (driver === undefined) throw new Error(`No ${previous.protocol} Harness driver is loaded`)
+      await requireConformantDriver(driver, previous)
+      const unavailable = await inspectDriverAvailability(driver, previous)
+      if (unavailable !== undefined) throw new Error(unavailable)
       await requireManagedDirectory(
         join(this.installRoot, previous.id, previous.version),
         `Harness "${previous.id}" ${previous.version} rollback snapshot`,
       )
       install.previous = [install.active, ...install.previous.slice(1)]
       install.active = previous
+      if (install.authMethod !== undefined
+        && !(previous.authMethods ?? []).some(method => method.id === install.authMethod)) {
+        delete install.authMethod
+      }
       delete install.compatibility
       await this.saveState()
     })
@@ -1790,13 +2109,30 @@ export class HarnessService extends Service {
     const driver = this.drivers.get(active.protocol)
     if (driver?.authenticateInteractive === undefined) throw new Error(`The ${active.protocol} driver cannot run interactive authentication`)
     this.requireDriverAuthorization(active)
-    await driver.authenticateInteractive(
-      active,
-      join(this.installRoot, active.id, active.version),
-      await this.runtimeDirectory(active),
-      method,
-      signal,
+    await requireConformantDriver(driver, active)
+    const unavailable = await inspectDriverAvailability(driver, active)
+    if (unavailable !== undefined) throw new Error(unavailable)
+    const installationDirectory = join(this.installRoot, active.id, active.version)
+    await requireManagedDirectory(
+      installationDirectory,
+      `Harness "${active.id}" ${active.version} installation snapshot`,
     )
+    try {
+      await driver.authenticateInteractive(
+        active,
+        installationDirectory,
+        await this.runtimeDirectory(active),
+        method,
+        signal,
+      )
+    } catch (error: unknown) {
+      if (signal?.aborted === true) throw error
+      throw new Error(safeHarnessDiagnostic(error, 'Harness sign-in failed'))
+    }
+    const authentication = await this.authenticationState(active, methodId, driver)
+    if (authentication.status !== 'configured') {
+      throw new Error(`Harness sign-in did not become ready: ${authentication.detail}`)
+    }
     await this.selectAuth(id, methodId)
   }
 
@@ -1808,18 +2144,22 @@ export class HarnessService extends Service {
     await this.initialRefresh
     await this.serialize(async () => {
       const catalogPack = this.require(id)
-      const selectedPack = this.state.installs[id]?.active ?? catalogPack
+      const selectedPack = withCurrentAuthenticationContract(
+        catalogPack,
+        this.state.installs[id]?.active ?? catalogPack,
+      )
       if (this.isRevoked(selectedPack)) {
         throw new Error(`Harness "${id}" version ${selectedPack.version} was revoked and cannot become the default`)
       }
       if (catalogPack.protocol !== 'dsh') {
-        const pack = this.state.installs[id]?.active
-        if (pack === undefined) throw new Error(`Harness "${id}" must be installed before it can become the default`)
+        const installedPack = this.state.installs[id]?.active
+        if (installedPack === undefined) throw new Error(`Harness "${id}" must be installed before it can become the default`)
+        const pack = withCurrentAuthenticationContract(catalogPack, installedPack)
         const driver = this.drivers.get(pack.protocol)
         if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
         this.requireDriverAuthorization(pack)
-        await assertHarnessDriverConformance(driver, pack)
-        const unavailable = await driver.available(pack)
+        await requireConformantDriver(driver, pack)
+        const unavailable = await inspectDriverAvailability(driver, pack)
         if (unavailable !== undefined) throw new Error(unavailable)
         const authMethod = this.state.installs[id]?.authMethod
         const authentication = await this.authenticationState(pack, authMethod, driver)
@@ -1827,7 +2167,10 @@ export class HarnessService extends Service {
           throw new Error(`Harness "${id}" requires an explicit authentication method before it can become the default`)
         }
         if (authentication.status === 'needs-credentials') {
-          throw new Error(`Harness "${id}" is missing required credentials: ${authentication.missingFields.join(', ')}`)
+          throw new Error(`Harness "${id}" is not authenticated: ${authentication.detail}`)
+        }
+        if (authentication.status === 'unknown') {
+          throw new Error(`Harness "${id}" did not expose an authentication discovery method and cannot become the default`)
         }
       }
       this.state.defaultHarnessId = id
@@ -1856,14 +2199,21 @@ export class HarnessService extends Service {
     const catalogPack = this.packs.get(id)
     if (catalogPack === undefined) return undefined
     if (catalogPack.protocol === 'dsh') return id
-    const pack = this.state.installs[id]?.active
-    if (pack === undefined) return undefined
+    const installedPack = this.state.installs[id]?.active
+    if (installedPack === undefined) return undefined
+    const pack = withCurrentAuthenticationContract(catalogPack, installedPack)
     if (this.isRevoked(pack)) return undefined
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) return undefined
     if (this.driverAuthorizationIssue(pack) !== undefined) return undefined
-    const auth = await this.authenticationState(pack, this.state.installs[id]?.authMethod, driver)
-    return auth.status === 'not-required' || auth.status === 'configured' ? id : undefined
+    try {
+      await requireConformantDriver(driver, pack)
+      if (await inspectDriverAvailability(driver, pack) !== undefined) return undefined
+      const auth = await this.authenticationState(pack, this.state.installs[id]?.authMethod, driver)
+      return auth.status === 'not-required' || auth.status === 'configured' ? id : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -1911,7 +2261,7 @@ export class HarnessService extends Service {
       throw new Error(`Harness Pack "${pack.id}" cannot be published from this Host because no ${pack.protocol} Driver is loaded`)
     }
     this.requireDriverAuthorization(pack)
-    await assertHarnessDriverConformance(driver, pack)
+    await requireConformantDriver(driver, pack)
     return pack
   }
 
@@ -2165,7 +2515,8 @@ export class HarnessService extends Service {
     workspaceMode?: HarnessSessionRequest['workspaceMode'],
   ): Promise<Agent> {
     await this.initialRefresh
-    let pack = this.require(id)
+    const catalogPack = this.require(id)
+    let pack = catalogPack
     if (pack.protocol === 'dsh') throw new Error('The DSH Harness is forked by the native AgentLoop')
     const install = this.state.installs[pack.id]
     if (install?.active === undefined) {
@@ -2181,11 +2532,11 @@ export class HarnessService extends Service {
     const pinnedVersion = version ?? sourceSelection.version
     const pinned = [install.active, ...install.previous].find(candidate => candidate.version === pinnedVersion)
     if (pinned === undefined) throw new Error(`Harness "${pack.id}" version ${pinnedVersion} is not installed`)
-    pack = pinned
+    pack = withCurrentAuthenticationContract(catalogPack, pinned)
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
     this.requireDriverAuthorization(pack)
-    const negotiatedCapabilities = withHostCapabilities(await assertHarnessDriverConformance(driver, pack))
+    const negotiatedCapabilities = withHostCapabilities(await requireConformantDriver(driver, pack))
     if (sourceSelection.version !== pack.version || sourceSelection.protocol !== pack.protocol) {
       throw new Error(`Harness "${pack.id}" fork seed does not contain the exact pinned source identity`)
     }
@@ -2209,13 +2560,16 @@ export class HarnessService extends Service {
       && !capabilities.some(capability => capability.id === requiredWorkspaceCapability && capability.status !== 'unsupported')) {
       throw new Error(`Harness "${pack.id}" does not support ${selectedWorkspaceMode} tasks`)
     }
-    const unavailable = await driver.available(pack)
+    const unavailable = await inspectDriverAvailability(driver, pack)
     if (unavailable !== undefined) throw new Error(unavailable)
     const selectedAuth = sourceSelection.authMethod ?? authMethod ?? install.authMethod
     const authentication = await this.authenticationState(pack, selectedAuth, driver)
     if (authentication.status === 'needs-selection') throw new Error(`Harness "${pack.id}" requires an explicit authentication method`)
     if (authentication.status === 'needs-credentials') {
-      throw new Error(`Harness "${pack.id}" is missing required credentials: ${authentication.missingFields.join(', ')}`)
+      throw new Error(`Harness "${pack.id}" is not authenticated: ${authentication.detail}`)
+    }
+    if (authentication.status === 'unknown') {
+      throw new Error(`Harness "${pack.id}" authentication is unknown; install it and let its Driver discover the available sign-in methods before starting a task`)
     }
     const request: HarnessForkRequest = {
       harnessId: pack.id,
@@ -2230,17 +2584,22 @@ export class HarnessService extends Service {
       ...(selectedAuth === undefined ? {} : { authMethod: selectedAuth }),
       ...(selectedWorkspaceMode === undefined ? {} : { workspaceMode: selectedWorkspaceMode }),
     }
+    let agent: Agent
     try {
-      const agent = await driver.fork(request, pack)
-      await this.recordCompatibility(pack.id, { status: 'compatible', checkedAt: new Date().toISOString() })
-      return agent
+      agent = await driver.fork(request, pack)
+      await this.requireDriverSession(agent, request, pack, driver, 'fork')
     } catch (error: unknown) {
-      await this.recordCompatibility(pack.id, {
+      const message = safeHarnessDiagnostic(error, 'Harness fork failed')
+      await this.recordCompatibilityWithoutMasking(pack.id, {
         status: 'failed', checkedAt: new Date().toISOString(),
-        message: safeHarnessDiagnostic(error, 'Harness fork failed'),
+        message,
       })
-      throw error
+      throw new Error(message)
     }
+    await this.recordCompatibilityWithoutMasking(pack.id, {
+      status: 'compatible', checkedAt: new Date().toISOString(),
+    })
+    return agent
   }
 
   /**
@@ -2267,7 +2626,13 @@ export class HarnessService extends Service {
     }
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
-    await driver.dispose(sessionId, pack)
+    this.requireDriverAuthorization(pack)
+    await requireConformantDriver(driver, pack)
+    try {
+      await driver.dispose(sessionId, pack)
+    } catch (error: unknown) {
+      throw new Error(safeHarnessDiagnostic(error, 'Harness session disposal failed'))
+    }
   }
 
   /**
@@ -2295,8 +2660,14 @@ export class HarnessService extends Service {
     }
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
-    if (driver.discard === undefined) await driver.dispose(sessionId, pack)
-    else await driver.discard(sessionId, pack)
+    this.requireDriverAuthorization(pack)
+    await requireConformantDriver(driver, pack)
+    try {
+      if (driver.discard === undefined) await driver.dispose(sessionId, pack)
+      else await driver.discard(sessionId, pack)
+    } catch (error: unknown) {
+      throw new Error(safeHarnessDiagnostic(error, 'Harness draft discard failed'))
+    }
   }
 
   private async driverRequest(
@@ -2305,7 +2676,8 @@ export class HarnessService extends Service {
     signal?: AbortSignal,
   ): Promise<Agent> {
     signal?.throwIfAborted()
-    let pack = this.require(request.harnessId)
+    const catalogPack = this.require(request.harnessId)
+    let pack = catalogPack
     if (pack.protocol === 'dsh') throw new Error('The DSH Harness is created by the native AgentLoop')
     if (this.state.installs[pack.id]?.active === undefined) {
       throw new Error(`Harness "${pack.id}" must be installed explicitly before creating a task`)
@@ -2316,9 +2688,9 @@ export class HarnessService extends Service {
       if (pinned === undefined) {
         throw new Error(`Harness "${pack.id}" version ${request.version} is not installed; restore that version or fork the task onto a current Harness`)
       }
-      pack = pinned
+      pack = withCurrentAuthenticationContract(catalogPack, pinned)
     } else {
-      pack = install?.active ?? pack
+      pack = withCurrentAuthenticationContract(catalogPack, install?.active ?? pack)
     }
     if (operation === 'create' && this.isRevoked(pack)) {
       throw new Error(`Harness "${pack.id}" version ${pack.version} was revoked and cannot start new tasks; update the Harness or choose another one`)
@@ -2326,7 +2698,7 @@ export class HarnessService extends Service {
     const driver = this.drivers.get(pack.protocol)
     if (driver === undefined) throw new Error(`No ${pack.protocol} Harness driver is loaded`)
     this.requireDriverAuthorization(pack)
-    const capabilities = withHostCapabilities(await assertHarnessDriverConformance(driver, pack))
+    const capabilities = withHostCapabilities(await requireConformantDriver(driver, pack))
     signal?.throwIfAborted()
     const requiredWorkspaceCapability = request.workspaceMode === 'no-project'
       ? 'workspace.no-project'
@@ -2335,7 +2707,7 @@ export class HarnessService extends Service {
       && !capabilities.some(capability => capability.id === requiredWorkspaceCapability && capability.status !== 'unsupported')) {
       throw new Error(`Harness "${pack.id}" does not support ${request.workspaceMode} tasks`)
     }
-    const unavailable = await driver.available(pack)
+    const unavailable = await inspectDriverAvailability(driver, pack)
     signal?.throwIfAborted()
     if (unavailable !== undefined) throw new Error(unavailable)
     const authMethod = request.authMethod ?? this.state.installs[pack.id]?.authMethod
@@ -2343,7 +2715,10 @@ export class HarnessService extends Service {
     signal?.throwIfAborted()
     if (authentication.status === 'needs-selection') throw new Error(`Harness "${pack.id}" requires an explicit authentication method`)
     if (authentication.status === 'needs-credentials') {
-      throw new Error(`Harness "${pack.id}" is missing required credentials: ${authentication.missingFields.join(', ')}`)
+      throw new Error(`Harness "${pack.id}" is not authenticated: ${authentication.detail}`)
+    }
+    if (authentication.status === 'unknown') {
+      throw new Error(`Harness "${pack.id}" authentication is unknown; install it and let its Driver discover the available sign-in methods before starting a task`)
     }
     const installationDirectory = join(this.installRoot, pack.id, pack.version)
     await requireManagedDirectory(
@@ -2351,42 +2726,201 @@ export class HarnessService extends Service {
       `Harness "${pack.id}" ${pack.version} installation snapshot`,
     )
     const runtimeDirectory = await this.runtimeDirectory(pack)
+    let agent: Agent
     try {
-      const agent = await driver[operation]({
+      agent = await driver[operation]({
         ...request,
         installationDirectory,
         runtimeDirectory,
         capabilities,
         ...(authMethod === undefined ? {} : { authMethod }),
       }, pack, signal)
-      await this.recordCompatibility(pack.id, { status: 'compatible', checkedAt: new Date().toISOString() })
-      return agent
+      await this.requireDriverSession(
+        agent,
+        { ...request, capabilities, ...(authMethod === undefined ? {} : { authMethod }) },
+        pack,
+        driver,
+        operation,
+      )
     } catch (error: unknown) {
-      await this.recordCompatibility(pack.id, {
+      if (signal !== undefined && abortSignalIsAborted(signal)) throw error
+      const message = safeHarnessDiagnostic(error, 'Harness session failed')
+      await this.recordCompatibilityWithoutMasking(pack.id, {
         status: 'failed', checkedAt: new Date().toISOString(),
-        message: safeHarnessDiagnostic(error, 'Harness session failed'),
+        message,
       })
-      throw error
+      throw new Error(message)
     }
+    await this.recordCompatibilityWithoutMasking(pack.id, {
+      status: 'compatible', checkedAt: new Date().toISOString(),
+    })
+    return agent
+  }
+
+  /**
+   * Enforce the session identity a Driver promised before native clients can
+   * address it. A malformed Driver must not leave an invisible process or
+   * provider-side draft after returning the wrong task, cwd, or Pack pin.
+   */
+  private async requireDriverSession(
+    agent: Agent,
+    request: HarnessSessionRequest,
+    pack: HarnessPack,
+    driver: HarnessDriver,
+    operation: 'create' | 'resume' | 'fork',
+  ): Promise<void> {
+    const issues: string[] = []
+    try {
+      if (String(agent.id) !== String(request.sessionId)) issues.push(`Agent id is "${agent.id}" instead of "${request.sessionId}"`)
+      if (String(agent.session.header.id) !== String(request.sessionId)) {
+        issues.push(`Session id is "${agent.session.header.id}" instead of "${request.sessionId}"`)
+      }
+      if (agent.session.header.cwd !== request.cwd) {
+        issues.push(`Session cwd is "${agent.session.header.cwd ?? 'missing'}" instead of the admitted workspace`)
+      }
+      if (this.ctx.sessions.get(request.sessionId) !== agent.session) {
+        issues.push('Driver did not publish the exact returned Session through the Host SessionStore')
+      }
+      const selected = agent.session.events.findLast(event => event.type === 'harness/selected')?.data
+      if (selected === undefined) issues.push('Session has no durable harness/selected identity')
+      else {
+        if (selected.harnessId !== pack.id) issues.push(`Session selected Harness "${selected.harnessId}" instead of "${pack.id}"`)
+        if (selected.version !== pack.version) issues.push(`Session selected version "${selected.version}" instead of "${pack.version}"`)
+        if (selected.protocol !== pack.protocol) issues.push(`Session selected protocol "${selected.protocol}" instead of "${pack.protocol}"`)
+        if (request.workspaceMode !== undefined && selected.workspaceMode !== request.workspaceMode) {
+          issues.push(`Session workspace mode is "${selected.workspaceMode ?? 'missing'}" instead of "${request.workspaceMode}"`)
+        }
+        if (request.authMethod !== undefined && selected.authMethod !== request.authMethod) {
+          issues.push(`Session authentication method is "${selected.authMethod ?? 'missing'}" instead of the admitted method`)
+        }
+        if (selected.remoteSessionId !== undefined
+          && (typeof selected.remoteSessionId !== 'string' || selected.remoteSessionId.length === 0)) {
+          issues.push('Session pinned an invalid remote Harness identity')
+        }
+        if (operation === 'create') {
+          if (selected.capabilities === undefined) {
+            issues.push('New Session did not pin its negotiated capability snapshot')
+          } else if (JSON.stringify(selected.capabilities) !== JSON.stringify(request.capabilities ?? [])) {
+            issues.push('New Session capability snapshot differs from the admitted Driver contract')
+          }
+          if (selected.authMethod !== request.authMethod) {
+            issues.push('New Session authentication method differs from the admitted selection')
+          }
+          if (selected.workspaceMode !== request.workspaceMode) {
+            issues.push('New Session workspace mode differs from the admitted location contract')
+          }
+        }
+      }
+    } catch (error: unknown) {
+      issues.push(`Driver result could not be inspected: ${safeHarnessDiagnostic(error, 'invalid Agent or Session object')}`)
+    }
+    if (issues.length === 0) return
+    let cleanupIssue: string | undefined
+    try {
+      if (operation === 'resume' || driver.discard === undefined) await driver.dispose(request.sessionId, pack)
+      else await driver.discard(request.sessionId, pack)
+    } catch (error: unknown) {
+      cleanupIssue = safeHarnessDiagnostic(error, 'Driver cleanup failed')
+    }
+    throw new Error(
+      `Harness Driver returned an invalid ${operation} result: ${issues.join('. ')}.`
+        + (cleanupIssue === undefined ? '' : ` Cleanup also failed: ${cleanupIssue}`),
+    )
   }
 
   private async authenticationState(
     pack: HarnessPack,
     selectedMethod: string | undefined,
     driver: HarnessDriver | undefined,
-  ): Promise<{ status: 'not-required' | 'needs-selection' | 'needs-credentials' | 'configured'; missingFields: string[] }> {
+  ): Promise<{
+    status: 'unknown' | 'not-required' | 'needs-selection' | 'needs-credentials' | 'configured'
+    missingFields: string[]
+    detail: string
+  }> {
     const methods = pack.authMethods ?? []
-    if (methods.length === 0) return { status: 'not-required', missingFields: [] }
-    if (selectedMethod === undefined) return { status: 'needs-selection', missingFields: [] }
+    if (methods.length === 0) {
+      if (pack.authenticationDiscovery?.source === 'runtime') {
+        const install = this.state.installs[pack.id]
+        const installedVersion = [install?.active, ...(install?.previous ?? [])]
+          .some(candidate => candidate?.version === pack.version)
+        const discoveryCompleted = install?.authDiscoveries?.[pack.version] !== undefined
+        if (!installedVersion || driver?.discoverAuth === undefined || !discoveryCompleted) {
+          return {
+            status: 'unknown', missingFields: [],
+            detail: pack.authenticationDiscovery.detail,
+          }
+        }
+        return {
+          status: 'not-required', missingFields: [],
+          detail: 'The installed Harness completed authentication discovery and advertised no required sign-in method.',
+        }
+      }
+      return {
+        status: 'not-required', missingFields: [],
+        detail: pack.authenticationDiscovery?.detail ?? 'This Pack declares that no Harness-level sign-in is required.',
+      }
+    }
+    if (selectedMethod === undefined) {
+      return {
+        status: 'needs-selection', missingFields: [],
+        detail: 'Choose one of the authentication methods advertised by this Harness.',
+      }
+    }
     if (!methods.some(method => method.id === selectedMethod)) {
-      return { status: 'needs-selection', missingFields: [] }
+      return {
+        status: 'needs-selection', missingFields: [],
+        detail: 'The previously selected authentication method is no longer advertised by this Harness.',
+      }
     }
     const locations = {
       installationDirectory: join(this.installRoot, pack.id, pack.version),
       runtimeDirectory: join(this.runtimeRoot, pack.id, pack.version),
     }
-    const missingFields = await driver?.missingCredentials?.(pack, selectedMethod, locations) ?? []
-    return { status: missingFields.length === 0 ? 'configured' : 'needs-credentials', missingFields }
+    const method = methods.find(candidate => candidate.id === selectedMethod)
+    if (driver?.missingCredentials === undefined) {
+      if (method !== undefined && method.kind !== 'terminal'
+        && !method.fields.some(field => field.required)) {
+        return {
+          status: 'configured', missingFields: [],
+          detail: 'The selected protocol-owned authentication method has no Host credential fields.',
+        }
+      }
+      return {
+        status: 'unknown', missingFields: [],
+        detail: 'The loaded Harness Driver cannot prove whether the selected authentication method is ready.',
+      }
+    }
+    let rawMissing: unknown
+    try {
+      rawMissing = await driver.missingCredentials(pack, selectedMethod, locations)
+    } catch (error: unknown) {
+      return {
+        status: 'unknown', missingFields: [],
+        detail: safeHarnessDiagnostic(error, 'Harness credential-readiness inspection failed'),
+      }
+    }
+    const permittedRefs = new Set([
+      ...(method?.fields.map(field => field.ref) ?? []),
+      ...(method === undefined ? [] : [`auth-state:${method.id}`]),
+      ...(method?.kind === 'terminal' ? [`terminal-login:${method.id}`] : []),
+    ])
+    if (!Array.isArray(rawMissing)
+      || rawMissing.some(ref => typeof ref !== 'string' || !permittedRefs.has(ref))) {
+      return {
+        status: 'unknown', missingFields: [],
+        detail: 'The Harness Driver returned an invalid credential-readiness result.',
+      }
+    }
+    const missingFields = [...new Set(rawMissing as string[])]
+    const missingHarnessState = missingFields.some(ref => ref.startsWith('auth-state:') || ref.startsWith('terminal-login:'))
+    return missingFields.length === 0
+      ? { status: 'configured', missingFields, detail: 'The selected authentication method is ready on this Host.' }
+      : {
+        status: 'needs-credentials', missingFields,
+        detail: missingHarnessState
+          ? `Complete “${method?.name ?? selectedMethod}” sign-in on this Host.`
+          : 'Enter the required credentials for the selected authentication method.',
+      }
   }
 
   private async recordCompatibility(id: HarnessId, compatibility: NonNullable<StoredInstall['compatibility']>): Promise<void> {
@@ -2403,6 +2937,20 @@ export class HarnessService extends Service {
       }
       await this.saveState()
     })
+  }
+
+  /** Session success/failure must never be replaced by optional catalog bookkeeping failure. */
+  private async recordCompatibilityWithoutMasking(
+    id: HarnessId,
+    compatibility: NonNullable<StoredInstall['compatibility']>,
+  ): Promise<void> {
+    try {
+      await this.recordCompatibility(id, compatibility)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(
+        `Harness "${id}" compatibility state could not be persisted after a session lifecycle result: ${safeHarnessDiagnostic(error, 'state write failed')}`,
+      )
+    }
   }
 }
 
@@ -2447,12 +2995,14 @@ export function apply(ctx: Context, config: HarnessConfig): void {
       try {
         const raw = binding.driver?.runtimeSignals?.(event, binding.pack)
         if (Array.isArray(raw)) {
-          for (const candidate of raw as readonly unknown[]) {
+          for (const candidate of (raw as readonly unknown[]).slice(0, 64)) {
             if (typeof candidate !== 'object' || candidate === null) continue
             const signal = (candidate as { signal?: unknown }).signal
             const status = (candidate as { status?: unknown }).status
             if (typeof signal !== 'string' || typeof status !== 'string') continue
             const namespaced = signal.startsWith(`driver.${binding.pack.protocol}.`)
+              && signal.length <= 256
+              && /^[a-z0-9][a-z0-9._-]*$/u.test(signal)
             const builtin = [
               'protocol.ready', 'session.ready', 'turn.started', 'turn.completed', 'turn.failed',
               'model.completed', 'tool.activity', 'output.activity', 'approval.requested', 'approval.resolved',

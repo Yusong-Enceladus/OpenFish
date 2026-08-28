@@ -12,7 +12,7 @@ Harness 服务安装和运行 DSH、ACP 目录条目及自定义 Harness Pack，
 安装其固定版本 Runtime、发现认证方式，并通过 Host 的只写 API 把凭证存入用户 macOS 钥匙串。DSH 模型只显示
 已配置的提供方；外部 ACP Harness 的模型来自该实时会话的 ACP 配置。默认 Harness 可在设置中
 修改，已有任务则继续固定到创建它的 Harness 与 Pack 版本。“No Project”任务分别使用
-`$DSH_HOME/openfish/no-project/<session-id>` 会话专属目录，因此不会意外共享 Desktop 或临时 cwd。
+`$DSH_HOME/openfish/sessions/no-workspace/<session-id>` 会话专属目录，因此不会意外共享 Desktop 或临时 cwd。
 
 当前垂直切片实现了项目／任务导航、持久化会话加载、用户／assistant／工具事件的
 流式投影、模型选择、通过 `permissions` 投影与 `commands/execute` Remote 完成的

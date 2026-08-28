@@ -76,8 +76,14 @@ enum OpenFishDriverManager {
         let root = resources.appendingPathComponent("OpenFishHostRuntime", isDirectory: true)
         let node = root.appendingPathComponent("node/bin/node")
         let cli = root.appendingPathComponent("app/lib/bin.js")
+        let npm = root.appendingPathComponent("node/lib/node_modules/npm/bin/npm-cli.js")
+        let bun = root.appendingPathComponent("app/node_modules/bun/bin/bun.exe")
+        let uv = root.appendingPathComponent("uv/uv")
         guard FileManager.default.isExecutableFile(atPath: node.path),
-              FileManager.default.fileExists(atPath: cli.path) else { return nil }
+              FileManager.default.fileExists(atPath: cli.path),
+              FileManager.default.fileExists(atPath: npm.path),
+              FileManager.default.isExecutableFile(atPath: bun.path),
+              FileManager.default.isExecutableFile(atPath: uv.path) else { return nil }
         return Runtime(root: root, node: node, cli: cli)
     }
 
@@ -154,7 +160,7 @@ enum OpenFishHostRuntime {
     // Increment whenever the launcher-to-Host security contract changes. The
     // runtime bundle digest alone cannot retire a Host started by an older Mac
     // launcher when only the native launcher changed.
-    private static let launcherRuntimeVersion = "embedded-harness-runtime-v3-secure-remote"
+    private static let launcherRuntimeVersion = "embedded-harness-runtime-v5-upgrade-recovery"
 
     private struct RuntimeManifest: Decodable {
         let runtimeId: String
@@ -188,15 +194,26 @@ enum OpenFishHostRuntime {
     }
 
     private static var retiringProcessId: Int32?
+    private static let bootstrapRecheckLimit = 12
+    private static var bootstrapRechecksRemaining = bootstrapRecheckLimit
+    private static var bootstrapRecheckScheduled = false
 
     private static func embeddedRuntime() -> EmbeddedRuntime? {
         guard let resources = Bundle.main.resourceURL else { return nil }
         let root = resources.appendingPathComponent("OpenFishHostRuntime", isDirectory: true)
         let node = root.appendingPathComponent("node/bin/node")
         let host = root.appendingPathComponent("app/lib/bin.js")
+        let hostNpm = root.appendingPathComponent("app/node_modules/npm/bin/npm-cli.js")
+        let driverNpm = root.appendingPathComponent("node/lib/node_modules/npm/bin/npm-cli.js")
+        let bun = root.appendingPathComponent("app/node_modules/bun/bin/bun.exe")
+        let uv = root.appendingPathComponent("uv/uv")
         let manifest = root.appendingPathComponent("runtime.json")
         guard FileManager.default.isExecutableFile(atPath: node.path),
               FileManager.default.fileExists(atPath: host.path),
+              FileManager.default.fileExists(atPath: hostNpm.path),
+              FileManager.default.fileExists(atPath: driverNpm.path),
+              FileManager.default.isExecutableFile(atPath: bun.path),
+              FileManager.default.isExecutableFile(atPath: uv.path),
               let data = try? Data(contentsOf: manifest),
               let expected = try? JSONDecoder().decode(RuntimeManifest.self, from: data) else { return nil }
         return EmbeddedRuntime(
@@ -215,7 +232,17 @@ enum OpenFishHostRuntime {
         )
         let processToRetire: Int32?
         switch existing {
-        case .compatible(_), .unmanaged:
+        case .compatible(_):
+            bootstrapRechecksRemaining = bootstrapRecheckLimit
+            return
+        case .unmanaged:
+            // A verified Host that is still starting or retiring can briefly
+            // own the port without answering the identity handshake. Never
+            // signal an unverified process, but do not make an app upgrade
+            // depend on the user reopening OpenFish either. Recheck for a
+            // bounded window and remain fail-closed if the listener really is
+            // external.
+            scheduleBootstrapRecheck()
             return
         case .safeLocal(let pid):
             // A failed identity generation must never expose clear-text LAN
@@ -228,20 +255,16 @@ enum OpenFishHostRuntime {
         case .absent:
             processToRetire = nil
         }
+        bootstrapRechecksRemaining = bootstrapRecheckLimit
         if let pid = processToRetire {
-            guard kill(pid, SIGTERM) == 0 else { return }
-            var retired = false
-            for _ in 0..<20 {
-                if case .absent = localHostState(
-                    expectedRuntimeId: embedded.managedRuntimeId,
-                    expectedExecutable: embedded.node
-                ) {
-                    retired = true
-                    break
-                }
-                Thread.sleep(forTimeInterval: 0.05)
+            guard kill(pid, SIGTERM) == 0 else {
+                scheduleBootstrapRecheck()
+                return
             }
-            guard retired else { return }
+            retiringProcessId = pid
+            if process?.processIdentifier == pid { process = nil }
+            finishScheduledRestart(embedded: embedded, attemptsRemaining: 60)
+            return
         }
 
         let logs = FileManager.default.homeDirectoryForCurrentUser
@@ -306,6 +329,16 @@ enum OpenFishHostRuntime {
             process = child
         } catch {
             try? log.write(contentsOf: Data("Open Fish could not start its embedded Host: \(error)\n".utf8))
+        }
+    }
+
+    private static func scheduleBootstrapRecheck() {
+        guard bootstrapRechecksRemaining > 0, !bootstrapRecheckScheduled else { return }
+        bootstrapRechecksRemaining -= 1
+        bootstrapRecheckScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            bootstrapRecheckScheduled = false
+            bootstrapIfNeeded()
         }
     }
 

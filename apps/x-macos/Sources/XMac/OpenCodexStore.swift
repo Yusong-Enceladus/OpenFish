@@ -9,6 +9,13 @@ private struct OpenFishDemoHarnessCatalog: Decodable {
 
 private func isOpenFishCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
+    if let apiError = error as? DshApiError {
+        switch apiError {
+        case let .host(code, _): if code == "cancelled" { return true }
+        case let .transport(message): if message.localizedCaseInsensitiveContains("cancelled") { return true }
+        case .rpcIdMismatch: break
+        }
+    }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }
@@ -79,6 +86,7 @@ final class OpenCodexStore: ObservableObject {
     @Published private(set) var agentPresets: AgentPresetCatalog?
     @Published private(set) var harnesses: [HarnessCatalogEntry] = []
     @Published private(set) var harnessOperationId: String?
+    @Published private(set) var harnessOperationPhase: String?
     @Published private(set) var isLoadingHarnessCatalog = false
     @Published private(set) var harnessCatalogError: String?
     // The Host is authoritative across Mac and iPhone. A cached client value
@@ -108,9 +116,34 @@ final class OpenCodexStore: ObservableObject {
     @Published private(set) var directoryListing: HostDirectoryListing?
     @Published var pendingImages: [PendingPromptImage] = []
     @Published var composerMode = "queue"
-    @Published var activeSubagent: ActiveSubagent?
+    @Published var activeSubagent: ActiveSubagent? {
+        didSet {
+            guard hasBooted else { return }
+            let selection = activeSubagent
+            let parent = selectedSessionId
+            let liveConnection = connection
+            Task {
+                if let selection {
+                    await liveConnection.selectSession(
+                        selection.childSessionId,
+                        parentSessionId: selection.parentSessionId,
+                        mode: selection.mode
+                    )
+                } else {
+                    await liveConnection.selectSession(parent)
+                }
+            }
+        }
+    }
     @Published var selectedSessionId: String? {
-        didSet { if hasBooted { scheduleProjectionCache() } }
+        didSet {
+            guard hasBooted else { return }
+            scheduleProjectionCache()
+            guard activeSubagent == nil else { return }
+            let selected = selectedSessionId
+            let liveConnection = connection
+            Task { await liveConnection.selectSession(selected) }
+        }
     }
     @Published private(set) var draftSessionId: String?
     @Published var selectedWorkspaceId: String? {
@@ -140,8 +173,10 @@ final class OpenCodexStore: ObservableObject {
     private var syncTask: Task<Void, Never>?
     private var projectionCacheTask: Task<Void, Never>?
     private var draftPreparationTask: Task<Void, Never>?
+    private var harnessOperationCancellation: (() -> Void)?
     private var draftPreparationGeneration = 0
-    private var bufferedEnvelopes: [(DshDownlinkChannel, DshServerRequest)] = []
+    private var bufferedFeeds: [JSONValue] = []
+    private var remoteEventClientId: String?
     private var readTimestamps: [String: Double] = UserDefaults.standard
         .dictionary(forKey: "OpenFish.readTimestamps.mac")?
         .compactMapValues { ($0 as? NSNumber)?.doubleValue } ?? [:]
@@ -165,6 +200,55 @@ final class OpenCodexStore: ObservableObject {
             bearerToken: profile.bearerToken,
             tlsFingerprint: profile.tlsFingerprint
         )
+    }
+
+    func cancelHarnessOperation() {
+        guard let cancel = harnessOperationCancellation else { return }
+        harnessOperationPhase = "Cancelling safely…"
+        cancel()
+    }
+
+    var canCancelHarnessOperation: Bool { harnessOperationCancellation != nil }
+
+    private func runHarnessOperationStep<Value: Sendable>(
+        _ phase: String,
+        pollInstallationFor harnessId: String? = nil,
+        cancellable: Bool = true,
+        operation: @escaping @MainActor () async throws -> Value
+    ) async throws -> Value {
+        harnessOperationPhase = phase
+        let poller: Task<Void, Never>? = harnessId.map { id in
+            Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled, let self else { return }
+                    guard let rows = try? await self.api.harnesses(),
+                          let detail = rows.first(where: { $0.id == id })?.installation.operationDetail else { continue }
+                    self.harnessOperationPhase = detail
+                }
+            }
+        }
+        let task = Task { @MainActor in try await operation() }
+        harnessOperationCancellation = cancellable ? { task.cancel() } : nil
+        defer {
+            poller?.cancel()
+            harnessOperationCancellation = nil
+        }
+        return try await task.value
+    }
+
+    private func livePreflightIfNeeded(_ harness: HarnessCatalogEntry) async throws -> HarnessCatalogEntry {
+        if harness.compatibility.status == "compatible" { return harness }
+        let rows = try await runHarnessOperationStep(
+            "Checking \(harness.name) against its live protocol…"
+        ) {
+            try await self.api.mutateHarness(action: "probe", id: harness.id)
+        }
+        harnesses = rows
+        guard let verified = rows.first(where: { $0.id == harness.id }) else {
+            throw DshApiError.host("harness-missing-after-preflight", "The checked Harness disappeared from the Host catalog.")
+        }
+        return verified
     }
 
     /// Deterministic, network-isolated state for screenshots and product demos.
@@ -241,6 +325,7 @@ final class OpenCodexStore: ObservableObject {
         ]
         store.recordsBySession["session-live"] = visualFixtureRecords(now: now)
         store.pendingApprovals["approval-visual"] = PendingApproval(
+            clientId: "demo",
             rpcId: "approval-rpc-visual",
             sessionId: "session-live",
             approvalId: "approval-visual",
@@ -535,7 +620,9 @@ final class OpenCodexStore: ObservableObject {
 
     var currentModelName: String {
         guard let models = sessionModels else {
-            return hostDescription?.model ?? "Default model"
+            if isLoadingSessionModels { return "Discovering models…" }
+            if sessionModelsError != nil { return "Models unavailable" }
+            return "Model not discovered"
         }
         for group in models.groups {
             if group.id == models.current.provider,
@@ -574,6 +661,14 @@ final class OpenCodexStore: ObservableObject {
     var currentReasoningName: String? {
         guard let effort = sessionModels?.current.reasoningEffort else { return nil }
         return currentReasoningOptions.first(where: { $0.id == effort })?.name ?? effort
+    }
+
+    var currentReasoningLabel: String {
+        if let currentReasoningName { return currentReasoningName }
+        if isLoadingSessionModels, sessionModels == nil { return "Discovering reasoning…" }
+        if sessionModelsError != nil { return "Reasoning unavailable" }
+        if sessionModels == nil { return "Reasoning not discovered" }
+        return currentReasoningOptions.isEmpty ? "Reasoning fixed by Harness" : "Reasoning"
     }
 
     var canAttachImages: Bool { harnessCan("interaction.files") }
@@ -697,6 +792,7 @@ final class OpenCodexStore: ObservableObject {
                 await self.handle(update)
             }
         }
+        await connection.selectSession(selectedSessionId)
         await connection.start()
         // Baseline synchronization starts from the connected event. Starting it
         // here races the embedded Host's HTTP listener during a cold launch.
@@ -722,6 +818,7 @@ final class OpenCodexStore: ObservableObject {
             let trimmedCode = pairingCode?.trimmingCharacters(in: .whitespacesAndNewlines)
             let token: String?
             let tlsFingerprint: String?
+            var persistentURL = baseURL
             if let trimmedCode, !trimmedCode.isEmpty {
                 let bootstrap = DshBootstrapClient(baseURL: baseURL, permitsBootstrapTrust: true)
                 let result = try await bootstrap.pair(
@@ -730,6 +827,13 @@ final class OpenCodexStore: ObservableObject {
                 )
                 token = result.receipt.token
                 tlsFingerprint = result.tlsFingerprint
+                if let advertised = result.receipt.hostURL {
+                    guard let canonical = NativeConnectionProfile.normalizedURL(advertised),
+                          canonical.scheme == "https" else {
+                        throw NativeCredentialError.incompleteRemoteAuthorization
+                    }
+                    persistentURL = canonical
+                }
             } else if baseURL == NativeConnectionProfile.local.baseURL {
                 token = nil
                 tlsFingerprint = nil
@@ -738,11 +842,14 @@ final class OpenCodexStore: ObservableObject {
                 tlsFingerprint = NativeCredentialStore.fingerprint(for: baseURL)
             }
             let profile = NativeConnectionProfile(
-                baseURL: baseURL,
+                baseURL: persistentURL,
                 bearerToken: token,
                 tlsFingerprint: tlsFingerprint
             )
             try profile.persist()
+            if persistentURL != baseURL {
+                NativeCredentialStore.removeAuthorization(for: baseURL)
+            }
             await reconfigure(profile)
             errorBanner = nil
         } catch {
@@ -810,7 +917,8 @@ final class OpenCodexStore: ObservableObject {
         hostIssue = nil
         hasBaseline = false
         isSynchronizingBaseline = true
-        bufferedEnvelopes.removeAll(keepingCapacity: false)
+        bufferedFeeds.removeAll(keepingCapacity: false)
+        remoteEventClientId = nil
         purgeHostProjection()
         isLoadingSessionModels = false
         if let cached = await projectionCache.load(matching: profile.baseURL) {
@@ -1140,6 +1248,11 @@ final class OpenCodexStore: ObservableObject {
             guard receipt.accepted else {
                 throw DshApiError.host("approval-\(receipt.reason ?? "rejected")", "This approval is no longer pending.")
             }
+            // The successful RPC receipt is authoritative for this client.
+            // A later cancellation/resolution feed is useful for other
+            // clients, but it is not guaranteed to race back to the answering
+            // connection before the tool and turn complete.
+            pendingApprovals[approval.approvalId] = nil
             errorBanner = nil
         } catch {
             errorBanner = "Could not answer the approval: \(error)"
@@ -1324,7 +1437,12 @@ final class OpenCodexStore: ObservableObject {
     ) async {
         guard harnessOperationId == nil else { return }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) and its Driver…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let current = try await prepareHarnessDriverIfNeeded(
                 harness,
@@ -1337,16 +1455,23 @@ final class OpenCodexStore: ObservableObject {
                 )
             }
             if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(
-                    action: "install", id: harness.id,
-                    acceptUnverified: acceptUnverified ? true : nil
-                )
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version)…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.mutateHarness(
+                        action: "install", id: harness.id,
+                        acceptUnverified: acceptUnverified ? true : nil
+                    )
+                }
             }
-            let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
+            var configured = harnesses.first(where: { $0.id == harness.id }) ?? current
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
                 errorBanner = "Choose and complete a sign-in method for \(harness.name), then select it again."
                 return
             }
+            configured = try await livePreflightIfNeeded(configured)
+            harnessOperationPhase = "Preparing a task pinned to \(configured.name) \(configured.version)…"
             draftPreparationTask?.cancel()
             draftPreparationGeneration += 1
             if let abandonedDraft = draftSessionId { try? await api.discardSession(abandonedDraft) }
@@ -1363,7 +1488,9 @@ final class OpenCodexStore: ObservableObject {
             }
             errorBanner = nil
         } catch {
-            errorBanner = "Could not use \(harness.name) for this task: \(error)"
+            errorBanner = isOpenFishCancellation(error)
+                ? nil : "Could not use \(harness.name) for this task: \(error)"
+            harnesses = (try? await api.harnesses()) ?? harnesses
         }
     }
 
@@ -1375,7 +1502,12 @@ final class OpenCodexStore: ObservableObject {
     ) async {
         guard harnessOperationId == nil else { return }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) and its Driver…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let current = try await prepareHarnessDriverIfNeeded(
                 harness,
@@ -1388,12 +1520,17 @@ final class OpenCodexStore: ObservableObject {
                 )
             }
             if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(
-                    action: "install", id: harness.id,
-                    acceptUnverified: acceptUnverified ? true : nil
-                )
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version)…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.mutateHarness(
+                        action: "install", id: harness.id,
+                        acceptUnverified: acceptUnverified ? true : nil
+                    )
+                }
             }
-            let configured = harnesses.first(where: { $0.id == harness.id }) ?? harness
+            var configured = harnesses.first(where: { $0.id == harness.id }) ?? current
             guard configured.auth.status == "not-required" || configured.auth.status == "configured" else {
                 // Installation may have discovered authentication methods that
                 // were absent from the Registry summary. Let the refreshed
@@ -1402,7 +1539,13 @@ final class OpenCodexStore: ObservableObject {
                 errorBanner = nil
                 return
             }
-            harnesses = try await api.mutateHarness(action: "default", id: harness.id)
+            configured = try await livePreflightIfNeeded(configured)
+            harnesses = try await runHarnessOperationStep(
+                "Saving \(configured.name) as the default Harness…",
+                cancellable: false
+            ) {
+                try await self.api.mutateHarness(action: "default", id: configured.id)
+            }
             selectedHarnessId = harness.id
             UserDefaults.standard.set(harness.id, forKey: "OpenFish.defaultHarnessId")
             if completesOnboarding {
@@ -1411,7 +1554,9 @@ final class OpenCodexStore: ObservableObject {
             if selectedSessionId == nil { beginNewTask(in: selectedWorkspaceId) }
             errorBanner = nil
         } catch {
-            errorBanner = "Could not make \(harness.name) the default Harness: \(error)"
+            errorBanner = isOpenFishCancellation(error)
+                ? nil : "Could not make \(harness.name) the default Harness: \(error)"
+            harnesses = (try? await api.harnesses()) ?? harnesses
         }
     }
 
@@ -1471,7 +1616,12 @@ final class OpenCodexStore: ObservableObject {
     ) async -> Bool {
         guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) and its Driver…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let operationHarness: HarnessCatalogEntry
             if action == "rollback", let previousVersion = harness.installation.previousVersions.first {
@@ -1488,21 +1638,46 @@ final class OpenCodexStore: ObservableObject {
                     operationHarness,
                     acceptCodeExecution: acceptDriverBundle
                 )
-                guard prepared.available else {
+                let repairsAuthenticationDiscovery = action == "install"
+                    && prepared.installation.status == "installed"
+                    && prepared.auth.status == "unknown"
+                    && prepared.driver.loaded
+                    && prepared.driver.authorization != "required"
+                    && prepared.unavailableReason == prepared.auth.detail
+                guard prepared.available || repairsAuthenticationDiscovery else {
                     throw DshApiError.host(
                         "harness-unavailable",
                         prepared.unavailableReason ?? "This Harness is not available on this Mac."
                     )
                 }
             }
-            harnesses = try await api.mutateHarness(
-                action: action, id: harness.id, authMethod: authMethod,
-                acceptUnverified: acceptUnverified ? true : nil
-            )
+            let phase: String
+            switch action {
+            case "install": phase = "Installing exact \(operationHarness.name) \(operationHarness.version)…"
+            case "update": phase = "Updating \(operationHarness.name) to \(operationHarness.version)…"
+            case "rollback": phase = "Restoring \(operationHarness.name) \(operationHarness.version)…"
+            case "probe": phase = "Checking \(operationHarness.name) against its live protocol…"
+            case "default": phase = "Saving \(operationHarness.name) as the default Harness…"
+            case "auth", "login": phase = "Confirming \(operationHarness.name) authentication…"
+            case "uninstall": phase = "Removing the installed \(operationHarness.name) runtime…"
+            case "remove": phase = "Removing the local \(operationHarness.name) Pack…"
+            default: phase = "Applying \(action) to \(operationHarness.name)…"
+            }
+            harnesses = try await runHarnessOperationStep(
+                phase,
+                pollInstallationFor: ["install", "update"].contains(action) ? harness.id : nil,
+                cancellable: ["install", "update", "probe"].contains(action)
+            ) {
+                try await self.api.mutateHarness(
+                    action: action, id: harness.id, authMethod: authMethod,
+                    acceptUnverified: acceptUnverified ? true : nil
+                )
+            }
             errorBanner = nil
             return true
         } catch {
-            errorBanner = "Could not \(action) \(harness.name): \(error)"
+            errorBanner = isOpenFishCancellation(error)
+                ? nil : "Could not \(action) \(harness.name): \(error)"
             harnesses = (try? await api.harnesses()) ?? harnesses
             return false
         }
@@ -1535,7 +1710,12 @@ final class OpenCodexStore: ObservableObject {
     ) async -> Bool {
         guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) and its Driver…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let prepared = try await prepareHarnessDriverIfNeeded(
                 harness,
@@ -1618,24 +1798,41 @@ final class OpenCodexStore: ObservableObject {
     ) async -> Bool {
         guard harnessOperationId == nil else { return false }
         harnessOperationId = harness.id
-        defer { harnessOperationId = nil }
+        harnessOperationPhase = "Checking \(harness.name) and its Driver…"
+        defer {
+            harnessOperationId = nil
+            harnessOperationPhase = nil
+            harnessOperationCancellation = nil
+        }
         do {
             let current = try await prepareHarnessDriverIfNeeded(
                 harness,
                 acceptCodeExecution: acceptDriverBundle
             )
-            guard current.available else {
+            let repairsAuthenticationDiscovery = current.installation.status == "installed"
+                && current.auth.status == "unknown"
+                && current.driver.loaded
+                && current.driver.authorization != "required"
+                && current.unavailableReason == current.auth.detail
+            guard current.available || repairsAuthenticationDiscovery else {
                 throw DshApiError.host(
                     "harness-unavailable",
                     current.unavailableReason ?? "This Harness is not available on this Mac."
                 )
             }
-            if current.installation.status != "builtin" && current.installation.status != "installed" {
-                harnesses = try await api.mutateHarness(
-                    action: "install", id: harness.id,
-                    acceptUnverified: acceptUnverified ? true : nil
-                )
+            if current.installation.status != "builtin"
+                && (current.installation.status != "installed" || repairsAuthenticationDiscovery) {
+                harnesses = try await runHarnessOperationStep(
+                    "Installing exact \(harness.name) \(harness.version)…",
+                    pollInstallationFor: harness.id
+                ) {
+                    try await self.api.mutateHarness(
+                        action: "install", id: harness.id,
+                        acceptUnverified: acceptUnverified ? true : nil
+                    )
+                }
             }
+            harnessOperationPhase = "Saving \(method.name) credentials in the Host credential store…"
             for field in method.fields {
                 if let value = credentials[field.ref], !value.isEmpty {
                     try await api.setCredential(ref: field.ref, value: value)
@@ -1643,16 +1840,39 @@ final class OpenCodexStore: ObservableObject {
                     throw DshApiError.host("credential-required", "\(field.name) is required.")
                 }
             }
-            harnesses = try await api.mutateHarness(
-                action: method.kind == "terminal" ? "login" : "auth",
-                id: harness.id,
-                authMethod: method.id
-            )
-            guard let configured = harnesses.first(where: { $0.id == harness.id }), configured.auth.status == "configured" else {
+            let authAction = method.kind == "terminal" ? "login" : "auth"
+            harnessOperationPhase = method.kind == "terminal"
+                ? "Complete \(method.name) in the OpenFish-managed Terminal window…"
+                : "Confirming \(method.name)…"
+            if method.kind == "terminal" {
+                // The Host owns the managed Terminal process. The client must
+                // not advertise cancellation after that external UI has been
+                // handed off because killing the request would not prove the
+                // login process itself stopped.
+                harnesses = try await api.mutateHarness(
+                    action: authAction, id: harness.id, authMethod: method.id
+                )
+            } else {
+                harnesses = try await runHarnessOperationStep(
+                    "Confirming \(method.name)…",
+                    cancellable: false
+                ) {
+                    try await self.api.mutateHarness(
+                        action: authAction, id: harness.id, authMethod: method.id
+                    )
+                }
+            }
+            guard var configured = harnesses.first(where: { $0.id == harness.id }), configured.auth.status == "configured" else {
                 throw DshApiError.host("credential-unavailable", "The Host could not resolve all required credentials for \(harness.name).")
             }
+            configured = try await livePreflightIfNeeded(configured)
             if makeDefault {
-                harnesses = try await api.mutateHarness(action: "default", id: harness.id)
+                harnesses = try await runHarnessOperationStep(
+                    "Saving \(configured.name) as the default Harness…",
+                    cancellable: false
+                ) {
+                    try await self.api.mutateHarness(action: "default", id: configured.id)
+                }
                 selectedHarnessId = harness.id
                 UserDefaults.standard.set(harness.id, forKey: "OpenFish.defaultHarnessId")
                 if completesOnboarding { needsHarnessOnboarding = false }
@@ -1661,7 +1881,8 @@ final class OpenCodexStore: ObservableObject {
             errorBanner = nil
             return true
         } catch {
-            errorBanner = "Could not configure \(harness.name): \(error)"
+            errorBanner = isOpenFishCancellation(error)
+                ? nil : "Could not configure \(harness.name): \(error)"
             harnesses = (try? await api.harnesses()) ?? harnesses
             return false
         }
@@ -1805,6 +2026,7 @@ final class OpenCodexStore: ObservableObject {
         authMethodId: String, authMethodName: String, authKind: String,
         authFieldRef: String, authFieldName: String, authFieldEnv: String,
         authAccountLabel: String, authBilling: String, authAccountDetail: String,
+        discoverAuthenticationAtRuntime: Bool,
         agentAuthMetaKey: String, agentAuthFieldProperty: String,
         modelOwner: String, modelConfigurationRequired: Bool, modelConfigurationDetail: String,
         terminalAuthArguments: String, terminalAuthEnvironment: String,
@@ -1950,6 +2172,12 @@ final class OpenCodexStore: ObservableObject {
         if !license.isEmpty { packObject["license"] = .string(license) }
         if !repository.isEmpty { packObject["repository"] = .string(repository) }
         if let icon = existingPack?.icon { packObject["icon"] = .string(icon) }
+        packObject["authenticationDiscovery"] = .object([
+            "source": .string(discoverAuthenticationAtRuntime ? "runtime" : "pack"),
+            "detail": .string(discoverAuthenticationAtRuntime
+                ? "The installed Driver discovers the actual sign-in methods before this Harness can be selected."
+                : "This Pack declares the complete sign-in contract; an empty method list means no sign-in is required."),
+        ])
         if !driverPackage.isEmpty || !driverSpec.isEmpty {
             packObject["driverBundle"] = .object([
                 "apiVersion": .number(1), "package": .string(driverPackage), "spec": .string(driverSpec),
@@ -2865,10 +3093,28 @@ final class OpenCodexStore: ObservableObject {
             members = workspace.sessionIds.compactMap { byId[$0] }.sorted(by: sessionRecency)
         } else {
             let accounted = Set(workspaces.flatMap(\.sessionIds))
-            members = visible.filter { !accounted.contains($0.sessionId) }
+            members = visible.filter {
+                !accounted.contains($0.sessionId) && $0.workspaceMode == "no-project"
+            }
                 .sorted(by: sessionRecency)
         }
 
+        return filterVisibleSessions(members)
+    }
+
+    var otherLocationSessions: [SessionSummary] {
+        let accounted = Set(workspaces.flatMap(\.sessionIds))
+        let members = sessions.filter {
+            $0.origin != "subagent"
+                && !$0.blank
+                && !archivedSessionIds.contains($0.sessionId)
+                && !accounted.contains($0.sessionId)
+                && $0.workspaceMode != "no-project"
+        }.sorted(by: sessionRecency)
+        return filterVisibleSessions(members)
+    }
+
+    private func filterVisibleSessions(_ members: [SessionSummary]) -> [SessionSummary] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return members }
         let remoteMatches = Set(searchResults.map(\.sessionId))
@@ -2897,7 +3143,7 @@ final class OpenCodexStore: ObservableObject {
     }
 
     var visibleSessionsByRecency: [SessionSummary] {
-        (orderedWorkspaces.flatMap { sessions(in: $0) } + sessions(in: nil))
+        (orderedWorkspaces.flatMap { sessions(in: $0) } + sessions(in: nil) + otherLocationSessions)
             .reduce(into: [String: SessionSummary]()) { $0[$1.sessionId] = $1 }
             .values.sorted(by: sessionRecency)
     }
@@ -2919,7 +3165,15 @@ final class OpenCodexStore: ObservableObject {
     }
 
     func workspaceTitle(for session: SessionSummary) -> String {
-        workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title ?? "No Project"
+        if let title = workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title {
+            return title
+        }
+        if session.workspaceMode == "no-project" { return "No Project" }
+        if let cwd = session.cwd {
+            let base = cwd.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init)
+            if let base, !base.isEmpty { return "External · \(base)" }
+        }
+        return "Unfiled"
     }
 
     func displayTitle(for session: SessionSummary) -> String {
@@ -3144,7 +3398,7 @@ final class OpenCodexStore: ObservableObject {
                   composition.host == "dsh",
                   composition.surface == "native",
                   composition.protocolVersion == "v2",
-                  composition.features.apiProxy,
+                  composition.features.gateway,
                   composition.features.typert,
                   composition.contracts.sessions,
                   composition.contracts.workspaces,
@@ -3435,31 +3689,252 @@ final class OpenCodexStore: ObservableObject {
                     await self?.synchronizeBaseline(selectInitialSession: selectInitialSession)
                 }
             }
-        case let .envelope(channel, envelope):
+        case let .feed(frame):
             guard !isSynchronizingBaseline else {
-                bufferedEnvelopes.append((channel, envelope))
+                bufferedFeeds.append(frame)
                 return
             }
-            applyEnvelope(channel, envelope)
+            handleFeed(frame)
         }
         scheduleProjectionCache()
     }
 
     private func finishBaselineSynchronization() {
         isSynchronizingBaseline = false
-        let pending = bufferedEnvelopes
-        bufferedEnvelopes.removeAll(keepingCapacity: true)
-        for (channel, envelope) in pending {
-            applyEnvelope(channel, envelope)
-        }
+        let pending = bufferedFeeds
+        bufferedFeeds.removeAll(keepingCapacity: true)
+        for frame in pending { handleFeed(frame) }
         scheduleProjectionCache()
     }
 
-    private func applyEnvelope(_ channel: DshDownlinkChannel, _ envelope: DshServerRequest) {
+    private func handleFeed(_ frame: JSONValue) {
+        guard let channel = frame["channel"]?.stringValue,
+              let value = frame["value"] else { return }
         switch channel {
-        case .host: handleHost(envelope)
-        case .mux: handleMux(envelope)
+        case "remote-events": handleRemoteEvents(value)
+        case "workspace": handleWorkspaceFeed(value)
+        case "control": handleControlFeed(value)
+        case "session":
+            guard let sessionId = frame["sessionId"]?.stringValue else { return }
+            handleSessionFeed(value, sessionId: sessionId)
+        default: break
         }
+    }
+
+    private func handleRemoteEvents(_ frame: JSONValue) {
+        switch frame["type"]?.stringValue {
+        case "ready":
+            remoteEventClientId = frame["clientId"]?.stringValue
+            pendingApprovals.removeAll(keepingCapacity: true)
+            pendingQuestions.removeAll(keepingCapacity: true)
+        case "emit":
+            guard let event = frame["event"]?.stringValue else { return }
+            let args = frame["args"]?.arrayValue ?? []
+            switch event {
+            case "api-session/added":
+                guard let summaryValue = args.first,
+                      let summary = try? summaryValue.decode(SessionSummary.self) else { return }
+                if let index = sessions.firstIndex(where: { $0.sessionId == summary.sessionId }) {
+                    sessions[index] = summary
+                } else {
+                    sessions.append(summary)
+                }
+            case "api-session/removed":
+                guard let id = args.first?.stringValue else { return }
+                removeSessionProjection(id)
+            case "api-session/status":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      let running = args[1].boolValue,
+                      let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
+                let wasRunning = sessions[index].running
+                sessions[index].running = running
+                if running { sessions[index].blank = false }
+                sessions[index].updatedAt = Date().timeIntervalSince1970 * 1_000
+                updateIdleGuard()
+                if wasRunning && !running && !NSApplication.shared.isActive {
+                    let title = displayTitle(for: sessions[index])
+                    Task { await notifications.post(title: title, body: "Task finished", sessionId: id) }
+                }
+            case "api-session/activity":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      let updatedAt = args[1].doubleValue,
+                      let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
+                sessions[index].updatedAt = updatedAt
+                sessions[index].blank = false
+            case "api-session/error":
+                guard args.count >= 2,
+                      let id = args[0].stringValue,
+                      let message = args[1].stringValue else { return }
+                if id == selectedSessionId { errorBanner = message }
+                if id == voiceConversationSessionId { voiceConversationStatus = "Task failed" }
+            case "agent-preset/selected", "commands/change", "credentials/reference-updated",
+                 "llm/adapters-updated", "settings/document-updated":
+                Task { await refreshLiveCatalogs(after: event) }
+            default: break
+            }
+        case "waterfall":
+            guard let clientId = remoteEventClientId,
+                  let event = frame["event"]?.stringValue,
+                  let eventId = frame["eventId"]?.stringValue,
+                  let sessionId = frame["agentId"]?.stringValue,
+                  let request = frame["request"] else { return }
+            switch event {
+            case "approval/request":
+                guard let toolName = request["toolName"]?.stringValue else { return }
+                pendingApprovals[eventId] = PendingApproval(
+                    clientId: clientId,
+                    rpcId: eventId,
+                    sessionId: sessionId,
+                    approvalId: eventId,
+                    toolName: toolName,
+                    callId: request["callId"]?.stringValue,
+                    reason: request["reason"]?.stringValue
+                )
+                if sessionId == voiceConversationSessionId {
+                    voiceConversationStatus = "Approval required"
+                    voice.stopSpeaking()
+                }
+                if !NSApplication.shared.isActive {
+                    Task { await notifications.post(title: "OpenFish needs approval", body: toolName, sessionId: sessionId) }
+                }
+            case "user-questions/request":
+                let questions = (try? request["questions"]?.decode([QuestionItem].self)) ?? []
+                pendingQuestions[eventId] = PendingQuestion(
+                    clientId: clientId,
+                    rpcId: eventId,
+                    sessionId: sessionId,
+                    questions: questions
+                )
+                if sessionId == voiceConversationSessionId {
+                    voiceConversationStatus = "Answer required"
+                    voice.stopSpeaking()
+                }
+                if !NSApplication.shared.isActive {
+                    Task {
+                        await notifications.post(
+                            title: "OpenFish has a question",
+                            body: questions.first?.question ?? "Input is required to continue.",
+                            sessionId: sessionId
+                        )
+                    }
+                }
+            default: break
+            }
+        case "cancel":
+            guard let eventId = frame["eventId"]?.stringValue else { return }
+            pendingApprovals[eventId] = nil
+            pendingQuestions[eventId] = nil
+        default: break
+        }
+    }
+
+    private func refreshLiveCatalogs(after event: String) async {
+        switch event {
+        case "agent-preset/selected": agentPresets = try? await api.agentPresets()
+        case "commands/change":
+            if let sessionId = controlSessionId { commands = (try? await api.commandDirectory(sessionId: sessionId)) ?? [] }
+        case "llm/adapters-updated": hostModels = (try? await api.hostModels()) ?? hostModels
+        case "settings/document-updated": settingsCatalog = try? await api.settings()
+        case "credentials/reference-updated": providers = (try? await api.configurableProviders()) ?? providers
+        default: break
+        }
+    }
+
+    private func handleWorkspaceFeed(_ frame: JSONValue) {
+        switch frame["type"]?.stringValue {
+        case "baseline":
+            guard let value = frame["value"], let baseline = try? value.decode(WorkspaceList.self) else { return }
+            workspaces = baseline.items
+            archivedSessionIds = Set(baseline.archivedSessionIds)
+        case "upsert":
+            guard let value = frame["workspace"], let workspace = try? value.decode(WorkspaceView.self) else { return }
+            upsert(workspace)
+        case "remove":
+            guard let id = frame["workspaceId"]?.stringValue else { return }
+            workspaces.removeAll { $0.workspaceId == id }
+            if selectedWorkspaceId == id { selectedWorkspaceId = nil }
+        case "order":
+            guard let ids = frame["workspaceIds"]?.arrayValue?.compactMap(\.stringValue) else { return }
+            let byId = workspaces.reduce(into: [String: WorkspaceView]()) { $0[$1.workspaceId] = $1 }
+            workspaces = ids.compactMap { byId[$0] }
+        case "archived":
+            archivedSessionIds = Set(frame["archivedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        default: break
+        }
+    }
+
+    private func handleControlFeed(_ frame: JSONValue) {
+        switch frame["type"]?.stringValue {
+        case "baseline":
+            guard let value = frame["value"] else { return }
+            queuedItems = (value["queues"]?.objectValue ?? [:]).mapValues {
+                $0.arrayValue?.compactMap(QueuedInboxItem.init(json:)) ?? []
+            }
+            backgroundJobs = (value["jobs"]?.objectValue ?? [:]).mapValues {
+                $0.arrayValue?.compactMap(BackgroundJob.init(json:)) ?? []
+            }
+            for (sessionId, blockValue) in value["projections"]?.objectValue ?? [:] {
+                if let block = try? blockValue.decode(SessionProjectionsBlock.self) {
+                    seedProjections(sessionId: sessionId, block: block)
+                }
+            }
+        case "queue":
+            guard let sessionId = frame["sessionId"]?.stringValue else { return }
+            queuedItems[sessionId] = frame["items"]?.arrayValue?.compactMap(QueuedInboxItem.init(json:)) ?? []
+        case "jobs":
+            guard let sessionId = frame["sessionId"]?.stringValue else { return }
+            backgroundJobs[sessionId] = frame["jobs"]?.arrayValue?.compactMap(BackgroundJob.init(json:)) ?? []
+        case "projection":
+            guard let sessionId = frame["sessionId"]?.stringValue,
+                  let key = frame["key"]?.stringValue,
+                  let value = frame["value"],
+                  let seq = frame["seq"]?.intValue else { return }
+            applyProjection(sessionId: sessionId, key: key, value: value, seq: seq)
+        default: break
+        }
+    }
+
+    private func handleSessionFeed(_ frame: JSONValue, sessionId: String) {
+        switch frame["type"]?.stringValue {
+        case "snapshot":
+            let incoming = frame["events"]?.arrayValue?.compactMap { entry -> SessionEventRecord? in
+                guard let value = entry["event"], let event = try? value.decode(SessionEvent.self) else { return nil }
+                return SessionEventRecord(event: event, view: nil)
+            } ?? []
+            recordsBySession[sessionId] = mergeRecords(incoming, recordsBySession[sessionId] ?? [])
+            historyHasMoreBySession[sessionId] = frame["hasMore"]?.boolValue ?? false
+            if let projections = frame["projections"],
+               let block = try? projections.decode(SessionProjectionsBlock.self) {
+                seedProjections(sessionId: sessionId, block: block)
+            }
+        case "event":
+            guard let value = frame["event"], let event = try? value.decode(SessionEvent.self) else { return }
+            recordsBySession[sessionId] = mergeRecords(
+                recordsBySession[sessionId] ?? [],
+                [SessionEventRecord(event: event, view: nil)]
+            )
+            if let index = sessions.firstIndex(where: { $0.sessionId == sessionId }) {
+                sessions[index].updatedAt = event.time
+                if event.type == "turn/start" || event.type == "user/message" { sessions[index].blank = false }
+            }
+            if event.type == "turn/end" { finishVoiceTurn(sessionId: sessionId, endSeq: event.seq) }
+        default: return
+        }
+        objectWillChange.send()
+    }
+
+    private func removeSessionProjection(_ id: String) {
+        sessions.removeAll { $0.sessionId == id }
+        recordsBySession[id] = nil
+        historyHasMoreBySession[id] = nil
+        projectionsBySession[id] = nil
+        pendingApprovals = pendingApprovals.filter { $0.value.sessionId != id }
+        pendingQuestions = pendingQuestions.filter { $0.value.sessionId != id }
+        queuedItems[id] = nil
+        backgroundJobs[id] = nil
+        if selectedSessionId == id { beginNewTask(in: selectedWorkspaceId) }
     }
 
     private func handleHost(_ envelope: DshServerRequest) {
@@ -3562,6 +4037,7 @@ final class OpenCodexStore: ObservableObject {
                   let approvalId = frame["approvalId"]?.stringValue,
                   let toolName = frame["toolName"]?.stringValue else { return }
             pendingApprovals[approvalId] = PendingApproval(
+                clientId: remoteEventClientId ?? "",
                 rpcId: envelope.rpcId,
                 sessionId: sessionId,
                 approvalId: approvalId,
@@ -3590,6 +4066,7 @@ final class OpenCodexStore: ObservableObject {
                   let values = frame["questions"] else { return }
             let questions = (try? values.decode([QuestionItem].self)) ?? []
             pendingQuestions[envelope.rpcId] = PendingQuestion(
+                clientId: remoteEventClientId ?? "",
                 rpcId: envelope.rpcId,
                 sessionId: sessionId,
                 questions: questions
@@ -3711,6 +4188,8 @@ final class OpenCodexStore: ObservableObject {
     /// useful during an ordinary outage, but it must not remain readable after
     /// that Host explicitly removes this device's authorization.
     private func purgeHostProjection() {
+        remoteEventClientId = nil
+        bufferedFeeds.removeAll(keepingCapacity: false)
         workspaces = []
         sessions = []
         archivedSessionIds = []

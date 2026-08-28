@@ -10,6 +10,17 @@ OpenFish needs a full Mac and iPhone redesign, but earlier visual changes were m
 
 This dated reference records the current primary-source comparison and the baseline product audit captured on 2026-08-22. It is subordinate to the complete [product completion contract](2026-08-22-openfish-product-completion-contract.md); it does not narrow that contract.
 
+## 2026-08-28 ecosystem refresh
+
+- The official Codex stable release is `0.150.1`; its documented `app-server` remains the interface used by rich Codex clients. OpenFish therefore keeps the stable official app-server lane pinned to `0.150.1` rather than following `0.151.0-alpha.*` prereleases.
+- The official ACP Registry now contains many independently versioned agents and refreshes release metadata hourly. It is the generic discovery plane, not a hand-maintained OpenFish shortlist and not a security endorsement.
+- `pi-acp` is present in that Registry at `0.0.33` and wraps the separate Pi coding agent. Pi itself is now published from `earendil-works/pi` with stable `0.84.3`, including session-scoped model/thinking controls. OpenFish exposes Pi through the generic ACP lane instead of adding native Pi UI.
+- Oh My Pi stable `18.0.9` continues to expose a direct ACP mode and a broader provider/model/auth surface. It remains the curated Pi-family release baseline because that richer direct integration is materially different from the Registry adapter; this is a support decision, not a claim that OMP produces better coding results.
+- OpenCode `1.18.25` is distributed in the ACP Registry as checksum-pinned native binaries for supported platforms. It is a useful proof that Registry ingestion must preserve platform artifacts and integrity facts without product-specific UI.
+- The same live Registry now advertises `codex-acp` `1.7.0`, Gemini CLI `0.57.0`, and Harn `0.10.119`. `codex-acp` demonstrates that an ACP adapter can expose rich Codex model, reasoning, approval, and authentication controls, while Harn demonstrates a graph-native agent pipeline. They should enter OpenFish through the generic Registry lane and conformance gate; neither justifies another native selector branch.
+
+These changes strengthen the architectural choice: curate only release-blocking Harnesses whose exact setup OpenFish verifies, while letting every compatible Registry entry flow through one bounded ACP Driver. They do not justify naming Codex, OMP, Pi, OpenCode, or DSH “best” without a common task benchmark.
+
 ## Reference matrix
 
 | Product | Primary evidence | Strong pattern | OpenFish adoption | Rejection or limit |

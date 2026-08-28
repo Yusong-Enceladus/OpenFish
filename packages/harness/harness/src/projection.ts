@@ -5,18 +5,21 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type { HarnessRuntimeProjection } from './projection.types.ts'
 import type {} from './index.ts'
 
-interface HarnessRuntimeState {
-  harnessId?: string
-  version?: string
-  nodes: HarnessRuntimeProjection['nodes']
-  edges: HarnessRuntimeProjection['edges']
-}
+type HarnessRuntimeState = HarnessRuntimeProjection
 
 const runtimeSignalSchema = z.string().min(1).regex(/^[a-z0-9][a-z0-9._-]*$/u)
 
 const schema = z.object({
   harnessId: z.string().min(1).optional(),
   version: z.string().min(1).optional(),
+  authMethod: z.string().min(1).optional(),
+  workspaceMode: z.enum(['project', 'no-project', 'custom-cwd']).optional(),
+  capabilities: z.array(z.object({
+    id: z.string().min(1),
+    status: z.enum(['supported', 'runtime', 'unsupported']),
+    source: z.enum(['host', 'pack', 'driver', 'runtime']),
+    detail: z.string().optional(),
+  }).strict()).optional(),
   nodes: z.record(z.string(), z.object({
     status: z.enum(['active', 'waiting', 'completed', 'failed']),
     activity: z.string(),
@@ -38,12 +41,12 @@ const schema = z.object({
 }).strict()
 
 /** Whole-log latest runtime state for every Pack-declared node. */
-export const harnessRuntimeProjectionDefinition: ProjectionDefinition<'harnessRuntime', HarnessRuntimeState> = {
+export const harnessRuntimeProjectionDefinition = {
   key: 'harnessRuntime',
   // Zod's `.optional()` widens an optional output slot to `T | undefined`;
   // JSON serialization makes that indistinguishable from an absent property,
   // while the public projection deliberately keeps exact optional fields.
-  schema: schema as unknown as z.ZodType<HarnessRuntimeProjection>,
+  stateSchema: schema as unknown as z.ZodType<HarnessRuntimeState>,
   init: () => ({ nodes: {}, edges: {} }),
   apply(state, event) {
     if (event.type === 'harness/selected') {
@@ -51,6 +54,9 @@ export const harnessRuntimeProjectionDefinition: ProjectionDefinition<'harnessRu
       return {
         harnessId: event.data.harnessId,
         version: event.data.version,
+        ...(event.data.authMethod === undefined ? {} : { authMethod: event.data.authMethod }),
+        ...(event.data.workspaceMode === undefined ? {} : { workspaceMode: event.data.workspaceMode }),
+        ...(event.data.capabilities === undefined ? {} : { capabilities: event.data.capabilities }),
         nodes: sameIdentity ? state.nodes : {},
         edges: sameIdentity ? state.edges : {},
       }
@@ -60,6 +66,9 @@ export const harnessRuntimeProjectionDefinition: ProjectionDefinition<'harnessRu
       return {
         harnessId: event.data.harnessId,
         ...(sameIdentity && state.version !== undefined ? { version: state.version } : {}),
+        ...(sameIdentity && state.authMethod !== undefined ? { authMethod: state.authMethod } : {}),
+        ...(sameIdentity && state.workspaceMode !== undefined ? { workspaceMode: state.workspaceMode } : {}),
+        ...(sameIdentity && state.capabilities !== undefined ? { capabilities: state.capabilities } : {}),
         nodes: sameIdentity ? state.nodes : {},
         edges: {
           ...(sameIdentity ? state.edges : {}),
@@ -82,6 +91,9 @@ export const harnessRuntimeProjectionDefinition: ProjectionDefinition<'harnessRu
     return {
       harnessId: event.data.harnessId,
       ...(sameIdentity && state.version !== undefined ? { version: state.version } : {}),
+      ...(sameIdentity && state.authMethod !== undefined ? { authMethod: state.authMethod } : {}),
+      ...(sameIdentity && state.workspaceMode !== undefined ? { workspaceMode: state.workspaceMode } : {}),
+      ...(sameIdentity && state.capabilities !== undefined ? { capabilities: state.capabilities } : {}),
       edges: sameIdentity ? state.edges : {},
       nodes: {
         ...(sameIdentity ? state.nodes : {}),
@@ -95,6 +107,9 @@ export const harnessRuntimeProjectionDefinition: ProjectionDefinition<'harnessRu
       },
     }
   },
-  view: state => state,
-  stateVersion: 3,
-}
+  wire: {
+    viewSchema: schema as unknown as z.ZodType<HarnessRuntimeProjection>,
+    view: state => state,
+  },
+  stateVersion: 4,
+} satisfies ProjectionDefinition<'harnessRuntime', HarnessRuntimeState>

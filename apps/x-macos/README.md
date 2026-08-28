@@ -17,7 +17,7 @@ macOS Keychain through a write-only Host API. DSH model choices are limited to c
 providers; external ACP Harness model choices come from that live session's ACP
 configuration. The default can be changed in Settings, while existing tasks
 remain pinned to the Harness and Pack version that created them. “No Project”
-tasks use a session-owned `$DSH_HOME/openfish/no-project/<session-id>` directory,
+tasks use a session-owned `$DSH_HOME/openfish/sessions/no-workspace/<session-id>` directory,
 so two unrelated tasks never share an accidental Desktop or scratch cwd.
 
 The current vertical slice implements project/task navigation, durable session

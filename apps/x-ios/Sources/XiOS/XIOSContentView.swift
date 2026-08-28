@@ -36,6 +36,7 @@ public struct OpenCodexIOSView: View {
     @State private var searchText = ""
     @State private var expandedWorkspaceIDs: Set<String> = []
     @State private var otherTasksExpanded = false
+    @State private var externalTasksExpanded = false
     @State private var archivedTasksExpanded = false
     @State private var choseInitialWorkspace = false
     @State private var showsActivity = false
@@ -158,6 +159,37 @@ public struct OpenCodexIOSView: View {
                         .buttonStyle(.plain)
                         if otherTasksExpanded || searchIsActive {
                             ForEach(unfiled) { session in
+                                NavigationLink {
+                                    MobileConversationView(store: store, sessionId: session.sessionId)
+                                        .onAppear { store.markRead(session) }
+                                } label: {
+                                    MobileSessionRow(store: store, session: session)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Archive", systemImage: "archivebox") {
+                                        Task { await store.setArchived(session.sessionId, archived: true) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let external = filtered(store.otherLocationSessions)
+                if !external.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button { externalTasksExpanded.toggle() } label: {
+                            MobileWorkspaceHeader(
+                                title: "Other locations",
+                                taskCount: external.count,
+                                expanded: externalTasksExpanded || searchIsActive,
+                                systemImage: "externaldrive"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if externalTasksExpanded || searchIsActive {
+                            ForEach(external) { session in
                                 NavigationLink {
                                     MobileConversationView(store: store, sessionId: session.sessionId)
                                         .onAppear { store.markRead(session) }
@@ -651,6 +683,30 @@ private struct MobileCachedHostBanner: View {
     }
 }
 
+private struct MobileHarnessOperationStatus: View {
+    @ObservedObject var store: MobileOpenCodexStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text(store.harnessOperationPhase ?? "Preparing Harness…")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if store.canCancelHarnessOperation {
+                Button("Cancel") { store.cancelHarnessOperation() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .contain)
+    }
+}
+
 private struct MobileHarnessOnboardingView: View {
     @ObservedObject var store: MobileOpenCodexStore
     @State private var query = ""
@@ -677,6 +733,9 @@ private struct MobileHarnessOnboardingView: View {
                     Text("Choose how OpenFish works").font(.largeTitle.bold())
                     Text("Pick the execution system that owns models, tools, guardrails, and resumable sessions. The connected Mac installs it; existing tasks never change Harnesses.")
                         .foregroundStyle(.secondary)
+                    if store.harnessOperationId != nil {
+                        MobileHarnessOperationStatus(store: store)
+                    }
                     if store.harnesses.isEmpty {
                         ContentUnavailableView(
                             "Harness catalog unavailable",
@@ -820,9 +879,9 @@ private struct MobileHarnessCredentialsView: View {
                 Section("Sign-in method") {
                     if currentHarness.auth.methods.isEmpty {
                         ContentUnavailableView(
-                            "No sign-in method advertised",
+                            currentHarness.auth.status == "unknown" ? "Setup is discovered on the Mac" : "No sign-in method advertised",
                             systemImage: "key.slash",
-                            description: Text("Install or refresh this Harness on the connected Mac so its Driver can discover authentication.")
+                            description: Text(currentHarness.auth.detail ?? "Install or refresh this Harness on the connected Mac so its Driver can discover authentication.")
                         )
                     } else {
                         Picker("Method", selection: $selectedMethodId) {
@@ -886,11 +945,21 @@ private struct MobileHarnessCredentialsView: View {
                         }
                     }
                 }
+                if saving {
+                    Section("Harness setup") {
+                        MobileHarnessOperationStatus(store: store)
+                    }
+                }
             }
             .navigationTitle("Configure Harness")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(saving && store.canCancelHarnessOperation ? "Cancel setup" : "Cancel") {
+                        if saving && store.canCancelHarnessOperation { store.cancelHarnessOperation() }
+                        else { dismiss() }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Confirm") {
                         guard let method else { return }
@@ -1206,13 +1275,7 @@ private struct MobileHarnessDetailView: View {
                         }
                     }
                     if store.harnessOperationId == harness.id {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("Installing and checking \(harness.name)…")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .accessibilityElement(children: .combine)
+                        MobileHarnessOperationStatus(store: store)
                     } else {
                         Button(harnessActionTitle) {
                             use()
@@ -1289,7 +1352,7 @@ private struct MobileHarnessDetailView: View {
             return method?.account?.label ?? method?.name ?? selected
         }
         if currentHarness.auth.status != "not-required" {
-            return currentHarness.auth.status.replacingOccurrences(of: "-", with: " ")
+            return currentHarness.auth.detail ?? currentHarness.auth.status.replacingOccurrences(of: "-", with: " ")
         }
         return currentHarness.modelConfiguration?.detail
             ?? currentHarness.account?.label
@@ -2619,7 +2682,7 @@ private struct MobileReasoningSelectionMenu: View {
     @ObservedObject var store: MobileOpenCodexStore
 
     var body: some View {
-        Menu(store.currentReasoningName ?? "Reasoning · Auto") {
+        Menu(store.currentReasoningLabel) {
             if store.currentReasoningOptions.isEmpty {
                 Text("This Harness and model did not advertise a reasoning control.")
                 Button("Refresh") { Task { await store.refreshCurrentModels() } }
@@ -3467,7 +3530,9 @@ private struct MobileComposerControls: View {
             return method.account?.label ?? method.name
         }
         return harness.account?.label
-            ?? (harness.auth.status == "not-required" ? "Billing not declared" : "Sign-in required")
+            ?? (harness.auth.status == "not-required"
+                ? "Billing not declared"
+                : harness.auth.status == "unknown" ? "Account discovered after install" : "Sign-in required")
     }
 
     @ViewBuilder
@@ -3544,7 +3609,7 @@ private struct MobileComposerControls: View {
                             ? "Choose model · \(store.currentModelName)"
                             : "Choose model · Needs attention"
                 ) { showingModelPicker = true }
-                Menu("Reasoning · \(store.currentReasoningName ?? "Auto")") {
+                Menu(store.currentReasoningLabel) {
                     if store.currentReasoningOptions.isEmpty {
                         Text("This Harness and model did not advertise a reasoning control.")
                         Button("Refresh") { Task { await store.refreshCurrentModels() } }
@@ -3577,7 +3642,7 @@ private struct MobileComposerControls: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("\(store.currentHarness.map { mobileHarnessDisplayName($0, among: store.harnesses) } ?? store.currentHarnessId) · \(store.currentModelLabel)")
                             .lineLimit(1)
-                        Text("\(store.currentReasoningName ?? "Reasoning Auto") · \(accountLabel)")
+                        Text("\(store.currentReasoningLabel) · \(accountLabel)")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -3843,6 +3908,9 @@ private struct MobileConnectionView: View {
                 }
 
                 Section("Default Harness") {
+                    if store.harnessOperationId != nil {
+                        MobileHarnessOperationStatus(store: store)
+                    }
                     ForEach(store.harnesses) { harness in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {

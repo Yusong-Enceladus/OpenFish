@@ -4,7 +4,38 @@ import { z } from 'zod'
 import { isAbsolute, normalize, win32 } from 'node:path'
 import type { HarnessId, HarnessPack } from './types.ts'
 
-const stringRecord = z.record(z.string(), z.string())
+const MAX_SHORT_TEXT = 256
+const MAX_DETAIL_TEXT = 8_192
+const MAX_URL_TEXT = 4_096
+const MAX_ARGUMENTS = 128
+const MAX_ENVIRONMENT_FIELDS = 128
+const MAX_GRAPH_NODES = 256
+const MAX_GRAPH_EDGES = 1_024
+const MAX_NODE_PORTS = 64
+const MAX_NODE_CONTROLS = 64
+const MAX_SELECT_CHOICES = 128
+const MAX_RUNTIME_SIGNALS = 64
+const MAX_REGISTRY_AGENTS = 4_096
+const MAX_REGISTRY_AUTHORS = 32
+const MAX_REGISTRY_BINARY_TARGETS = 32
+const FORBIDDEN_TEXT_CONTROL = /[\u0000\u0008\u000b\u000c\u000e-\u001f\u007f]/u
+const shortText = z.string().min(1).max(MAX_SHORT_TEXT)
+  .refine(value => value.trim().length > 0 && !/[\u0000-\u001f\u007f]/u.test(value), 'Expected printable non-empty text.')
+const stableId = z.string().min(1).max(MAX_SHORT_TEXT).regex(/^[a-z0-9][a-z0-9._-]*$/u)
+const optionalShortText = z.string().max(MAX_SHORT_TEXT)
+  .refine(value => !/[\u0000-\u001f\u007f]/u.test(value), 'Expected printable text.')
+const detailText = z.string().min(1).max(MAX_DETAIL_TEXT)
+  .refine(value => value.trim().length > 0 && !FORBIDDEN_TEXT_CONTROL.test(value), 'Expected non-empty display text.')
+const optionalDetailText = z.string().max(MAX_DETAIL_TEXT)
+  .refine(value => !FORBIDDEN_TEXT_CONTROL.test(value), 'Expected display text.')
+const urlText = z.string().max(MAX_URL_TEXT).url()
+const processText = z.string().max(MAX_DETAIL_TEXT).refine(value => !value.includes('\u0000'), 'Process text cannot contain NUL.')
+const argumentList = z.array(processText).max(MAX_ARGUMENTS)
+const stringRecord = z.record(z.string().min(1).max(MAX_SHORT_TEXT), processText).superRefine((record, context) => {
+  if (Object.keys(record).length > MAX_ENVIRONMENT_FIELDS) {
+    context.addIssue({ code: 'custom', message: `Environment maps may contain at most ${MAX_ENVIRONMENT_FIELDS} entries.` })
+  }
+})
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const SENSITIVE_ENVIRONMENT_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)$/iu
 const EXACT_NPM_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u
@@ -30,106 +61,123 @@ const PRIVATE_PUBLICATION_TEXT = [
   /\b(?:api[_-]?key|authorization|password|secret|session[_-]?token)\s*[:=]\s*\S+/iu,
 ]
 const distribution = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('npx'), package: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
-  z.object({ kind: z.literal('bunx'), package: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
-  z.object({ kind: z.literal('uvx'), package: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
+  z.object({ kind: z.literal('npx'), package: shortText, args: argumentList.default([]), env: stringRecord.default({}) }),
+  z.object({ kind: z.literal('bunx'), package: shortText, args: argumentList.default([]), env: stringRecord.default({}) }),
+  z.object({ kind: z.literal('uvx'), package: shortText, args: argumentList.default([]), env: stringRecord.default({}) }),
   z.object({
-    kind: z.literal('binary'), archive: z.url(), sha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
-    command: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}),
+    kind: z.literal('binary'), archive: urlText, sha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+    command: z.string().min(1).max(MAX_URL_TEXT), args: argumentList.default([]), env: stringRecord.default({}),
   }),
-  z.object({ kind: z.literal('executable'), command: z.string().min(1), args: z.array(z.string()).default([]), env: stringRecord.default({}) }),
+  z.object({ kind: z.literal('executable'), command: z.string().min(1).max(MAX_URL_TEXT), args: argumentList.default([]), env: stringRecord.default({}) }),
 ])
 const graphEvidence = z.object({
   kind: z.enum(['declared', 'source-derived', 'runtime-observed']),
-  source: z.string().min(1),
-  version: z.string().min(1).optional(),
+  source: detailText,
+  version: shortText.optional(),
 })
-const runtimeSignal = z.string().min(1).regex(/^[a-z0-9][a-z0-9._-]*$/u)
+const runtimeSignal = z.string().min(1).max(MAX_SHORT_TEXT).regex(/^[a-z0-9][a-z0-9._-]*$/u)
 const graphPort = z.object({
-  id: z.string().min(1), name: z.string().min(1), direction: z.enum(['input', 'output']),
-  dataType: z.string().min(1), required: z.boolean().optional(),
+  id: stableId, name: shortText, direction: z.enum(['input', 'output']),
+  dataType: shortText, required: z.boolean().optional(),
 })
 const configField = z.object({
-  id: z.string().min(1), name: z.string().min(1), description: z.string().min(1).optional(),
+  id: stableId, name: shortText, description: detailText.optional(),
   type: z.enum(['string', 'boolean', 'select', 'secret-reference']), required: z.boolean(),
   choices: z.array(z.object({
-    id: z.string().min(1), name: z.string().min(1), description: z.string().min(1).optional(),
-  })).min(1).optional(),
-  binding: z.object({ kind: z.string().min(1), target: z.string().min(1) }),
+    id: shortText, name: shortText, description: detailText.optional(),
+  })).min(1).max(MAX_SELECT_CHOICES).optional(),
+  binding: z.object({ kind: stableId, target: z.string().min(1).max(MAX_SHORT_TEXT) }),
+})
+const nodeConfiguration = z.record(
+  stableId,
+  z.union([optionalDetailText, z.boolean(), z.number().finite()]),
+).superRefine((record, context) => {
+  if (Object.keys(record).length > MAX_NODE_CONTROLS + 2) {
+    context.addIssue({ code: 'custom', message: `Node configuration may contain at most ${MAX_NODE_CONTROLS} controls.` })
+  }
 })
 const graphNode = z.object({
-  id: z.string().min(1),
-  kind: z.string().min(1),
-  title: z.string().min(1),
+  id: stableId,
+  kind: stableId,
+  title: shortText,
   editable: z.boolean(),
-  responsibility: z.string().min(1).optional(),
-  inputs: z.array(z.string().min(1)).optional(),
-  outputs: z.array(z.string().min(1)).optional(),
-  ports: z.array(graphPort).optional(),
-  evidence: z.array(graphEvidence).min(1).optional(),
-  observes: z.array(runtimeSignal).min(1).optional(),
-  position: z.object({ x: z.number(), y: z.number() }).optional(),
-  configSchema: z.object({ version: z.literal(1), fields: z.array(configField).min(1) }).optional(),
-  config: z.record(z.string(), z.unknown()).optional(),
+  responsibility: detailText.optional(),
+  inputs: z.array(shortText).max(MAX_NODE_PORTS).optional(),
+  outputs: z.array(shortText).max(MAX_NODE_PORTS).optional(),
+  ports: z.array(graphPort).max(MAX_NODE_PORTS).optional(),
+  evidence: z.array(graphEvidence).min(1).max(32).optional(),
+  observes: z.array(runtimeSignal).min(1).max(MAX_RUNTIME_SIGNALS).optional(),
+  position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  configSchema: z.object({ version: z.literal(1), fields: z.array(configField).min(1).max(MAX_NODE_CONTROLS) }).optional(),
+  config: nodeConfiguration.optional(),
 })
 const graph = z.object({
   level: z.enum(['opaque', 'observable', 'composable']),
   manifestVersion: z.literal(1).optional(),
-  boundary: z.string().min(1).optional(),
-  evidence: z.array(graphEvidence).min(1).optional(),
-  nodes: z.array(graphNode),
+  boundary: detailText.optional(),
+  evidence: z.array(graphEvidence).min(1).max(32).optional(),
+  nodes: z.array(graphNode).max(MAX_GRAPH_NODES),
   edges: z.array(z.object({
-    from: z.string().min(1), to: z.string().min(1),
-    fromPort: z.string().min(1).optional(), toPort: z.string().min(1).optional(),
-    label: z.string().min(1).optional(),
-    observes: z.array(runtimeSignal).min(1).optional(),
-  })),
+    from: shortText, to: shortText,
+    fromPort: shortText.optional(), toPort: shortText.optional(),
+    label: shortText.optional(),
+    observes: z.array(runtimeSignal).min(1).max(MAX_RUNTIME_SIGNALS).optional(),
+  })).max(MAX_GRAPH_EDGES),
 })
 const driverBundle = z.object({
   apiVersion: z.literal(1),
-  package: z.string().min(1),
-  spec: z.string().min(1),
+  package: shortText,
+  spec: z.string().min(1).max(MAX_URL_TEXT),
   requiresInstallScripts: z.boolean(),
 })
 const account = z.object({
-  label: z.string().min(1),
+  label: shortText,
   billing: z.enum(['subscription', 'usage', 'local', 'harness-managed', 'unknown']),
-  detail: z.string().min(1),
+  detail: detailText,
 })
 const modelConfiguration = z.object({
-  owner: z.enum(['host', 'harness']), required: z.boolean(), detail: z.string().min(1),
+  owner: z.enum(['host', 'harness']), required: z.boolean(), detail: detailText,
+})
+const authenticationDiscovery = z.object({
+  source: z.enum(['pack', 'runtime']), detail: detailText,
 })
 const agentAuthentication = z.object({
-  metaKey: z.string().min(1), fieldMap: z.record(z.string().min(1), z.string().min(1)),
+  metaKey: shortText,
+  fieldMap: z.record(shortText, shortText).superRefine((record, context) => {
+    if (Object.keys(record).length > MAX_NODE_CONTROLS) {
+      context.addIssue({ code: 'custom', message: `Agent authentication maps may contain at most ${MAX_NODE_CONTROLS} entries.` })
+    }
+  }),
 })
 
 const packSchema = z.object({
   schemaVersion: z.literal(0),
-  id: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
-  name: z.string().min(1),
+  id: stableId,
+  name: shortText,
   // Versions become managed directory names and durable session identities.
   // Keep the vocabulary portable and traversal-free before any filesystem use.
-  version: z.string().regex(/^[0-9A-Za-z][0-9A-Za-z._+-]*$/u),
-  description: z.string().optional(),
-  publisher: z.string().min(1),
-  license: z.string().optional(),
-  repository: z.url().optional(),
-  icon: z.url().optional(),
+  version: z.string().max(MAX_SHORT_TEXT).regex(/^[0-9A-Za-z][0-9A-Za-z._+-]*$/u),
+  description: optionalDetailText.optional(),
+  publisher: shortText,
+  license: optionalShortText.optional(),
+  repository: urlText.optional(),
+  icon: urlText.optional(),
   verified: z.boolean(),
-  protocol: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
+  protocol: stableId,
   account: account.optional(),
   modelConfiguration: modelConfiguration.optional(),
+  authenticationDiscovery: authenticationDiscovery.optional(),
   driverBundle: driverBundle.optional(),
   authMethods: z.array(z.object({
-    id: z.string().min(1), name: z.string().min(1), kind: z.enum(['agent', 'environment', 'terminal']),
+    id: stableId, name: shortText, kind: z.enum(['agent', 'environment', 'terminal']),
     fields: z.array(z.object({
-      ref: z.string().min(1), name: z.string().min(1), env: z.string().min(1).optional(),
-      required: z.boolean().default(true), secret: z.boolean().default(true), placeholder: z.string().optional(),
-    })).default([]),
+      ref: shortText, name: shortText, env: shortText.optional(),
+      required: z.boolean().default(true), secret: z.boolean().default(true), placeholder: optionalShortText.optional(),
+    })).max(MAX_NODE_CONTROLS).default([]),
     account: account.optional(),
     agent: agentAuthentication.optional(),
-    terminal: z.object({ args: z.array(z.string()), env: z.record(z.string(), z.string()) }).optional(),
-  })).optional(),
+    terminal: z.object({ args: argumentList, env: stringRecord }).optional(),
+  })).max(32).optional(),
   distribution: distribution.optional(),
   graph,
   source: z.enum(['builtin', 'acp-registry', 'openfish-community', 'user']),
@@ -285,6 +333,12 @@ export function parseHarnessPack(input: unknown): HarnessPack {
   }
   for (const node of pack.graph.nodes) {
     for (const signal of node.observes ?? []) validateRuntimeSignal(signal)
+    if (node.inputs !== undefined && new Set(node.inputs).size !== node.inputs.length) {
+      throw new Error(`Harness Pack "${pack.id}" architecture node "${node.id}" declares an input more than once`)
+    }
+    if (node.outputs !== undefined && new Set(node.outputs).size !== node.outputs.length) {
+      throw new Error(`Harness Pack "${pack.id}" architecture node "${node.id}" declares an output more than once`)
+    }
     if (node.observes !== undefined && new Set(node.observes).size !== node.observes.length) {
       throw new Error(`Harness Pack "${pack.id}" architecture node "${node.id}" declares a runtime signal more than once`)
     }
@@ -298,6 +352,11 @@ export function parseHarnessPack(input: unknown): HarnessPack {
     if (new Set(fields.map(field => field.id)).size !== fields.length) {
       throw new Error(`Harness Pack "${pack.id}" architecture node "${node.id}" declares a configuration field more than once`)
     }
+    const fieldIds = new Set(fields.map(field => field.id))
+    const unknownConfiguration = Object.keys(node.config ?? {}).find(key => !fieldIds.has(key))
+    if (unknownConfiguration !== undefined) {
+      throw new Error(`Harness Pack "${pack.id}" architecture node "${node.id}" configures undeclared field "${unknownConfiguration}"`)
+    }
     for (const field of fields) {
       if (field.type === 'select' && (field.choices?.length ?? 0) === 0) {
         throw new Error(`Harness Pack "${pack.id}" select field "${field.id}" requires choices`)
@@ -309,6 +368,19 @@ export function parseHarnessPack(input: unknown): HarnessPack {
         throw new Error(`Harness Pack "${pack.id}" select field "${field.id}" declares a choice more than once`)
       }
       const value = node.config?.[field.id]
+      if (field.required && value === undefined) {
+        throw new Error(`Harness Pack "${pack.id}" required field "${field.id}" needs a credential-free default or reference`)
+      }
+      if (field.type === 'boolean' && value !== undefined && typeof value !== 'boolean') {
+        throw new Error(`Harness Pack "${pack.id}" boolean field "${field.id}" must store a boolean`)
+      }
+      if (field.type !== 'boolean' && value !== undefined && typeof value !== 'string') {
+        throw new Error(`Harness Pack "${pack.id}" field "${field.id}" must store text`)
+      }
+      if (field.type === 'select' && typeof value === 'string'
+        && !field.choices?.some(choice => choice.id === value)) {
+        throw new Error(`Harness Pack "${pack.id}" select field "${field.id}" must select a declared choice`)
+      }
       if (field.type === 'secret-reference' && value !== undefined
         && (typeof value !== 'string' || !ENVIRONMENT_NAME.test(value))) {
         throw new Error(`Harness Pack "${pack.id}" credential-reference field "${field.id}" must store a Host credential reference, never a secret value`)
@@ -476,35 +548,54 @@ function isPinnedPythonPackage(spec: string): boolean {
     && EXACT_PYTHON_VERSION.test(spec.slice(separator + width))
 }
 
-const acpRegistrySchema = z.object({
-  version: z.string(),
-  agents: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    version: z.string().min(1),
-    description: z.string().optional(),
-    repository: z.url().optional(),
-    authors: z.array(z.string()).optional(),
-    license: z.string().optional(),
-    icon: z.url().optional(),
-    distribution: z.object({
-      npx: z.object({
-        package: z.string().min(1),
-        args: z.array(z.string()).optional(),
-        env: stringRecord.optional(),
-      }).optional(),
-      uvx: z.object({
-        package: z.string().min(1),
-        args: z.array(z.string()).optional(),
-        env: stringRecord.optional(),
-      }).optional(),
-      binary: z.record(z.string(), z.object({
-        archive: z.url(), sha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(), cmd: z.string().min(1),
-        args: z.array(z.string()).optional(), env: stringRecord.optional(),
-      })).optional(),
-    }).loose(),
-  }).loose()),
+const registryBinaryTargets = z.record(shortText, z.object({
+  archive: urlText,
+  sha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+  cmd: z.string().min(1).max(MAX_URL_TEXT).refine(value => !value.includes('\u0000'), 'Command cannot contain NUL.'),
+  args: argumentList.optional(),
+  env: stringRecord.optional(),
+})).superRefine((record, context) => {
+  if (Object.keys(record).length > MAX_REGISTRY_BINARY_TARGETS) {
+    context.addIssue({
+      code: 'custom',
+      message: `ACP Registry binary maps may contain at most ${MAX_REGISTRY_BINARY_TARGETS} targets.`,
+    })
+  }
 })
+
+const acpRegistryAgentSchema = z.object({
+  id: stableId,
+  name: shortText,
+  // Registry metadata is bounded here, while registryDistribution() below
+  // decides whether a package version is exact enough to become executable.
+  version: shortText,
+  description: optionalDetailText.optional(),
+  repository: urlText.optional(),
+  authors: z.array(shortText).max(MAX_REGISTRY_AUTHORS).optional(),
+  license: optionalShortText.optional(),
+  icon: urlText.optional(),
+  distribution: z.object({
+    npx: z.object({
+      package: shortText,
+      args: argumentList.optional(),
+      env: stringRecord.optional(),
+    }).optional(),
+    uvx: z.object({
+      package: shortText,
+      args: argumentList.optional(),
+      env: stringRecord.optional(),
+    }).optional(),
+    binary: registryBinaryTargets.optional(),
+  }).loose(),
+}).loose()
+
+// Validate and bound the shared envelope before inspecting rows. Individual
+// publishers do not get to make every other Registry entry unavailable by
+// shipping one malformed row; admission remains per-Pack below.
+const acpRegistrySchema = z.object({
+  version: shortText,
+  agents: z.array(z.unknown()).max(MAX_REGISTRY_AGENTS),
+}).loose()
 
 /**
  * Project supported ACP Registry package or platform distributions into Pack v0.
@@ -513,7 +604,15 @@ const acpRegistrySchema = z.object({
  */
 export function packsFromAcpRegistry(input: unknown): HarnessPack[] {
   const registry = acpRegistrySchema.parse(input)
-  return registry.agents.flatMap((agent): HarnessPack[] => {
+  const seen = new Set<string>()
+  return registry.agents.flatMap((candidate): HarnessPack[] => {
+    const parsed = acpRegistryAgentSchema.safeParse(candidate)
+    if (!parsed.success) return []
+    const agent = parsed.data
+    // Duplicate publisher rows are ambiguous. Retain the first Registry row
+    // deterministically instead of silently letting a later row replace it.
+    if (seen.has(agent.id)) return []
+    seen.add(agent.id)
     const selected = registryDistribution(agent.distribution, agent.version)
     if (selected === undefined) return []
     return [parseHarnessPack({
@@ -534,6 +633,10 @@ export function packsFromAcpRegistry(input: unknown): HarnessPack[] {
         owner: 'harness', required: false,
         detail: 'Models and model-specific controls are discovered from the running ACP session.',
       },
+      authenticationDiscovery: {
+        source: 'runtime',
+        detail: 'The ACP Registry does not declare account requirements. OpenFish discovers them from the installed Harness before first use.',
+      },
       distribution: selected,
       graph: registryArchitecture(agent),
       source: 'acp-registry',
@@ -541,7 +644,9 @@ export function packsFromAcpRegistry(input: unknown): HarnessPack[] {
   })
 }
 
-function registryArchitecture(agent: z.infer<typeof acpRegistrySchema>['agents'][number]): HarnessPack['graph'] {
+type AcpRegistryAgent = z.infer<typeof acpRegistryAgentSchema>
+
+function registryArchitecture(agent: AcpRegistryAgent): HarnessPack['graph'] {
   return {
     level: 'opaque',
     manifestVersion: 1,
@@ -561,7 +666,7 @@ function registryArchitecture(agent: z.infer<typeof acpRegistrySchema>['agents']
   }
 }
 
-type RegistryDistribution = z.infer<typeof acpRegistrySchema>['agents'][number]['distribution']
+type RegistryDistribution = AcpRegistryAgent['distribution']
 
 /** Prefer a native target, then Node, then Python for this exact host. */
 function registryDistribution(distribution: RegistryDistribution, version: string): HarnessPack['distribution'] | undefined {

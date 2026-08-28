@@ -8,10 +8,19 @@ import { effectiveSessionModelSelection, emitAgentEvent, recordSessionModelSelec
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import { hasHarnessRuntimeBindings, type HarnessDriver, type HarnessForkRequest, type HarnessPack, type HarnessSessionRequest } from '@deepseek-ai/dsh-harness'
+import {
+  hasHarnessRuntimeBindings,
+  safeHarnessDiagnostic,
+  type HarnessAuthoringContract,
+  type HarnessDriver,
+  type HarnessForkRequest,
+  type HarnessPack,
+  type HarnessSessionRequest,
+} from '@deepseek-ai/dsh-harness'
 import { AcpHarnessAgent, discoverAcpAuthentication, installHarnessPack, launchAcpTerminalAuthentication, launchArgv, launchManagedTerminalAuthentication, managedExecutableArgv, terminalAuthenticationMarker } from './agent.ts'
 import {
   CodexHarnessAgent,
+  codexAuthenticationEnvironment,
   codexAuthenticationHome,
   codexAuthenticationRuntimeDirectory,
   prepareCodexAuthenticationHome,
@@ -26,21 +35,92 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 export const name = 'harness-acp'
 export const inject = ['harnesses', 'agents', 'sessions', 'subprocess', 'sandbox', 'sandboxPolicy', 'approval', 'userQuestions', 'credentials', 'attachments']
 
+const ACP_AUTHORING: HarnessAuthoringContract = {
+  bindingKinds: [{
+    kind: 'acp-session-option',
+    name: 'ACP session option',
+    description: 'Applies one option id advertised by the live ACP session configuration directory.',
+    fieldTypes: ['string', 'boolean', 'select'],
+    targetLabel: 'Live ACP option id',
+    targetPlaceholder: 'for example: thought_level',
+    targetPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$',
+  }],
+  nodeKinds: [
+    {
+      kind: 'protocol-adapter', name: 'Protocol boundary',
+      description: 'The standard ACP connection between OpenFish and the Harness process.',
+      responsibility: 'Translates Host requests and Harness updates across the ACP boundary.',
+      editable: false, inputs: ['Host request'], outputs: ['ACP update'], observes: ['protocol.ready'],
+    },
+    {
+      kind: 'context-runtime', name: 'Context assembly',
+      description: 'A declared context-construction responsibility backed by Pack evidence.',
+      responsibility: 'Builds model-visible input from the context sources this Harness owns.',
+      editable: false, inputs: ['instructions', 'task context'], outputs: ['model input'],
+    },
+    {
+      kind: 'agent-session', name: 'Agent session',
+      description: 'The ACP session boundary and the only generic component whose live options ACP can execute.',
+      responsibility: 'Owns task lifecycle and applies Driver-validated ACP session configuration.',
+      editable: true, inputs: ['task message', 'session controls'], outputs: ['turn updates'],
+      observes: ['session.ready', 'turn.started', 'turn.completed', 'turn.failed'],
+    },
+    {
+      kind: 'model-router', name: 'Model route',
+      description: 'A model-routing component whose advertised ACP session options can change live behavior.',
+      responsibility: 'Routes inference through the provider, account, and model exposed by this Harness.',
+      editable: true, inputs: ['model input', 'model selection'], outputs: ['model stream'],
+      observes: ['model.completed'],
+    },
+    {
+      kind: 'tool-runtime', name: 'Tool runtime',
+      description: 'A declared tool-execution responsibility backed by Pack or runtime evidence.',
+      responsibility: 'Executes the tool operations exposed through ACP.',
+      editable: false, inputs: ['tool request'], outputs: ['tool result'], observes: ['tool.activity'],
+    },
+    {
+      kind: 'permission-policy', name: 'Permission policy',
+      description: 'A declared approval responsibility backed by Pack or runtime evidence.',
+      responsibility: 'Stops guarded effects until the Harness policy or user resolves them.',
+      editable: false, inputs: ['guarded effect'], outputs: ['permission decision'],
+      observes: ['approval.requested', 'approval.resolved'],
+    },
+    {
+      kind: 'execution-boundary', name: 'Execution boundary',
+      description: 'A declared filesystem, process, or network authority boundary.',
+      responsibility: 'Constrains effects according to the active Harness and Host policies.',
+      editable: false, inputs: ['approved operation'], outputs: ['bounded effect'],
+    },
+    {
+      kind: 'output-stream', name: 'Output stream',
+      description: 'The structured progress and result stream visible to OpenFish.',
+      responsibility: 'Publishes structured Harness progress and final output.',
+      editable: false, inputs: ['Harness events'], outputs: ['visible output'], observes: ['output.activity'],
+    },
+    {
+      kind: 'session-storage', name: 'Persistence',
+      description: 'A declared resumable-state responsibility backed by Pack evidence.',
+      responsibility: 'Stores the resumable state that this Harness declares it owns.',
+      editable: false, inputs: ['session events'], outputs: ['resumable state'],
+    },
+    {
+      kind: 'extension-runtime', name: 'Extensions',
+      description: 'A declared extension boundary for tools, providers, or hooks.',
+      responsibility: 'Adds behavior while keeping its ownership and evidence explicit.',
+      editable: false, inputs: ['extension packages'], outputs: ['runtime contributions'],
+    },
+  ],
+}
+
 /** Validate the only generic executable graph semantics currently owned by the ACP Driver. */
 function validateAcpPack(pack: HarnessPack): string[] {
   const issues: string[] = []
   for (const node of pack.graph.nodes) {
     const config = node.config ?? {}
-    for (const coordinate of ['x', 'y'] as const) {
-      if (config[coordinate] !== undefined
-        && (typeof config[coordinate] !== 'number' || !Number.isFinite(config[coordinate]))) {
-        issues.push(`Architecture node "${node.id}" has an invalid ${coordinate} presentation coordinate.`)
-      }
-    }
     if (!node.editable) continue
     const schemaFields = node.configSchema?.fields ?? []
     const fieldIds = new Set(schemaFields.map(field => field.id))
-    const unknown = Object.keys(config).filter(key => key !== 'x' && key !== 'y' && key !== 'acpSessionOptions' && !fieldIds.has(key))
+    const unknown = Object.keys(config).filter(key => !fieldIds.has(key))
     if (unknown.length > 0) {
       issues.push(`ACP node "${node.id}" declares unsupported executable settings: ${unknown.join(', ')}.`)
     }
@@ -66,16 +146,7 @@ function validateAcpPack(pack: HarnessPack): string[] {
         issues.push(`ACP field "${field.id}" on node "${node.id}" selects an undeclared choice.`)
       }
     }
-    if (schemaFields.length > 0) continue
-    const options = config.acpSessionOptions
-    if (typeof options !== 'object' || options === null || Array.isArray(options) || Object.keys(options).length === 0) {
-      issues.push(`Editable ACP node "${node.id}" must declare at least one acpSessionOptions setting.`)
-      continue
-    }
-    const invalid = Object.entries(options).find(([, value]) => typeof value !== 'string' && typeof value !== 'boolean')
-    if (invalid !== undefined) {
-      issues.push(`ACP option "${invalid[0]}" on node "${node.id}" must be a string or boolean.`)
-    }
+    if (schemaFields.length === 0) issues.push(`Editable ACP node "${node.id}" must declare at least one typed configuration field.`)
   }
   return issues
 }
@@ -141,7 +212,7 @@ export function apply(ctx: Context): void {
         configurationIds,
       }
     } finally {
-      await agent.dispose()
+      try { await agent.deleteCurrentRemoteSession() } finally { await agent.dispose() }
     }
   }
 
@@ -275,6 +346,7 @@ export function apply(ctx: Context): void {
         { id: 'builder.publish', status: 'unsupported', source: 'host', detail: 'Registry and bundled Packs are read only; fork a user-authored Pack to use OpenFish community submission.' },
       ])
     },
+    authoring() { return Promise.resolve(ACP_AUTHORING) },
     validatePack(pack) { return Promise.resolve(validateAcpPack(pack)) },
     async available(pack) {
       try {
@@ -288,13 +360,25 @@ export function apply(ctx: Context): void {
         await ctx.subprocess.resolveExecutable(argv[0] as string)
         return undefined
       } catch (error: unknown) {
-        return `Harness "${pack.id}" cannot launch: ${error instanceof Error ? error.message : String(error)}`
+        return `Harness "${pack.id}" cannot launch: ${safeHarnessDiagnostic(error)}`
       }
     },
     preflight: preflightAcp,
     create: (request, pack, signal) => publish(request, pack, false, signal),
     resume: (request, pack, signal) => publish(request, pack, true, signal),
     dispose: sessionId => disposeAcp(sessionId),
+    async discard(sessionId) {
+      const record = live.get(sessionId)
+      if (record === undefined) return
+      live.delete(sessionId)
+      try {
+        await record.agent.deleteCurrentRemoteSession()
+      } finally {
+        await record.agent.dispose()
+        record.detachAgent()
+        record.detachSession()
+      }
+    },
     install: (pack, directory, runtimeDirectory, signal) => installHarnessPack(ctx, pack, directory, runtimeDirectory, signal),
     discoverAuth: (pack, directory, runtimeDirectory) => discoverAcpAuthentication(ctx, pack, directory, runtimeDirectory),
     authenticateInteractive: (pack, directory, runtimeDirectory, method, signal) =>
@@ -516,7 +600,7 @@ export function apply(ctx: Context): void {
         await ctx.subprocess.resolveExecutable(argv[0] as string)
         return undefined
       } catch (error: unknown) {
-        return `Codex cannot launch: ${error instanceof Error ? error.message : String(error)}`
+        return `Codex cannot launch: ${safeHarnessDiagnostic(error)}`
       }
     },
     async preflight(request, pack, signal) {
@@ -564,9 +648,10 @@ export function apply(ctx: Context): void {
       if (executable.length === 0) throw new Error('Installed Codex package does not expose its executable')
       const codexHome = await prepareCodexAuthenticationHome(runtimeDirectory, method.id)
       const processRuntimeDirectory = codexAuthenticationRuntimeDirectory(runtimeDirectory, method.id)
+      const authenticationEnvironment = await codexAuthenticationEnvironment(ctx, method, runtimeDirectory)
       await launchManagedTerminalAuthentication(ctx, {
         argv: [...executable, 'login'],
-        env: { ...(pack.distribution?.env ?? {}), CODEX_HOME: codexHome },
+        env: { ...(pack.distribution?.env ?? {}), ...authenticationEnvironment, CODEX_HOME: codexHome },
         installationDirectory: directory,
         runtimeDirectory: processRuntimeDirectory,
         completionFile: join(codexHome, 'auth.json'),
@@ -583,16 +668,16 @@ export function apply(ctx: Context): void {
           await access(join(homedir(), '.codex', 'auth.json'))
           return []
         } catch {
-          return ['existing-codex-login']
+          return [`auth-state:${method.id}`]
         }
       }
       if (method.id === 'codex-managed-login') {
-        if (locations === undefined) return ['openfish-codex-login']
+        if (locations === undefined) return [`auth-state:${method.id}`]
         try {
           await access(join(codexAuthenticationHome(locations.runtimeDirectory, method.id), 'auth.json'))
           return []
         } catch {
-          return ['openfish-codex-login']
+          return [`auth-state:${method.id}`]
         }
       }
       const missing: string[] = []

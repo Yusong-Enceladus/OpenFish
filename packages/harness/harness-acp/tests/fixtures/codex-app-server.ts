@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 
 type Frame = { id?: number; method?: string; params?: Record<string, unknown> }
 
@@ -56,6 +56,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       respond(frame, {})
       break
     case 'turn/start': {
+      const crashOnceMarker = process.env.OPENFISH_CODEX_FIXTURE_CRASH_ONCE_MARKER
+      if (crashOnceMarker !== undefined) {
+        try {
+          writeFileSync(crashOnceMarker, 'crashed\n', { flag: 'wx' })
+          process.exit(72)
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        }
+      }
       const id = `turn-${++turn}`
       const threadId = typeof frame.params?.threadId === 'string' ? frame.params.threadId : THREAD_ID
       const input = Array.isArray(frame.params?.input) ? frame.params.input : []
@@ -64,6 +73,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         .filter(entry => entry.type === 'text' && typeof entry.text === 'string')
         .map(entry => entry.text)
         .join('')
+      if (text === 'auth-expired') {
+        send({ id: frame.id, error: { code: -32001, message: 'authentication expired; access_token=sk-test-supersecret123456' } })
+        break
+      }
+      if (text === 'quota-failure') {
+        send({ id: frame.id, error: { code: -32002, message: 'provider quota exceeded; authorization=Bearer sk-test-supersecret123456' } })
+        break
+      }
       respond(frame, { turn: { id, status: 'inProgress' } })
       send({ method: 'turn/started', params: { threadId, turn: { id, status: 'inProgress' } } })
       send({

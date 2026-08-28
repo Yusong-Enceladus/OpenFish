@@ -14,17 +14,13 @@ enum DshConnectionState: Equatable, Sendable {
     }
 }
 
-enum DshDownlinkChannel: Sendable {
-    case host
-    case mux
-}
-
 enum DshLiveUpdate: Sendable {
     case state(DshConnectionState)
     /// The Host explicitly rejected the saved bearer credential. This is not
     /// a transient network retry: the user must pair this Mac again.
     case authorizationRevoked
-    case envelope(DshDownlinkChannel, DshServerRequest)
+    /// One canonical frame from the Host-owned `xNative/follow` contract.
+    case feed(JSONValue)
 }
 
 private enum DshLiveConnectionError: Error {
@@ -34,10 +30,50 @@ private enum DshLiveConnectionError: Error {
     case invalidEnvelope
     case updateBufferOverflow
     case socketClosedBeforeOpen
+    case socketOpenTimedOut
+    case remoteFailure(String)
 }
 
-/// Bridges URLSession's WebSocket open callback into async readiness without sending
-/// application data on DSH's strictly downlink-only sockets.
+private struct DshNativeFollowRequest: Encodable {
+    let sessionId: String?
+    let parentSessionId: String?
+    let mode: String?
+    let maxMessages: Int
+}
+
+private struct DshNativeFollowArguments: Encodable {
+    let request: DshNativeFollowRequest
+}
+
+private struct DshNativeFollowPayload: Encodable {
+    let args: DshNativeFollowArguments
+}
+
+private struct DshRemoteStreamOpen: Encodable {
+    let type = "open"
+    let streamId: String
+    let endpoint = "xNative/follow"
+    let payload: DshNativeFollowPayload
+}
+
+private struct DshRemoteStreamCancel: Encodable {
+    let type = "cancel"
+    let streamId: String
+}
+
+private struct DshRemoteStreamFailure: Decodable {
+    let code: String
+    let message: String
+}
+
+private struct DshRemoteStreamFrame: Decodable {
+    let type: String
+    let streamId: String
+    let value: JSONValue?
+    let error: DshRemoteStreamFailure?
+}
+
+/// Bridges URLSession's WebSocket open callback into async readiness.
 private final class DshWebSocketDelegate: OpenFishTLSDelegate, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var opened: Set<Int> = []
@@ -64,6 +100,9 @@ private final class DshWebSocketDelegate: OpenFishTLSDelegate, URLSessionWebSock
             }
             waiters[identifier] = continuation
             lock.unlock()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.timeOutOpenWaiter(for: identifier)
+            }
         }
     }
 
@@ -104,16 +143,22 @@ private final class DshWebSocketDelegate: OpenFishTLSDelegate, URLSessionWebSock
         lock.lock()
         let waiter = waiters.removeValue(forKey: identifier)
         let wasOpen = opened.remove(identifier) != nil
-        if waiter == nil, !wasOpen {
-            failures[identifier] = failure
-        }
+        if waiter == nil, !wasOpen { failures[identifier] = failure }
         lock.unlock()
         waiter?.resume(throwing: failure)
     }
+
+    private func timeOutOpenWaiter(for identifier: Int) {
+        lock.lock()
+        let waiter = waiters.removeValue(forKey: identifier)
+        lock.unlock()
+        waiter?.resume(throwing: DshLiveConnectionError.socketOpenTimedOut)
+    }
 }
 
-/// Owns the two downlink-only WebSockets exposed by DSH's existing client connection seam.
-/// A failed generation always rebuilds both streams so host and session frames share one cut.
+/// Owns the single authenticated Gateway carrier used by all native live data.
+/// Selecting another task replaces only its logical feed, never the physical
+/// connection, so workspace/control/events share one reconnect generation.
 actor DshLiveConnection {
     nonisolated let updates: AsyncStream<DshLiveUpdate>
 
@@ -123,7 +168,11 @@ actor DshLiveConnection {
     private let session: URLSession
     private let continuation: AsyncStream<DshLiveUpdate>.Continuation
     private var loopTask: Task<Void, Never>?
-    private var activeSockets: [URLSessionWebSocketTask] = []
+    private var activeSocket: URLSessionWebSocketTask?
+    private var activeStreamId: String?
+    private var selectedSessionId: String?
+    private var selectedParentSessionId: String?
+    private var selectedMode: String?
 
     init(baseURL: URL, bearerToken: String? = nil, tlsFingerprint: String? = nil) {
         self.baseURL = baseURL
@@ -148,43 +197,55 @@ actor DshLiveConnection {
     func stop() {
         loopTask?.cancel()
         loopTask = nil
-        for socket in activeSockets {
+        activeStreamId = nil
+        activeSocket?.cancel(with: .goingAway, reason: nil)
+        activeSocket = nil
+    }
+
+    /// Follow the selected parent task or one of its subagent conversations
+    /// while keeping Host-wide streams alive on the same Gateway carrier.
+    func selectSession(
+        _ sessionId: String?,
+        parentSessionId: String? = nil,
+        mode: String? = nil
+    ) async {
+        let parentSessionId = sessionId == nil ? nil : parentSessionId
+        let mode = parentSessionId == nil ? nil : mode
+        guard selectedSessionId != sessionId
+                || selectedParentSessionId != parentSessionId
+                || selectedMode != mode else { return }
+        selectedSessionId = sessionId
+        selectedParentSessionId = parentSessionId
+        selectedMode = mode
+        guard let socket = activeSocket, activeStreamId != nil else { return }
+        do {
+            try await replaceFollowStream(on: socket)
+        } catch {
             socket.cancel(with: .goingAway, reason: nil)
         }
-        activeSockets = []
-        // `stop()` is also the retry/reconfigure primitive. Finishing the
-        // stream here made every subsequent `start()` publish into a dead
-        // continuation, so a manual retry could never reconnect.
     }
 
     private func runLoop() async {
         var attempt = 0
         while !Task.isCancelled {
             do {
-                let mux = try socket(path: "/api/events.mux")
-                let host = try socket(path: "/api/events.host")
-                activeSockets = [mux, host]
-                mux.resume()
-                host.resume()
-
-                // DSH sockets are downlink-only, so readiness must use URLSession's open
-                // callback rather than an application message or a synthetic client frame.
-                async let muxReady: Void = delegate.waitUntilOpen(mux)
-                async let hostReady: Void = delegate.waitUntilOpen(host)
-                _ = try await (muxReady, hostReady)
+                let socket = try makeSocket()
+                activeSocket = socket
+                socket.resume()
+                try await delegate.waitUntilOpen(socket)
+                try await replaceFollowStream(on: socket)
 
                 attempt = 0
                 try publish(.state(.connected))
-                try await pumpGeneration(mux: mux, host: host)
+                try await pump(socket)
             } catch {
-                let authorizationRevoked = activeSockets.contains { socket in
-                    guard let response = socket.response as? HTTPURLResponse else { return false }
+                let authorizationRevoked: Bool = {
+                    guard let response = activeSocket?.response as? HTTPURLResponse else { return false }
                     return response.statusCode == 401 || response.statusCode == 403
-                }
-                for socket in activeSockets {
-                    socket.cancel(with: .goingAway, reason: nil)
-                }
-                activeSockets = []
+                }()
+                activeStreamId = nil
+                activeSocket?.cancel(with: .goingAway, reason: nil)
+                activeSocket = nil
                 if Task.isCancelled { break }
 
                 if authorizationRevoked {
@@ -204,18 +265,14 @@ actor DshLiveConnection {
 
     private func publish(_ update: DshLiveUpdate) throws {
         switch continuation.yield(update) {
-        case .enqueued:
-            return
-        case .dropped:
-            throw DshLiveConnectionError.updateBufferOverflow
-        case .terminated:
-            throw CancellationError()
-        @unknown default:
-            throw DshLiveConnectionError.streamEnded
+        case .enqueued: return
+        case .dropped: throw DshLiveConnectionError.updateBufferOverflow
+        case .terminated: throw CancellationError()
+        @unknown default: throw DshLiveConnectionError.streamEnded
         }
     }
 
-    private func socket(path: String) throws -> URLSessionWebSocketTask {
+    private func makeSocket() throws -> URLSessionWebSocketTask {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw DshLiveConnectionError.invalidBaseURL
         }
@@ -224,7 +281,7 @@ actor DshLiveConnection {
         case "http": components.scheme = "ws"
         default: throw DshLiveConnectionError.invalidBaseURL
         }
-        components.path = path
+        components.path = "/api/remote.mux"
         components.query = nil
         components.fragment = nil
         guard let url = components.url else { throw DshLiveConnectionError.invalidBaseURL }
@@ -235,62 +292,55 @@ actor DshLiveConnection {
         return session.webSocketTask(with: request)
     }
 
-    private func pumpGeneration(
-        mux: URLSessionWebSocketTask,
-        host: URLSessionWebSocketTask
-    ) async throws {
-        let sink = continuation
-        do {
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { try await Self.pump(mux, channel: .mux, sink: sink) }
-                group.addTask { try await Self.pump(host, channel: .host, sink: sink) }
-                _ = try await group.next()
-                mux.cancel(with: .goingAway, reason: nil)
-                host.cancel(with: .goingAway, reason: nil)
-                group.cancelAll()
-                throw DshLiveConnectionError.streamEnded
-            }
-        } catch {
-            mux.cancel(with: .goingAway, reason: nil)
-            host.cancel(with: .goingAway, reason: nil)
-            throw error
+    private func replaceFollowStream(on socket: URLSessionWebSocketTask) async throws {
+        if let oldStreamId = activeStreamId {
+            try await send(DshRemoteStreamCancel(streamId: oldStreamId), on: socket)
         }
+        let streamId = UUID().uuidString.lowercased()
+        activeStreamId = streamId
+        try await send(DshRemoteStreamOpen(
+            streamId: streamId,
+            payload: DshNativeFollowPayload(args: DshNativeFollowArguments(request: DshNativeFollowRequest(
+                sessionId: selectedSessionId,
+                parentSessionId: selectedParentSessionId,
+                mode: selectedMode,
+                maxMessages: 100
+            )))
+        ), on: socket)
     }
 
-    private static func pump(
-        _ task: URLSessionWebSocketTask,
-        channel: DshDownlinkChannel,
-        sink: AsyncStream<DshLiveUpdate>.Continuation
-    ) async throws {
+    private func send<Value: Encodable>(_ value: Value, on socket: URLSessionWebSocketTask) async throws {
+        let data = try JSONEncoder().encode(value)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw DshLiveConnectionError.invalidEnvelope
+        }
+        try await socket.send(.string(text))
+    }
+
+    private func pump(_ socket: URLSessionWebSocketTask) async throws {
         let decoder = JSONDecoder()
         while !Task.isCancelled {
-            let message = try await task.receive()
+            let message = try await socket.receive()
             let data: Data
             switch message {
-            case let .string(text):
-                data = Data(text.utf8)
-            case let .data(value):
-                data = value
-            @unknown default:
-                throw DshLiveConnectionError.binaryFrameDecodeFailed
+            case let .string(text): data = Data(text.utf8)
+            case let .data(value): data = value
+            @unknown default: throw DshLiveConnectionError.binaryFrameDecodeFailed
             }
-            let envelope = try decoder.decode(DshServerRequest.self, from: data)
-            guard envelope.type == "server-request",
-                  envelope.payload["type"]?.stringValue == envelope.method else {
+            let frame = try decoder.decode(DshRemoteStreamFrame.self, from: data)
+            guard frame.streamId == activeStreamId else { continue }
+            switch frame.type {
+            case "item":
+                if let value = frame.value { try publish(.feed(value)) }
+            case "error":
+                let failure = frame.error
+                throw DshLiveConnectionError.remoteFailure(
+                    [failure?.code, failure?.message].compactMap { $0 }.joined(separator: ": ")
+                )
+            case "end":
+                throw DshLiveConnectionError.streamEnded
+            default:
                 throw DshLiveConnectionError.invalidEnvelope
-            }
-            if envelope.payload["type"]?.stringValue == "stream/error" {
-                throw DshLiveConnectionError.streamEnded
-            }
-            switch sink.yield(.envelope(channel, envelope)) {
-            case .enqueued:
-                break
-            case .dropped:
-                throw DshLiveConnectionError.updateBufferOverflow
-            case .terminated:
-                throw CancellationError()
-            @unknown default:
-                throw DshLiveConnectionError.streamEnded
             }
         }
     }

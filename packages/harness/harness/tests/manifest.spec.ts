@@ -62,6 +62,7 @@ describe('Harness Pack v0', () => {
       protocol: 'acp',
       source: 'acp-registry',
       modelConfiguration: { owner: 'harness', required: false },
+      authenticationDiscovery: { source: 'runtime' },
       graph: { level: 'opaque' },
       distribution: { kind: 'npx', package: '@example/new-agent@9.0.0' },
     })
@@ -103,6 +104,60 @@ describe('Harness Pack v0', () => {
     })).toEqual([])
   })
 
+  it('isolates malformed and duplicate Registry rows instead of losing the shared catalog', () => {
+    const packs = packsFromAcpRegistry({
+      version: '1.0.0',
+      agents: [
+        {
+          id: 'healthy-agent', name: 'Healthy Agent', version: '1.2.3',
+          distribution: { npx: { package: '@example/healthy-agent@1.2.3' } },
+        },
+        {
+          id: 'broken-agent', name: '', version: '1.0.0',
+          distribution: { npx: { package: '@example/broken-agent' } },
+        },
+        {
+          id: 'healthy-agent', name: 'Ambiguous Replacement', version: '9.9.9',
+          distribution: { npx: { package: '@attacker/replacement@9.9.9' } },
+        },
+        {
+          id: 'second-agent', name: 'Second Agent', version: '2.0.0',
+          distribution: { uvx: { package: 'second-agent==2.0.0' } },
+        },
+      ],
+    })
+
+    expect(packs.map(pack => pack.id)).toEqual(['healthy-agent', 'second-agent'])
+    expect(packs[0]?.distribution).toMatchObject({
+      kind: 'npx', package: '@example/healthy-agent@1.2.3',
+    })
+  })
+
+  it('bounds the untrusted ACP Registry before projecting Pack rows', () => {
+    const row = {
+      id: 'bounded-agent', name: 'Bounded Agent', version: '1.0.0',
+      distribution: { npx: { package: '@example/bounded-agent' } },
+    }
+    expect(() => packsFromAcpRegistry({
+      version: '1',
+      agents: Array.from({ length: 4_097 }, (_, index) => ({ ...row, id: `agent-${index}` })),
+    })).toThrow()
+    expect(packsFromAcpRegistry({
+      version: '1',
+      agents: [{ ...row, distribution: { npx: {
+        package: '@example/bounded-agent', args: Array.from({ length: 129 }, () => '--argument'),
+      } } }],
+    })).toEqual([])
+    expect(packsFromAcpRegistry({
+      version: '1',
+      agents: [{ ...row, distribution: { binary: Object.fromEntries(
+        Array.from({ length: 33 }, (_, index) => [`linux-target-${index}`, {
+          archive: `https://example.com/agent-${index}.tar.gz`, cmd: './agent', sha256: 'a'.repeat(64),
+        }]),
+      ) } }],
+    })).toEqual([])
+  })
+
   it('keeps account, model ownership, and generic ACP credential metadata data-driven', () => {
     const pack = parseHarnessPack({
       schemaVersion: 0, id: 'future-auth', name: 'Future Auth', version: '1.0.0', publisher: 'Future',
@@ -137,7 +192,15 @@ describe('Harness Pack v0', () => {
         level: 'composable', manifestVersion: 1, boundary: 'Python Agent process', evidence,
         nodes: [
           { id: 'input', kind: 'input', title: 'Input', editable: false, responsibility: 'Accepts ACP prompts.', evidence },
-          { id: 'model', kind: 'model', title: 'Model', editable: true, responsibility: 'Selects the model route.', evidence, config: { provider: 'user' } },
+          {
+            id: 'model', kind: 'model', title: 'Model', editable: true,
+            responsibility: 'Selects the model route.', evidence,
+            configSchema: { version: 1, fields: [{
+              id: 'provider', name: 'Provider', type: 'string', required: true,
+              binding: { kind: 'acp-session-option', target: 'provider' },
+            }] },
+            config: { provider: 'user' },
+          },
           { id: 'output', kind: 'output', title: 'Output', editable: false, responsibility: 'Publishes ACP updates.', evidence },
         ],
         edges: [{ from: 'input', to: 'model' }, { from: 'model', to: 'output' }],
@@ -162,6 +225,40 @@ describe('Harness Pack v0', () => {
     })
     expect(pack.graph.nodes[0]?.position).toEqual({ x: 120, y: 80 })
     expect(pack.graph.nodes[0]?.config).toBeUndefined()
+  })
+
+  it('rejects undeclared or nested executable configuration before persistence', () => {
+    const evidence = [{ kind: 'declared', source: 'Typed configuration test' }]
+    const candidate = {
+      schemaVersion: 0, id: 'typed-only', name: 'Typed only', version: '1.0.0', publisher: 'User',
+      verified: false, protocol: 'acp', source: 'user',
+      distribution: { kind: 'npx', package: '@example/typed-only@1.0.0', args: [], env: {} },
+      graph: {
+        level: 'composable', boundary: 'Typed process', evidence,
+        nodes: [{
+          id: 'session', kind: 'agent-session', title: 'Session', editable: true,
+          responsibility: 'Applies a declared option.', evidence,
+          configSchema: { version: 1, fields: [{
+            id: 'mode', name: 'Mode', type: 'string', required: true,
+            binding: { kind: 'acp-session-option', target: 'mode' },
+          }] },
+          config: { mode: 'safe' },
+        }],
+        edges: [],
+      },
+    }
+    expect(() => parseHarnessPack({
+      ...candidate,
+      graph: { ...candidate.graph, nodes: candidate.graph.nodes.map(node => ({
+        ...node, config: { ...node.config, undeclared: 'value' },
+      })) },
+    })).toThrow('undeclared field')
+    expect(() => parseHarnessPack({
+      ...candidate,
+      graph: { ...candidate.graph, nodes: candidate.graph.nodes.map(node => ({
+        ...node, config: { mode: { nested: true } },
+      })) },
+    })).toThrow()
   })
 
   it('uses the current platform Registry binary cmd only when it is checksummed', () => {

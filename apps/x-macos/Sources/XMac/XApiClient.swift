@@ -105,6 +105,14 @@ private struct RpcRequestEnvelope<Payload: Encodable>: Encodable {
     let payload: Payload
 }
 
+private struct TypertPayload<Arguments: Encodable>: Encodable {
+    let args: Arguments
+}
+
+private struct TypertRequestArguments<Request: Encodable & Sendable>: Encodable, Sendable {
+    let request: Request
+}
+
 private struct RpcResponseEnvelope<Value: Decodable>: Decodable {
     struct Result: Decodable {
         struct Failure: Decodable {
@@ -115,6 +123,22 @@ private struct RpcResponseEnvelope<Value: Decodable>: Decodable {
 
         let ok: Bool
         let value: Value?
+        let error: Failure?
+    }
+
+    let type: String
+    let rpcId: String
+    let result: Result
+}
+
+private struct RpcVoidResponseEnvelope: Decodable {
+    struct Result: Decodable {
+        struct Failure: Decodable {
+            let code: String
+            let message: String
+        }
+
+        let ok: Bool
         let error: Failure?
     }
 
@@ -444,6 +468,7 @@ struct QuestionItem: Codable, Identifiable, Equatable, Sendable {
 }
 
 struct PendingQuestion: Identifiable, Equatable, Sendable {
+    let clientId: String
     let rpcId: String
     let sessionId: String
     let questions: [QuestionItem]
@@ -620,6 +645,39 @@ struct HarnessDistribution: Codable, Equatable, Sendable {
     let env: [String: String]
 }
 
+struct HarnessBindingKindDefinition: Decodable, Identifiable, Equatable, Sendable {
+    let kind: String
+    let name: String
+    let description: String
+    let fieldTypes: [String]
+    let targetLabel: String
+    let targetPlaceholder: String?
+    let targetPattern: String?
+
+    var id: String { kind }
+}
+
+struct HarnessNodeKindDefinition: Decodable, Identifiable, Equatable, Sendable {
+    let kind: String
+    let name: String
+    let description: String
+    let responsibility: String
+    let editable: Bool
+    let inputs: [String]
+    let outputs: [String]
+    let ports: [HarnessGraphPort]?
+    let observes: [String]?
+    let configSchema: HarnessNodeConfigSchema?
+    let defaultConfig: [String: JSONValue]?
+
+    var id: String { kind }
+}
+
+struct HarnessAuthoringContract: Decodable, Equatable, Sendable {
+    let nodeKinds: [HarnessNodeKindDefinition]
+    let bindingKinds: [HarnessBindingKindDefinition]
+}
+
 struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     struct DriverBundle: Decodable, Equatable, Sendable {
         let apiVersion: Int
@@ -635,6 +693,10 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     struct ModelConfiguration: Decodable, Equatable, Sendable {
         let owner: String
         let required: Bool
+        let detail: String
+    }
+    struct AuthenticationDiscovery: Decodable, Equatable, Sendable {
+        let source: String
         let detail: String
     }
     struct Capability: Decodable, Identifiable, Equatable, Sendable {
@@ -657,6 +719,8 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
             let detail: String
         }
         let status: String
+        let operationPhase: String?
+        let operationDetail: String?
         let installedVersion: String?
         let availableVersion: String
         let previousVersions: [String]
@@ -724,6 +788,7 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
         let selectedMethod: String?
         let status: String
         let missingFields: [String]
+        let detail: String?
     }
     struct Compatibility: Decodable, Equatable, Sendable {
         let status: String
@@ -757,6 +822,7 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let source: String
     var account: AccountDescriptor? = nil
     var modelConfiguration: ModelConfiguration? = nil
+    var authenticationDiscovery: AuthenticationDiscovery? = nil
     var driverBundle: DriverBundle? = nil
     let distribution: HarnessDistribution?
     let graph: HarnessGraph
@@ -767,10 +833,11 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let compatibility: Compatibility
     let publication: Publication?
     let capabilities: [Capability]
+    let authoring: HarnessAuthoringContract?
     let driver: Driver
 
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, account, modelConfiguration, driverBundle, distribution, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
+        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, distribution, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, authoring, driver
         case protocolName = "protocol"
     }
 }
@@ -868,6 +935,7 @@ struct DshCommandExecution: Decodable, Equatable, Sendable {
 }
 
 struct PendingApproval: Identifiable, Equatable, Sendable {
+    let clientId: String
     let rpcId: String
     let sessionId: String
     let approvalId: String
@@ -904,19 +972,23 @@ actor DshApiClient {
         session = URLSession(configuration: configuration, delegate: trustDelegate, delegateQueue: nil)
     }
 
-    func rpc<Payload: Encodable & Sendable, Value: Decodable & Sendable>(
+    private func invoke<Arguments: Encodable & Sendable, Value: Decodable & Sendable>(
         _ method: String,
-        _ payload: Payload,
+        arguments: Arguments,
+        rpcId: String = UUID().uuidString,
         timeout: TimeInterval? = nil
     ) async throws -> Value {
-        let rpcId = UUID().uuidString
         var request = URLRequest(url: baseURL.appending(path: "/api/\(method)"))
         request.httpMethod = "POST"
         if let timeout { request.timeoutInterval = timeout }
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         authorize(&request)
         request.httpBody = try JSONEncoder().encode(
-            RpcRequestEnvelope(rpcId: rpcId, method: method, payload: payload)
+            RpcRequestEnvelope(
+                rpcId: rpcId,
+                method: method,
+                payload: TypertPayload(args: arguments)
+            )
         )
 
         let (data, response) = try await session.data(for: request)
@@ -935,64 +1007,126 @@ actor DshApiClient {
         )
     }
 
+    private func rpc<Payload: Encodable & Sendable, Value: Decodable & Sendable>(
+        _ method: String,
+        _ request: Payload,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(
+            method,
+            arguments: TypertRequestArguments(request: request),
+            timeout: timeout
+        )
+    }
+
+    private func rpcDirect<Arguments: Encodable & Sendable, Value: Decodable & Sendable>(
+        _ method: String,
+        _ arguments: Arguments,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(method, arguments: arguments, timeout: timeout)
+    }
+
+    private func rpcEmpty<Value: Decodable & Sendable>(
+        _ method: String,
+        timeout: TimeInterval? = nil
+    ) async throws -> Value {
+        try await invoke(method, arguments: EmptyPayload(), timeout: timeout)
+    }
+
+    private func rpcDirectVoid<Arguments: Encodable & Sendable>(
+        _ method: String,
+        _ arguments: Arguments
+    ) async throws {
+        let rpcId = UUID().uuidString
+        var request = URLRequest(url: baseURL.appending(path: "/api/\(method)"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        authorize(&request)
+        request.httpBody = try JSONEncoder().encode(
+            RpcRequestEnvelope(
+                rpcId: rpcId,
+                method: method,
+                payload: TypertPayload(args: arguments)
+            )
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw DshApiError.transport(
+                "HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for \(method)"
+            )
+        }
+        let envelope = try JSONDecoder().decode(RpcVoidResponseEnvelope.self, from: data)
+        guard envelope.type == "server-response", envelope.rpcId == rpcId else {
+            throw DshApiError.rpcIdMismatch
+        }
+        guard envelope.result.ok else {
+            throw DshApiError.host(
+                envelope.result.error?.code ?? "unknown",
+                envelope.result.error?.message ?? "RPC failed"
+            )
+        }
+    }
+
     func hostDescription() async throws -> HostDescription {
-        try await rpc("host.describe", EmptyPayload())
+        try await rpcEmpty("xNative/describe")
     }
 
     func workspaces() async throws -> WorkspaceList {
-        try await rpc("workspace.list", EmptyPayload())
+        try await rpcEmpty("workspace/list")
     }
 
     func createWorkspace(path: String) async throws -> WorkspaceView {
         struct Payload: Encodable, Sendable { let path: String }
         struct Value: Decodable, Sendable { let workspace: WorkspaceView; let created: Bool }
-        let value: Value = try await rpc("workspace.create", Payload(path: path))
+        let value: Value = try await rpc("workspace/create", Payload(path: path))
         return value.workspace
     }
 
     func pickDirectory() async throws -> String? {
-        struct Value: Decodable, Sendable { let path: String? }
-        let value: Value = try await rpc("host.pickDirectory", EmptyPayload())
-        return value.path
+        let value: JSONValue = try await rpcEmpty("directoryPicker/pick")
+        return value.stringValue
     }
 
     func listDirectory(path: String? = nil) async throws -> HostDirectoryListing {
         struct Payload: Encodable, Sendable { let path: String? }
-        return try await rpc("host.listDirectory", Payload(path: path))
+        return try await rpcDirect("directoryPicker/list", Payload(path: path))
     }
 
     func createDirectory(parent: String, name: String) async throws -> String {
         struct Payload: Encodable, Sendable { let path: String; let name: String }
-        struct Value: Decodable, Sendable { let path: String }
-        let value: Value = try await rpc("host.createDirectory", Payload(path: parent, name: name))
-        return value.path
+        let value: String = try await rpcDirect(
+            "directoryPicker/createDirectory",
+            Payload(path: parent, name: name)
+        )
+        return value
     }
 
     func archiveSession(_ sessionId: String) async throws -> [String] {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let archivedSessionIds: [String] }
-        let value: Value = try await rpc("workspace.archiveSession", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("workspace/archiveSession", Payload(sessionId: sessionId))
         return value.archivedSessionIds
     }
 
     func unarchiveSession(_ sessionId: String) async throws -> [String] {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let archivedSessionIds: [String] }
-        let value: Value = try await rpc("workspace.unarchiveSession", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("workspace/unarchiveSession", Payload(sessionId: sessionId))
         return value.archivedSessionIds
     }
 
     func renameWorkspace(_ workspaceId: String, title: String) async throws -> WorkspaceView {
         struct Payload: Encodable, Sendable { let workspaceId: String; let title: String }
         struct Value: Decodable, Sendable { let workspace: WorkspaceView }
-        let value: Value = try await rpc("workspace.rename", Payload(workspaceId: workspaceId, title: title))
+        let value: Value = try await rpc("workspace/rename", Payload(workspaceId: workspaceId, title: title))
         return value.workspace
     }
 
     func deleteWorkspace(_ workspaceId: String) async throws {
         struct Payload: Encodable, Sendable { let workspaceId: String }
         struct Value: Decodable, Sendable { let deleted: Bool }
-        let value: Value = try await rpc("workspace.delete", Payload(workspaceId: workspaceId))
+        let value: Value = try await rpc("workspace/delete", Payload(workspaceId: workspaceId))
         guard value.deleted else { throw DshApiError.host("workspace-delete-rejected", "Workspace was not removed") }
     }
 
@@ -1000,7 +1134,7 @@ actor DshApiClient {
         struct Payload: Encodable, Sendable { let workspaceId: String; let beforeWorkspaceId: String? }
         struct Value: Decodable, Sendable { let workspaceIds: [String] }
         let value: Value = try await rpc(
-            "workspace.insertBefore",
+            "workspace/insertBefore",
             Payload(workspaceId: workspaceId, beforeWorkspaceId: before)
         )
         return value.workspaceIds
@@ -1009,13 +1143,13 @@ actor DshApiClient {
     func sessions() async throws -> [SessionSummary] {
         struct Payload: Encodable, Sendable { let cursor: String? = nil }
         struct Value: Decodable, Sendable { let items: [SessionSummary] }
-        let value: Value = try await rpc("session.list", Payload())
+        let value: Value = try await rpc("session/list", Payload())
         return value.items
     }
 
     func searchSessions(_ query: String) async throws -> SessionSearchResults {
         struct Payload: Encodable, Sendable { let query: String }
-        return try await rpc("session.search", Payload(query: query))
+        return try await rpc("session/search", Payload(query: query))
     }
 
     func createSession(
@@ -1035,7 +1169,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let sessionId: String; let harnessId: String; let agentPreset: String? }
         let value: Value = try await rpc(
-            "session.create",
+            "session/create",
             Payload(
                 workspaceId: workspaceId,
                 cwd: cwd,
@@ -1051,7 +1185,7 @@ actor DshApiClient {
     func discardSession(_ sessionId: String) async throws {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let discarded: Bool }
-        let value: Value = try await rpc("session.discard", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("session/discard", Payload(sessionId: sessionId))
         guard value.discarded else {
             throw DshApiError.host("draft-discard-rejected", "The Host did not discard the draft task")
         }
@@ -1073,7 +1207,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let items: [SessionImportItem] }
         let value: Value = try await rpc(
-            "session.import",
+            "xNative/import",
             Payload(
                 workspaceId: workspaceId,
                 format: format,
@@ -1091,7 +1225,7 @@ actor DshApiClient {
             let maxMessages: Int
         }
         return try await rpc(
-            "session.history",
+            "xNative/history",
             Payload(sessionId: sessionId, beforeSeq: beforeSeq, maxMessages: maxMessages)
         )
     }
@@ -1100,7 +1234,7 @@ actor DshApiClient {
         struct Payload: Encodable, Sendable { let sessionId: String; let attachmentId: String }
         struct Value: Decodable, Sendable { let data: String }
         let value: Value = try await rpc(
-            "session.attachment",
+            "session/attachment",
             Payload(sessionId: sessionId, attachmentId: attachmentId)
         )
         guard let data = Data(base64Encoded: value.data), data.count <= 25 * 1_024 * 1_024 else {
@@ -1112,24 +1246,24 @@ actor DshApiClient {
     func renameSession(_ sessionId: String, title: String) async throws -> (title: String, seq: Int) {
         struct Payload: Encodable, Sendable { let sessionId: String; let title: String }
         struct Value: Decodable, Sendable { let title: String; let seq: Int }
-        let value: Value = try await rpc("session.rename", Payload(sessionId: sessionId, title: title))
+        let value: Value = try await rpc("session/rename", Payload(sessionId: sessionId, title: title))
         return (value.title, value.seq)
     }
 
     func forkSession(_ sessionId: String, atSeq: Int? = nil) async throws -> String {
         struct Payload: Encodable, Sendable { let sessionId: String; let atSeq: Int? }
         struct Value: Decodable, Sendable { let sessionId: String }
-        let value: Value = try await rpc("session.fork", Payload(sessionId: sessionId, atSeq: atSeq))
+        let value: Value = try await rpc("session/fork", Payload(sessionId: sessionId, atSeq: atSeq))
         return value.sessionId
     }
 
     func models(sessionId: String) async throws -> SessionModels {
         struct Payload: Encodable, Sendable { let sessionId: String }
-        return try await rpc("session.models", Payload(sessionId: sessionId))
+        return try await rpc("session/models", Payload(sessionId: sessionId))
     }
 
     func hostModels() async throws -> HostModelCatalog {
-        try await rpc("llm.models", EmptyPayload())
+        try await rpcEmpty("session/modelCatalog")
     }
 
     func selectModel(sessionId: String, selection: ModelSelection) async throws -> ModelSelection {
@@ -1141,7 +1275,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let selected: ModelSelection }
         let value: Value = try await rpc(
-            "session.selectModel",
+            "session/selectModel",
             Payload(
                 sessionId: sessionId,
                 provider: selection.provider,
@@ -1160,7 +1294,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let options: [HarnessConfigOption] }
         let response: Value = try await rpc(
-            "session.setHarnessConfig",
+            "session/setHarnessConfig",
             Payload(sessionId: sessionId, configId: configId, value: value)
         )
         return response.options
@@ -1172,10 +1306,9 @@ actor DshApiClient {
             let line: String
             let images: [JSONValue]
         }
-        struct Payload: Encodable, Sendable { let args: Arguments }
-        return try await rpc(
+        return try await rpcDirect(
             "commands/execute",
-            Payload(args: Arguments(agentId: sessionId, line: line, images: []))
+            Arguments(agentId: sessionId, line: line, images: [])
         )
     }
 
@@ -1186,6 +1319,7 @@ actor DshApiClient {
         mode: String = "queue"
     ) async throws -> SessionPromptReceipt {
         struct Payload: Encodable, Sendable {
+            let requestId: String
             let sessionId: String
             let mode: String
             let content: [JSONValue]
@@ -1208,17 +1342,22 @@ actor DshApiClient {
             ])
         })
         let payload = Payload(
+            requestId: rpcId,
             sessionId: sessionId,
             mode: mode,
             content: content,
             clientTimeZone: TimeZone.current.identifier
         )
-        var request = URLRequest(url: baseURL.appending(path: "/api/session.prompt"))
+        var request = URLRequest(url: baseURL.appending(path: "/api/session/prompt"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         authorize(&request)
         request.httpBody = try JSONEncoder().encode(
-            RpcRequestEnvelope(rpcId: rpcId, method: "session.prompt", payload: payload)
+            RpcRequestEnvelope(
+                rpcId: rpcId,
+                method: "session/prompt",
+                payload: TypertPayload(args: TypertRequestArguments(request: payload))
+            )
         )
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -1241,7 +1380,7 @@ actor DshApiClient {
         struct Payload: Encodable, Sendable { let sessionId: String; let itemId: String; let action: JSONValue }
         struct Value: Decodable, Sendable { let accepted: Bool }
         let value: Value = try await rpc(
-            "session.updateQueue",
+            "session/updateQueue",
             Payload(sessionId: sessionId, itemId: itemId, action: action)
         )
         guard value.accepted else { throw DshApiError.host("queue-rejected", "Queue mutation was not accepted") }
@@ -1250,31 +1389,39 @@ actor DshApiClient {
     func cancel(sessionId: String) async throws {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let accepted: Bool }
-        let value: Value = try await rpc("session.cancel", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("session/cancel", Payload(sessionId: sessionId))
         guard value.accepted else { throw DshApiError.host("cancel-rejected", "Cancel was not accepted") }
     }
 
     func skills(sessionId: String) async throws -> [SkillEntry] {
         struct Payload: Encodable, Sendable { let sessionId: String }
         struct Value: Decodable, Sendable { let skills: [SkillEntry] }
-        let value: Value = try await rpc("skill.list", Payload(sessionId: sessionId))
+        let value: Value = try await rpc("skills/list", Payload(sessionId: sessionId))
         return value.skills
     }
 
     func commandDirectory(sessionId: String) async throws -> [JSONValue] {
         struct Arguments: Encodable, Sendable { let agentId: String }
-        struct Payload: Encodable, Sendable { let args: Arguments }
-        return try await rpc("commands/list", Payload(args: Arguments(agentId: sessionId)))
+        return try await rpcDirect("commands/list", Arguments(agentId: sessionId))
     }
 
     func agentPresets() async throws -> AgentPresetCatalog {
-        try await rpc("agentPreset.list", EmptyPayload())
+        struct Value: Decodable, Sendable {
+            let presets: [AgentPresetEntry]
+            let authorable: Bool
+        }
+        let value: Value = try await rpcEmpty("agentPresets/list")
+        return AgentPresetCatalog(
+            presets: value.presets,
+            authorable: value.authorable,
+            hasDocument: false
+        )
     }
 
     func harnesses(query: String? = nil) async throws -> [HarnessCatalogEntry] {
         struct Payload: Encodable, Sendable { let query: String? }
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
-        let value: Value = try await rpc("harness.list", Payload(query: query))
+        let value: Value = try await rpc("harness/list", Payload(query: query))
         return value.items
     }
 
@@ -1286,7 +1433,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let item: HarnessCatalogEntry }
         let value: Value = try await rpc(
-            "harness.resolve",
+            "harness/resolve",
             Payload(id: id, version: version, authMethod: authMethod)
         )
         return value.item
@@ -1294,7 +1441,7 @@ actor DshApiClient {
 
     func refreshHarnesses() async throws -> [HarnessCatalogEntry] {
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
-        let value: Value = try await rpc("harness.refresh", EmptyPayload())
+        let value: Value = try await rpcEmpty("harness/refresh")
         return value.items
     }
 
@@ -1310,7 +1457,7 @@ actor DshApiClient {
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
         let hostLocalActions: Set<String> = ["remove", "login", "upsert", "validate-publication", "submit-publication", "submit-revocation"]
         let hostLocalCodeConsent = acceptUnverified == true && ["install", "update", "probe"].contains(action)
-        let method = hostLocalActions.contains(action) || hostLocalCodeConsent ? "harness.manage" : "harness.mutate"
+        let method = hostLocalActions.contains(action) || hostLocalCodeConsent ? "harness/manage" : "harness/mutate"
         let value: Value = try await rpc(method, Payload(action: action, id: id, authMethod: authMethod, reason: reason, acceptUnverified: acceptUnverified, pack: pack))
         return value.items
     }
@@ -1333,7 +1480,7 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
         let value: Value = try await rpc(
-            "harness.manage",
+            "harness/manage",
             Payload(
                 action: "authorize-driver",
                 id: id,
@@ -1346,18 +1493,19 @@ actor DshApiClient {
     }
 
     func selectAgentPreset(sessionId: String, agentPreset: String) async throws -> String {
-        struct Payload: Encodable, Sendable { let sessionId: String; let agentPreset: String }
-        struct Value: Decodable, Sendable { let agentPreset: String }
-        let value: Value = try await rpc(
-            "agentPreset.select",
-            Payload(sessionId: sessionId, agentPreset: agentPreset)
+        struct Arguments: Encodable, Sendable { let agentId: String; let agentPreset: String }
+        return try await rpcDirect(
+            "agentPresets/select",
+            Arguments(agentId: sessionId, agentPreset: agentPreset)
         )
-        return value.agentPreset
     }
 
     func subagents(parentSessionId: String) async throws -> SubagentCatalog {
-        struct Payload: Encodable, Sendable { let parentSessionId: String }
-        let value: JSONValue = try await rpc("subagent.list", Payload(parentSessionId: parentSessionId))
+        struct Arguments: Encodable, Sendable { let parentSessionId: String }
+        let value: JSONValue = try await rpcDirect(
+            "subagents/list",
+            Arguments(parentSessionId: parentSessionId)
+        )
         return SubagentCatalog(
             entries: value["entries"]?.arrayValue?.compactMap(SubagentEntry.init(json:)) ?? [],
             parentAvailable: value["parentAvailable"]?.boolValue ?? false
@@ -1372,16 +1520,16 @@ actor DshApiClient {
     ) async throws -> SessionHistory {
         struct Payload: Encodable, Sendable {
             let parentSessionId: String
-            let childSessionId: String
+            let sessionId: String
             let mode: String
             let beforeSeq: Int?
             let maxMessages: Int
         }
         return try await rpc(
-            "subagent.history",
+            "xNative/history",
             Payload(
                 parentSessionId: parentSessionId,
-                childSessionId: childSessionId,
+                sessionId: childSessionId,
                 mode: mode,
                 beforeSeq: beforeSeq,
                 maxMessages: 100
@@ -1395,6 +1543,7 @@ actor DshApiClient {
         text: String
     ) async throws {
         struct Payload: Encodable, Sendable {
+            let requestId: String
             let parentSessionId: String
             let childSessionId: String
             let mode = "continuable"
@@ -1403,8 +1552,9 @@ actor DshApiClient {
         }
         struct Value: Decodable, Sendable { let messageId: String }
         let _: Value = try await rpc(
-            "subagent.prompt",
+            "subagents/prompt",
             Payload(
+                requestId: UUID().uuidString,
                 parentSessionId: parentSessionId,
                 childSessionId: childSessionId,
                 content: [.object(["type": .string("text"), "text": .string(text)])],
@@ -1414,43 +1564,51 @@ actor DshApiClient {
     }
 
     func interruptSubagent(parentSessionId: String, childSessionId: String) async throws {
-        struct Payload: Encodable, Sendable {
+        struct Arguments: Encodable, Sendable {
             let parentSessionId: String
             let childSessionId: String
             let mode = "continuable"
         }
         struct Value: Decodable, Sendable { let accepted: Bool }
-        let value: Value = try await rpc(
-            "subagent.interrupt",
-            Payload(parentSessionId: parentSessionId, childSessionId: childSessionId)
+        let value: Value = try await rpcDirect(
+            "subagents/interruptByParent",
+            Arguments(parentSessionId: parentSessionId, childSessionId: childSessionId)
         )
         guard value.accepted else { throw DshApiError.host("subagent-rejected", "Interrupt was not accepted") }
     }
 
     func createGoal(sessionId: String, objective: String, maxRounds: Int?) async throws -> GoalRef {
-        struct Payload: Encodable, Sendable { let sessionId: String; let objective: String; let maxGoalRounds: Int? }
+        struct Request: Encodable, Sendable { let objective: String; let maxGoalRounds: Int? }
+        struct Arguments: Encodable, Sendable { let agentId: String; let request: Request }
         struct Value: Decodable, Sendable { let ref: GoalRef }
-        let value: Value = try await rpc(
-            "goal.create",
-            Payload(sessionId: sessionId, objective: objective, maxGoalRounds: maxRounds)
+        let value: Value = try await rpcDirect(
+            "goals/create",
+            Arguments(
+                agentId: sessionId,
+                request: Request(objective: objective, maxGoalRounds: maxRounds)
+            )
         )
         return value.ref
     }
 
     func mutateGoal(sessionId: String, verb: String, ref: GoalRef) async throws -> GoalRef? {
-        struct Payload: Encodable, Sendable { let sessionId: String; let ref: GoalRef }
+        struct Arguments: Encodable, Sendable { let agentId: String; let ref: GoalRef }
         if verb == "clear" {
-            struct Value: Decodable, Sendable { let cleared: Bool }
-            let _: Value = try await rpc("goal.clear", Payload(sessionId: sessionId, ref: ref))
+            let _: GoalRef = try await rpcDirect(
+                "goals/clear",
+                Arguments(agentId: sessionId, ref: ref)
+            )
             return nil
         }
-        struct Value: Decodable, Sendable { let ref: GoalRef }
-        let value: Value = try await rpc("goal.\(verb)", Payload(sessionId: sessionId, ref: ref))
-        return value.ref
+        let value: GoalView = try await rpcDirect(
+            "goals/\(verb)",
+            Arguments(agentId: sessionId, ref: ref)
+        )
+        return GoalRef(id: value.id, revision: value.revision)
     }
 
     func settings() async throws -> SettingsCatalog {
-        try await rpc("settings.describe", EmptyPayload())
+        try await rpcEmpty("settings/describe")
     }
 
     func replaceSettings(namespace: String, section: JSONValue, revision: Int) async throws -> SettingsNamespaceView {
@@ -1459,37 +1617,34 @@ actor DshApiClient {
             let section: JSONValue
             let expectedRevision: Int
         }
-        return try await rpc(
-            "settings.replace",
+        return try await rpcDirect(
+            "settings/replace",
             Payload(ns: namespace, section: section, expectedRevision: revision)
         )
     }
 
     func credentialState(refs: [String]) async throws -> [String: JSONValue] {
         struct Payload: Encodable, Sendable { let refs: [String] }
-        let value: JSONValue = try await rpc("credentials.describe", Payload(refs: refs))
-        return value["credentials"]?.objectValue ?? [:]
+        let value: JSONValue = try await rpcDirect("credentials/describe", Payload(refs: refs))
+        return value.objectValue ?? [:]
     }
 
     func setCredential(ref: String, value: String) async throws {
         struct Payload: Encodable, Sendable { let ref: String; let value: String }
-        let _: JSONValue = try await rpc("credentials.set", Payload(ref: ref, value: value))
+        try await rpcDirectVoid("credentials/set", Payload(ref: ref, value: value))
     }
 
     func unsetCredential(ref: String) async throws {
         struct Payload: Encodable, Sendable { let ref: String }
-        let _: JSONValue = try await rpc("credentials.unset", Payload(ref: ref))
+        try await rpcDirectVoid("credentials/unset", Payload(ref: ref))
     }
 
     func configurableProviders() async throws -> [ConfigurableProvider] {
-        struct Value: Decodable, Sendable { let providers: [ConfigurableProvider] }
-        let value: Value = try await rpc("llm.providers", EmptyPayload())
-        return value.providers
+        try await rpcEmpty("llm/listConfigurableProviders")
     }
 
     func pluginInventory() async throws -> [PluginInventoryEntry] {
-        struct Payload: Encodable, Sendable { let args: JSONValue = .object([:]) }
-        let value: JSONValue = try await rpc("pluginInventory/list", Payload())
+        let value: JSONValue = try await rpcEmpty("pluginInventory/list")
         return value["entries"]?.arrayValue?.compactMap(PluginInventoryEntry.init(json:)) ?? []
     }
 
@@ -1512,51 +1667,34 @@ actor DshApiClient {
     }
 
     func respond(to approval: PendingApproval, outcome: String) async throws -> DshResponseReceipt {
-        struct ApprovalPayload: Encodable, Sendable {
-            let sessionId: String
-            let approvalId: String
-            let outcome: String
+        struct Outcome: Encodable, Sendable { let kind = "result"; let value: String }
+        struct Arguments: Encodable, Sendable {
+            let clientId: String
+            let eventId: String
+            let outcome: Outcome
         }
-
-        let envelope = ClientResponseEnvelope(
-            rpcId: approval.rpcId,
-            result: .init(
-                value: ApprovalPayload(
-                    sessionId: approval.sessionId,
-                    approvalId: approval.approvalId,
-                    outcome: outcome
-                )
-            )
-        )
-        var request = URLRequest(url: baseURL.appending(path: "/api/respond"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "content-type")
-        authorize(&request)
-        request.httpBody = try JSONEncoder().encode(envelope)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw DshApiError.transport("HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for respond")
-        }
-        return try JSONDecoder().decode(DshResponseReceipt.self, from: data)
+        try await rpcDirectVoid("$events/result", Arguments(
+            clientId: approval.clientId,
+            eventId: approval.rpcId,
+            outcome: Outcome(value: outcome)
+        ))
+        return DshResponseReceipt(accepted: true, reason: nil)
     }
 
     func respond(to question: PendingQuestion, answers: [QuestionAnswerItem]) async throws -> DshResponseReceipt {
         struct Answer: Encodable, Sendable { let answers: [QuestionAnswerItem] }
-        struct QuestionPayload: Encodable, Sendable { let sessionId: String; let answer: Answer }
-        let envelope = ClientResponseEnvelope(
-            rpcId: question.rpcId,
-            result: .init(value: QuestionPayload(sessionId: question.sessionId, answer: Answer(answers: answers)))
-        )
-        var request = URLRequest(url: baseURL.appending(path: "/api/respond"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "content-type")
-        authorize(&request)
-        request.httpBody = try JSONEncoder().encode(envelope)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw DshApiError.transport("HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for respond")
+        struct Outcome: Encodable, Sendable { let kind = "result"; let value: Answer }
+        struct Arguments: Encodable, Sendable {
+            let clientId: String
+            let eventId: String
+            let outcome: Outcome
         }
-        return try JSONDecoder().decode(DshResponseReceipt.self, from: data)
+        try await rpcDirectVoid("$events/result", Arguments(
+            clientId: question.clientId,
+            eventId: question.rpcId,
+            outcome: Outcome(value: Answer(answers: answers))
+        ))
+        return DshResponseReceipt(accepted: true, reason: nil)
     }
 
     private func authorize(_ request: inout URLRequest) {

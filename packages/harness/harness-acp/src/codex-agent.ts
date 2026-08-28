@@ -1,6 +1,7 @@
 /** First-class OpenFish Agent projection over the official Codex app-server. */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { isAbsolute } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises'
@@ -15,7 +16,9 @@ import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionId, TurnEndReason } from '@deepseek-ai/dsh-session'
 import {
   observeHarnessRuntime,
+  safeHarnessDiagnostic,
   type HarnessCapability,
+  type HarnessAuthMethod,
   type HarnessPack,
   type HarnessRuntimeSignal,
   type HarnessSessionRequest,
@@ -34,9 +37,131 @@ import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/ds
 import { managedLaunchArgv } from './agent.ts'
 import type { AcpHarnessConfigOption, AcpHarnessModelCatalog } from './agent.ts'
 import { prepareHarnessProcess } from './process-authority.ts'
-import { harnessStartupError, harnessStartupSignal } from './startup.ts'
+import { harnessStartupError, harnessStartupSignal, harnessTransportClosed } from './startup.ts'
+import { durableCodexNotification } from './native-event.ts'
 
 type Phase = { kind: 'idle'; turn: number } | { kind: 'running'; turn: number; abort: AbortController }
+
+const MAX_CODEX_CA_BUNDLE_BYTES = 8 * 1024 * 1024
+const CODEX_CA_ENVIRONMENTS = new Set(['CODEX_CA_CERTIFICATE', 'SSL_CERT_FILE'])
+
+/** Platform CA bundle candidates used only when the user has not chosen one. */
+function systemCodexCaCandidates(): string[] {
+  if (process.platform === 'darwin') return ['/etc/ssl/cert.pem']
+  if (process.platform === 'linux') {
+    return [
+      '/etc/ssl/certs/ca-certificates.crt',
+      '/etc/pki/tls/certs/ca-bundle.crt',
+      '/etc/ssl/ca-bundle.pem',
+    ]
+  }
+  return []
+}
+
+/** Find the first regular system trust bundle without making it mandatory. */
+async function systemCodexCaBundle(): Promise<string | undefined> {
+  for (const candidate of systemCodexCaCandidates()) {
+    try {
+      if ((await lstat(candidate)).isFile()) return candidate
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  return undefined
+}
+
+/**
+ * Import an explicitly selected or platform trust bundle into the private
+ * Harness runtime. The subprocess receives only the private copy, never a read
+ * grant to an arbitrary external directory.
+ */
+async function importCodexCaBundle(runtimeDirectory: string, source: string): Promise<string> {
+  if (!isAbsolute(source) || source.includes('\0')) {
+    throw new Error('The Codex CA bundle must be an absolute local file path')
+  }
+  const sourceHandle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let bytes: Buffer
+  try {
+    const info = await sourceHandle.stat()
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_CODEX_CA_BUNDLE_BYTES) {
+      throw new Error('The Codex CA bundle must be a non-empty regular PEM file no larger than 8 MiB')
+    }
+    bytes = await sourceHandle.readFile()
+  } finally {
+    await sourceHandle.close()
+  }
+  const text = bytes.toString('utf8')
+  if (!text.includes('-----BEGIN CERTIFICATE-----') || !text.includes('-----END CERTIFICATE-----')) {
+    throw new Error('The Codex CA bundle does not contain a PEM certificate')
+  }
+
+  const directory = join(runtimeDirectory, 'network-trust')
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await chmod(directory, 0o700)
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  const destination = join(directory, `ca-${digest}.pem`)
+  try {
+    const existing = await lstat(destination)
+    if (!existing.isFile()) throw new Error('The private Codex CA destination is not a regular file')
+    return destination
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  const temporary = join(directory, `.ca-importing-${randomUUID()}`)
+  try {
+    await writeFile(temporary, bytes, { mode: 0o600, flag: 'wx' })
+    try {
+      await rename(temporary, destination)
+    } catch (error: unknown) {
+      // Windows does not replace an existing destination and two sessions may
+      // import the same digest concurrently. Accept only the regular file at
+      // the content-addressed private destination; every other failure stays
+      // fail-closed.
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'EPERM') throw error
+      const existing = await lstat(destination)
+      if (!existing.isFile()) throw new Error('The private Codex CA destination is not a regular file')
+    }
+    await chmod(destination, 0o600)
+    return destination
+  } finally {
+    await rm(temporary, { force: true })
+  }
+}
+
+/**
+ * Resolve auth fields plus Codex's documented custom-CA variables. Optional
+ * platform trust is copied into the same private boundary as credentials.
+ */
+export async function codexAuthenticationEnvironment(
+  ctx: Context,
+  method: HarnessAuthMethod | undefined,
+  runtimeDirectory: string,
+): Promise<Record<string, string>> {
+  const environment: Record<string, string> = {}
+  let caEnvironment = 'CODEX_CA_CERTIFICATE'
+  let caSource: string | undefined
+  const credentials = ctx.get('credentials')
+  for (const field of method?.fields ?? []) {
+    const hit = await credentials?.resolve(credentialRef(field.ref))
+    if (field.required && hit === undefined) throw new Error(`Authentication needs ${field.name}`)
+    if (hit === undefined || field.env === undefined) continue
+    if (CODEX_CA_ENVIRONMENTS.has(field.env)) {
+      caEnvironment = field.env
+      caSource = hit.value
+    } else {
+      environment[field.env] = hit.value
+    }
+  }
+
+  const ambientCa = process.env.CODEX_CA_CERTIFICATE ?? process.env.SSL_CERT_FILE
+  caSource ??= ambientCa === undefined || ambientCa === '' ? await systemCodexCaBundle() : ambientCa
+  if (caSource !== undefined) {
+    environment[caEnvironment] = await importCodexCaBundle(runtimeDirectory, caSource)
+  }
+  return environment
+}
 
 /**
  * Resolve the private process boundary for one Codex authentication method.
@@ -134,6 +259,8 @@ export class CodexHarnessAgent implements Agent {
   private phase: Phase
   private activity: Promise<void> = Promise.resolve()
   private process: SubprocessHandle | undefined
+  private processFailure: Promise<never> | undefined
+  private processStopped = false
   private wire: CodexAppServerWire | undefined
   private remoteThreadId: string | undefined
   private models: CodexAppServerModel[] = []
@@ -142,6 +269,7 @@ export class CodexHarnessAgent implements Agent {
   private selectedEffort: string | undefined
   private maintenanceAbort: AbortController | undefined
   private processSandboxMode: SandboxMode
+  private readonly workspaceDirectory: string
 
   constructor(
     private readonly hostCtx: Context,
@@ -154,6 +282,11 @@ export class CodexHarnessAgent implements Agent {
     private readonly workspaceMode?: HarnessSessionRequest['workspaceMode'],
     private readonly capabilities: HarnessCapability[] = [],
   ) {
+    const workspaceDirectory = session.header.cwd
+    if (workspaceDirectory === undefined || !isAbsolute(workspaceDirectory) || workspaceDirectory.includes('\0')) {
+      throw new Error('Codex Harness sessions require an explicit absolute Project or OpenFish-managed No Project directory')
+    }
+    this.workspaceDirectory = workspaceDirectory
     this.options = { provider: 'harness', model: pack.id }
     this.processSandboxMode = hostCtx.sandboxPolicy.resolve({ session }).mode
     const currentSandboxMode = (): SandboxMode => this.processSandboxMode
@@ -201,7 +334,7 @@ export class CodexHarnessAgent implements Agent {
     )
     const launch = await prepareHarnessProcess(this.hostCtx, {
       argv,
-      cwd: this.session.header.cwd ?? process.cwd(),
+      cwd: this.workspaceDirectory,
       installationDirectory: this.installationDirectory,
       runtimeDirectory: processRuntimeDirectory,
       purpose: 'session',
@@ -215,7 +348,7 @@ export class CodexHarnessAgent implements Agent {
     })
     const child = this.hostCtx.subprocess.spawn({
       argv: launch.argv,
-      cwd: this.session.header.cwd ?? process.cwd(),
+      cwd: this.workspaceDirectory,
       env: launch.env,
       stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } },
       graceMs: 3_000,
@@ -225,6 +358,22 @@ export class CodexHarnessAgent implements Agent {
       throw new Error('Codex app-server did not expose protocol pipes')
     }
     this.process = child
+    this.processStopped = false
+    const processFailure = child.done.then<never>(
+      (outcome) => {
+        if (this.process === child) this.processStopped = true
+        const stderr = child.collected.stderr?.readFrom(0).text.trim()
+        const detail = stderr === undefined || stderr === '' ? '' : `: ${safeHarnessDiagnostic(stderr)}`
+        const exit = outcome.exitCode === null ? `signal ${outcome.signal ?? 'unknown'}` : `exit ${String(outcome.exitCode)}`
+        throw new Error(`Codex app-server stopped unexpectedly (${exit})${detail}`)
+      },
+      (error: unknown) => {
+        if (this.process === child) this.processStopped = true
+        throw new Error(`Codex app-server process failed: ${safeHarnessDiagnostic(error)}`, { cause: error })
+      },
+    )
+    processFailure.catch(() => undefined)
+    this.processFailure = processFailure
     const wire = new CodexAppServerWire(child.stdout, child.stdin, 'never', {
       clientInfo: { name: 'openfish', title: 'OpenFish', version: '0.1.0' },
       approval: async (kind) => {
@@ -242,8 +391,10 @@ export class CodexHarnessAgent implements Agent {
       userInput: params => this.answerCodexUserInput(params),
       mcpElicitation: params => this.answerCodexMcpElicitation(params),
       notification: (method, params) => {
-        if (this.session.events.findLast(event => event.type === 'harness/selected') !== undefined) {
-          this.session.append('harness/native-event', { harnessId: this.pack.id, event: { method, params } })
+        const durableEvent = durableCodexNotification(method, params)
+        if (durableEvent !== undefined
+          && this.session.events.findLast(event => event.type === 'harness/selected') !== undefined) {
+          this.session.append('harness/native-event', { harnessId: this.pack.id, event: durableEvent })
         }
         if (method.startsWith('item/')) this.observe(codexItemSignal(method, params), 'active', method)
       },
@@ -262,9 +413,9 @@ export class CodexHarnessAgent implements Agent {
       if (resumeThreadId === undefined) {
         this.selectedModel = preferred?.id
         this.selectedEffort = preferred?.defaultReasoningEffort
-        this.remoteThreadId = await wire.startDurableThread(this.session.header.cwd ?? process.cwd(), startup)
+        this.remoteThreadId = await wire.startDurableThread(this.workspaceDirectory, startup)
       } else {
-        const retained = await wire.resumeThread(resumeThreadId, this.session.header.cwd ?? process.cwd(), startup)
+        const retained = await wire.resumeThread(resumeThreadId, this.workspaceDirectory, startup)
         this.selectedModel = retained.model
         this.selectedEffort = retained.reasoningEffort
         this.remoteThreadId = resumeThreadId
@@ -273,20 +424,13 @@ export class CodexHarnessAgent implements Agent {
     } catch (error: unknown) {
       await this.disposeProcess()
       if (startup.aborted) throw harnessStartupError('Codex Harness', startup, error)
-      throw new Error(`Codex Harness failed to start: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+      throw new Error(`Codex Harness failed to start: ${safeHarnessDiagnostic(error)}`)
     }
   }
 
   private async authenticationEnvironment(): Promise<Record<string, string>> {
     const method = this.pack.authMethods?.find(candidate => candidate.id === this.preferredAuthMethod)
-    if (method === undefined || method.kind !== 'environment') return {}
-    const environment: Record<string, string> = {}
-    for (const field of method.fields) {
-      const hit = await this.hostCtx.credentials.resolve(credentialRef(field.ref))
-      if (field.required && hit === undefined) throw new Error(`Authentication needs ${field.name}`)
-      if (hit !== undefined && field.env !== undefined) environment[field.env] = hit.value
-    }
-    return environment
+    return codexAuthenticationEnvironment(this.hostCtx, method, this.runtimeDirectory)
   }
 
   /** Commit the exact live Codex identity and capabilities into the local task transcript. */
@@ -413,7 +557,7 @@ export class CodexHarnessAgent implements Agent {
     const wire = this.wire
     if (wire === undefined) throw new Error('Codex app-server is not ready')
     return await wire.forkThread(
-      this.session.header.cwd ?? process.cwd(),
+      this.workspaceDirectory,
       lastTurnId,
       AbortSignal.timeout(30_000),
     )
@@ -479,12 +623,16 @@ export class CodexHarnessAgent implements Agent {
       const remoteThreadId = this.remoteThreadId
       if (remoteThreadId === undefined) throw new Error('Codex has no resumable thread identity')
       const previous = this.processSandboxMode
+      const stagedModel = this.selectedModel
+      const stagedEffort = this.selectedEffort
       await this.disposeProcess()
       try {
         await this.start(remoteThreadId, mode)
+        this.restoreStagedSelection(stagedModel, stagedEffort)
       } catch (error: unknown) {
         try {
           await this.start(remoteThreadId, previous)
+          this.restoreStagedSelection(stagedModel, stagedEffort)
         } catch (rollbackError: unknown) {
           throw new AggregateError(
             [error, rollbackError],
@@ -510,7 +658,11 @@ export class CodexHarnessAgent implements Agent {
     try {
       while (this.inbox.hasPending && !running.abort.signal.aborted) await this.turn(running)
     } catch (error: unknown) {
-      this.dispatch.emit('agent/error', { turn: running.turn, step: 1, error })
+      this.dispatch.emit('agent/error', {
+        turn: running.turn,
+        step: 1,
+        error: new Error(safeHarnessDiagnostic(error)),
+      })
     } finally {
       this.phase = { kind: 'idle', turn: running.turn }
       this.dispatch.emit('agent/status', { status: 'idle' })
@@ -532,12 +684,16 @@ export class CodexHarnessAgent implements Agent {
       for (const message of messages) this.session.append('user/message', message, { surfaceOp: 'append' })
       const inputs = await this.codexTurnInputs(messages, running.abort.signal)
       if (inputs.length === 0) throw new Error('Codex Harness accepts text and image prompt content')
+      await this.reconnectStoppedProcess(running.abort.signal)
       const wire = this.wire
       if (wire === undefined) throw new Error('Codex app-server is not ready')
-      const result = await wire.runTurn(inputs, running.abort.signal, {
+      const turnOperation = wire.runTurn(inputs, running.abort.signal, {
         ...(this.selectedModel === undefined ? {} : { model: this.selectedModel }),
         ...(this.selectedEffort === undefined ? {} : { effort: this.selectedEffort }),
       })
+      const result = this.processFailure === undefined
+        ? await turnOperation
+        : await Promise.race([turnOperation, this.processFailure])
       if (result.output.length > 0) {
         this.session.append('assistant/message', {
           turn, step: 1,
@@ -549,10 +705,22 @@ export class CodexHarnessAgent implements Agent {
       }
       this.observe('model.completed', 'completed', `Turn ${turn} completed`)
     } catch (error: unknown) {
+      let failure = error
+      if (harnessTransportClosed(error)) this.processStopped = true
+      if (!running.abort.signal.aborted && this.processStopped) {
+        try {
+          await this.reconnectStoppedProcess(running.abort.signal)
+          failure = new Error(`${safeHarnessDiagnostic(error)}. OpenFish restored the pinned Codex thread; retry this turn because the interrupted prompt may have reached Codex.`)
+        } catch (recoveryError: unknown) {
+          failure = new Error(`${safeHarnessDiagnostic(error)}. Automatic Codex recovery failed: ${safeHarnessDiagnostic(recoveryError)}`, {
+            cause: new AggregateError([error, recoveryError]),
+          })
+        }
+      }
       if (running.abort.signal.aborted) reason = { kind: 'aborted', reason: running.abort.signal.reason as AgentCancelCause }
-      else reason = { kind: 'error', error: { code: 'CODEX_APP_SERVER_ERROR', message: error instanceof Error ? error.message : String(error) } }
+      else reason = { kind: 'error', error: { code: 'CODEX_APP_SERVER_ERROR', message: safeHarnessDiagnostic(failure) } }
       this.observe('turn.failed', 'failed', `Turn ${turn} failed`)
-      throw error
+      throw new Error(safeHarnessDiagnostic(failure))
     } finally {
       if (stepStarted) this.session.append('step/end', { turn, step: 1 })
       this.session.append('turn/end', { turn, reason })
@@ -590,9 +758,9 @@ export class CodexHarnessAgent implements Agent {
     const secretIds = new Set<string>()
     for (const raw of rows) {
       const row = codexObject(raw)
-      const id = codexString(row.id)
-      const question = codexString(row.question)
-      if (id === undefined || question === undefined || id.length > 256 || question.length > 10_000) {
+      const id = codexString(row.id, 256)
+      const question = codexString(row.question, 10_000)
+      if (id === undefined || question === undefined) {
         return { answers: {} }
       }
       if (row.isSecret === true) {
@@ -602,13 +770,13 @@ export class CodexHarnessAgent implements Agent {
       const options = Array.isArray(row.options)
         ? row.options.slice(0, 100).flatMap((rawOption) => {
           const option = codexObject(rawOption)
-          const label = codexString(option.label)
-          if (label === undefined || label.length > 512) return []
-          const description = codexString(option.description)
+          const label = codexString(option.label, 512)
+          if (label === undefined) return []
+          const description = codexString(option.description, 2_048)
           return [{ label, ...(description === undefined ? {} : { description }) }]
         })
         : []
-      const header = codexString(row.header)
+      const header = codexString(row.header, 128)
       questions.push({
         id,
         question,
@@ -627,8 +795,10 @@ export class CodexHarnessAgent implements Agent {
       return { answers: response }
     }
     for (const item of answer.answers) {
-      const values = [...item.selected]
-      if (item.custom !== undefined && item.custom.trim() !== '') values.push(item.custom)
+      const values = item.selected.slice(0, 100).filter(value => Array.from(value).length <= 4_096)
+      if (item.custom !== undefined && item.custom.trim() !== '' && Array.from(item.custom).length <= 65_536) {
+        values.push(item.custom)
+      }
       response[item.id] = { answers: values }
     }
     return { answers: response }
@@ -639,14 +809,16 @@ export class CodexHarnessAgent implements Agent {
     const schema = codexObject(params.requestedSchema)
     const properties = Object.entries(codexObject(schema.properties))
     if (properties.length === 0 || properties.length > 32) return { action: 'decline', content: null }
-    const required = new Set(Array.isArray(schema.required) ? schema.required.filter((value): value is string => typeof value === 'string') : [])
+    const requiredRows = Array.isArray(schema.required) ? schema.required : []
+    if (requiredRows.length > 32) return { action: 'decline', content: null }
+    const required = new Set(requiredRows.filter((value): value is string => codexString(value, 256) !== undefined))
     const questions: AskUserQuestionItem[] = []
     const fields = new Map<string, { type: string; required: boolean; values: Map<string, unknown>; schema: Record<string, unknown> }>()
     for (const [id, rawField] of properties) {
       const field = codexObject(rawField)
-      const type = codexString(field.type)
-      if (id.length === 0 || id.length > 256 || type === undefined) return { action: 'decline', content: null }
-      const format = codexString(field.format)?.toLowerCase()
+      const type = codexString(field.type, 32)
+      if (codexString(id, 256) === undefined || type === undefined) return { action: 'decline', content: null }
+      const format = codexString(field.format, 64)?.toLowerCase()
       // DSH's generic question surface intentionally has no secret text field.
       // Never downgrade a password/write-only MCP value into ordinary visible
       // task state; the server can retry through its own credential mechanism.
@@ -660,12 +832,12 @@ export class CodexHarnessAgent implements Agent {
       const choices = codexElicitationChoices(field)
       if (!isRequired) choices.push({ label: 'Skip this optional field', value: undefined })
       const values = new Map(choices.map(choice => [choice.label, choice.value]))
-      const description = [codexString(params.message), codexString(field.description), isRequired ? undefined : 'Optional']
+      const description = [codexString(params.message, 4_096), codexString(field.description, 4_096), isRequired ? undefined : 'Optional']
         .filter((value): value is string => value !== undefined && value !== '').join('\n\n')
-      const header = codexString(params.serverName)
+      const header = codexString(params.serverName, 128)
       questions.push({
         id,
-        question: codexString(field.title) ?? id,
+        question: codexString(field.title, 512) ?? id,
         ...(header === undefined ? {} : { header }),
         ...(description === '' ? {} : { detail: description }),
         ...(choices.length === 0 ? {} : { options: choices.map(choice => ({ label: choice.label })) }),
@@ -707,12 +879,16 @@ export class CodexHarnessAgent implements Agent {
         if (typeof maximum === 'number' && value > maximum) return { action: 'decline', content: null }
       }
       if (typeof value === 'string') {
+        if (Array.from(value).length > 65_536) return { action: 'decline', content: null }
         const minLength = field.schema.minLength
         const maxLength = field.schema.maxLength
         if (typeof minLength === 'number' && value.length < minLength) return { action: 'decline', content: null }
         if (typeof maxLength === 'number' && value.length > maxLength) return { action: 'decline', content: null }
       }
       if (Array.isArray(value)) {
+        if (value.length > 100 || value.some(item => typeof item !== 'string' || Array.from(item).length > 4_096)) {
+          return { action: 'decline', content: null }
+        }
         const minItems = field.schema.minItems
         const maxItems = field.schema.maxItems
         if (typeof minItems === 'number' && value.length < minItems) return { action: 'decline', content: null }
@@ -725,6 +901,39 @@ export class CodexHarnessAgent implements Agent {
 
   private observe(signal: HarnessRuntimeSignal, status: 'active' | 'waiting' | 'completed' | 'failed', activity: string): void {
     observeHarnessRuntime(this.session, this.pack, signal, status, activity)
+  }
+
+  /**
+   * Restore the resident app-server around the exact durable Codex thread.
+   * A prompt interrupted by a process exit is deliberately never replayed:
+   * the provider may already have accepted it even when no response reached us.
+   */
+  private async reconnectStoppedProcess(signal: AbortSignal): Promise<void> {
+    if (!this.processStopped) return
+    signal.throwIfAborted()
+    const remoteThreadId = this.remoteThreadId
+    if (remoteThreadId === undefined) {
+      throw new Error('Codex stopped before it created a resumable thread')
+    }
+    // The app-server applies model and effort per turn. Keep the exact choice
+    // already visible in the composer across a resident-process replacement;
+    // resume metadata is a fallback, not permission to silently change it.
+    const stagedModel = this.selectedModel
+    const stagedEffort = this.selectedEffort
+    await this.disposeProcess()
+    await this.start(remoteThreadId, this.processSandboxMode, signal)
+    this.restoreStagedSelection(stagedModel, stagedEffort)
+  }
+
+  private restoreStagedSelection(model?: string, effort?: string): void {
+    const liveModel = this.models.find(candidate => candidate.id === model)
+    if (liveModel !== undefined) {
+      this.selectedModel = liveModel.id
+      this.selectedEffort = effort !== undefined
+        && liveModel.supportedReasoningEfforts.some(candidate => candidate.reasoningEffort === effort)
+        ? effort
+        : liveModel.defaultReasoningEffort
+    }
   }
 
   /** Stop active work, release the scoped Agent, and terminate the Codex process. */
@@ -740,6 +949,8 @@ export class CodexHarnessAgent implements Agent {
     this.wire = undefined
     const child = this.process
     this.process = undefined
+    this.processFailure = undefined
+    this.processStopped = false
     if (child === undefined) return
     child.stdin?.end()
     const timeout = AbortSignal.timeout(1_000)
@@ -754,8 +965,10 @@ function codexObject(value: unknown): Record<string, unknown> {
     : {}
 }
 
-function codexString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined
+function codexString(value: unknown, maximum = 4_096): string | undefined {
+  return typeof value === 'string' && value.length > 0 && Array.from(value).length <= maximum
+    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
+    ? value : undefined
 }
 
 function codexElicitationChoices(field: Record<string, unknown>): Array<{ label: string; value: unknown }> {
@@ -764,18 +977,21 @@ function codexElicitationChoices(field: Record<string, unknown>): Array<{ label:
   let choices: Array<{ label: string; value: unknown }> = []
   for (const key of ['oneOf', 'anyOf'] as const) {
     if (!Array.isArray(source[key])) continue
-    choices = source[key].flatMap((raw) => {
+    choices = source[key].slice(0, 100).flatMap((raw) => {
       const option = codexObject(raw)
-      if (typeof option.const !== 'string') return []
-      return [{ label: codexString(option.title) ?? option.const, value: option.const }]
+      const value = codexString(option.const, 4_096)
+      if (value === undefined) return []
+      return [{ label: codexString(option.title, 512) ?? value, value }]
     })
     if (choices.length > 0) break
   }
   if (choices.length === 0 && Array.isArray(source.enum)) {
     const names = Array.isArray(source.enumNames) ? source.enumNames : []
-    choices = source.enum.flatMap((value, index) => typeof value === 'string'
-      ? [{ label: typeof names[index] === 'string' ? names[index] : value, value }]
-      : [])
+    choices = source.enum.slice(0, 100).flatMap((raw, index) => {
+      const value = codexString(raw, 4_096)
+      if (value === undefined) return []
+      return [{ label: codexString(names[index], 512) ?? value, value }]
+    })
   }
   const counts = new Map<string, number>()
   for (const choice of choices) counts.set(choice.label, (counts.get(choice.label) ?? 0) + 1)

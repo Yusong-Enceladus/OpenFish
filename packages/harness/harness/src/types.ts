@@ -74,6 +74,48 @@ export interface HarnessNodeConfigSchema {
   fields: HarnessConfigField[]
 }
 
+/** Credential-free executable value admitted by a Driver-owned configuration field. */
+export type HarnessNodeConfigValue = string | boolean
+
+/** One executable binding vocabulary item published by a protocol Driver. */
+export interface HarnessBindingKindDefinition {
+  /** Stable Driver-owned id stored in `HarnessConfigBinding.kind`. */
+  kind: string
+  name: string
+  description: string
+  /** Generic field types this binding can execute. */
+  fieldTypes: HarnessConfigField['type'][]
+  /** User-facing label for the Driver-owned target id. */
+  targetLabel: string
+  targetPlaceholder?: string
+  /** Optional portable expression used for immediate, non-secret client validation. */
+  targetPattern?: string
+}
+
+/** Driver-owned component template that a generic client may safely instantiate. */
+export interface HarnessNodeKindDefinition {
+  /** Stable value stored in `HarnessGraphNode.kind`. */
+  kind: string
+  name: string
+  description: string
+  responsibility: string
+  /** True only when changing this node can change Driver-validated behavior. */
+  editable: boolean
+  inputs: string[]
+  outputs: string[]
+  ports?: HarnessGraphPort[]
+  observes?: HarnessRuntimeSignal[]
+  /** Optional executable defaults. Secrets are references, never values. */
+  configSchema?: HarnessNodeConfigSchema
+  defaultConfig?: Record<string, HarnessNodeConfigValue>
+}
+
+/** Pure authoring vocabulary negotiated from a loaded Driver. */
+export interface HarnessAuthoringContract {
+  nodeKinds: HarnessNodeKindDefinition[]
+  bindingKinds: HarnessBindingKindDefinition[]
+}
+
 /** Presentation-only canvas coordinate. Drivers must never interpret it as executable configuration. */
 export interface HarnessGraphPosition {
   x: number
@@ -102,7 +144,7 @@ export interface HarnessGraphNode {
   position?: HarnessGraphPosition
   /** Driver-validated controls whose values live in `config` under the field id. */
   configSchema?: HarnessNodeConfigSchema
-  config?: Record<string, unknown>
+  config?: Record<string, HarnessNodeConfigValue>
 }
 
 /** Directed data-flow connection between two declared Harness nodes. */
@@ -220,6 +262,13 @@ export interface HarnessModelConfiguration {
   detail: string
 }
 
+/** How the shell learns whether a Harness needs an account before first use. */
+export interface HarnessAuthenticationDiscovery {
+  /** `pack` is complete manifest data; `runtime` requires an installed Driver probe. */
+  source: 'pack' | 'runtime'
+  detail: string
+}
+
 /** Harness Pack v0: identity, launch, protocol, capabilities, and honest graph metadata. */
 export interface HarnessPack {
   schemaVersion: 0
@@ -239,6 +288,8 @@ export interface HarnessPack {
   modelConfiguration?: HarnessModelConfiguration
   /** Non-secret sign-in choices the shell may present before first launch. */
   authMethods?: HarnessAuthMethod[]
+  /** Whether an empty auth method list is authoritative before installation. */
+  authenticationDiscovery?: HarnessAuthenticationDiscovery
   /** Self-install recipe for a non-bundled protocol Driver. */
   driverBundle?: HarnessDriverBundleRequirement
   distribution?: HarnessDistribution
@@ -278,6 +329,8 @@ export interface HarnessCatalogEntry extends HarnessPack {
   publication?: HarnessPublication
   /** Negotiated capabilities drive native UI visibility and admission diagnostics. */
   capabilities: HarnessCapability[]
+  /** Driver-owned Builder vocabulary; empty means the graph is explanatory only. */
+  authoring: HarnessAuthoringContract
   driver: {
     apiVersion: 1
     protocol: string
@@ -313,6 +366,10 @@ export interface HarnessCommunitySubmissionRecord {
 /** User-controlled lifecycle state for one Harness installation. */
 export interface HarnessInstallation {
   status: 'builtin' | 'not-installed' | 'installing' | 'installed' | 'failed'
+  /** Current Host-owned transaction phase; present only while an install/update is running. */
+  operationPhase?: 'staging' | 'discovering-auth' | 'verifying' | 'activating' | 'health-check'
+  /** Client-safe explanation of the current transaction phase. */
+  operationDetail?: string
   installedVersion?: string
   availableVersion: string
   previousVersions: string[]
@@ -330,8 +387,10 @@ export interface HarnessInstallation {
 export interface HarnessAuthentication {
   methods: HarnessAuthMethod[]
   selectedMethod?: string
-  status: 'not-required' | 'needs-selection' | 'needs-credentials' | 'configured'
+  status: 'unknown' | 'not-required' | 'needs-selection' | 'needs-credentials' | 'configured'
   missingFields: string[]
+  /** Client-safe explanation of the current authentication result. */
+  detail: string
 }
 
 /** Open Fish's own local compatibility evidence; independent from Registry curation. */
@@ -406,6 +465,12 @@ export interface HarnessDriver {
   readonly protocol: string
   /** Declare only what this driver can expose for the concrete Pack. */
   capabilities(pack: HarnessPack): Promise<HarnessCapability[]>
+  /**
+   * Publish node and binding semantics for schema-driven clients. This method
+   * must be pure: it describes what the Driver can execute and must not launch
+   * the Harness, inspect credentials, or mutate installation state.
+   */
+  authoring?(pack: HarnessPack): Promise<HarnessAuthoringContract>
   /** Validate every executable node setting this Driver claims to interpret. */
   validatePack?(pack: HarnessPack): Promise<string[]>
   /**

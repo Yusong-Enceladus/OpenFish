@@ -145,7 +145,7 @@ describe('JsonRpcLineTransport', () => {
     b.close()
   })
 
-  it('ignores malformed frames and accepts notifications without params', async () => {
+  it('ignores structurally irrelevant JSON and accepts notifications without params', async () => {
     const { aToB, b } = transportPair()
     const notifications: Record<string, unknown>[] = []
     b.onNotification((method, params) => {
@@ -154,7 +154,6 @@ describe('JsonRpcLineTransport', () => {
     b.start()
     b.start()
 
-    aToB.write('not json\n')
     aToB.write('\n')
     aToB.write('null\n')
     aToB.write('{"jsonrpc":"2.0","params":{}}\n')
@@ -167,6 +166,35 @@ describe('JsonRpcLineTransport', () => {
       { method: 'string-chunk', params: {} },
     ])
     b.close()
+  })
+
+  it('fails closed on invalid or oversized peer JSON without echoing its content', async () => {
+    const input = new PassThrough()
+    const transport = new JsonRpcLineTransport(input, new PassThrough(), 128)
+    transport.start()
+    const secret = 'sk-test-supersecret123456'
+    const malformedPending = transport.request('pending', {})
+    input.write(`{"secret":"${secret}"\n`)
+    const malformed = await malformedPending.catch((error: unknown) => error)
+    expect(malformed).toMatchObject({ message: 'JSON-RPC peer emitted invalid JSON' })
+    expect(String(malformed)).not.toContain(secret)
+
+    const secondInput = new PassThrough()
+    const bounded = new JsonRpcLineTransport(secondInput, new PassThrough(), 256)
+    bounded.start()
+    const oversizedPending = bounded.request('pending', {})
+    secondInput.write('x'.repeat(257))
+    await expect(oversizedPending).rejects.toThrow('256-byte limit')
+    bounded.close()
+  })
+
+  it('rejects an oversized outbound JSON-RPC frame before writing it', () => {
+    const output = new PassThrough()
+    let written = 0
+    output.on('data', (chunk: Buffer) => { written += chunk.byteLength })
+    const transport = new JsonRpcLineTransport(new PassThrough(), output, 64)
+    expect(() => transport.notify('oversized', { value: 'x'.repeat(80) })).toThrow('64-byte limit')
+    expect(written).toBe(0)
   })
 
   it('preserves multibyte UTF-8 characters split across Buffer chunks', async () => {

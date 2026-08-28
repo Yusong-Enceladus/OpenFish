@@ -1,7 +1,8 @@
 /**
  * Newline-delimited JSON-RPC 2.0 over byte streams. Frames with `id` and
  * `method` are requests, `id` alone is a response, and `method` alone is a
- * notification. Malformed lines are ignored; handler failures become error frames.
+ * notification. Invalid JSON fails closed without echoing peer content;
+ * handler failures become error frames.
  *
  * @module @deepseek-ai/dsh-sdk-protocol/transport
  */
@@ -13,6 +14,9 @@ import { StringDecoder } from 'node:string_decoder'
 type JsonRpcId = string | number
 type RequestHandler = (method: string, params: Record<string, unknown>) => Promise<unknown>
 type NotificationHandler = (method: string, params: Record<string, unknown>) => void
+
+/** Maximum one-line JSON-RPC frame accepted from or sent to a subprocess. */
+export const MAXIMUM_JSON_RPC_LINE_BYTES = 8 * 1024 * 1024
 
 /** A JSON-RPC error response, preserving the wire `code` and optional `data`. */
 export class JsonRpcResponseError extends Error {
@@ -70,7 +74,12 @@ export class JsonRpcLineTransport implements JsonRpcTransportPeer {
   constructor(
     private readonly input: Readable,
     private readonly output: Writable,
-  ) {}
+    private readonly maximumFrameBytes = MAXIMUM_JSON_RPC_LINE_BYTES,
+  ) {
+    if (!Number.isSafeInteger(maximumFrameBytes) || maximumFrameBytes < 1) {
+      throw new Error('JSON-RPC frame limit must be a positive safe integer')
+    }
+  }
 
   /** Attach the input listeners and begin reading frames. Idempotent. */
   start(): void {
@@ -175,6 +184,9 @@ export class JsonRpcLineTransport implements JsonRpcTransportPeer {
   private readonly onData = (chunk: Buffer | string): void => {
     this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk)
     this.drainLines()
+    if (Buffer.byteLength(this.buffer, 'utf8') > this.maximumFrameBytes) {
+      this.failProtocol(new Error(`JSON-RPC frame exceeds the ${this.maximumFrameBytes}-byte limit`))
+    }
   }
 
   private drainLines(): void {
@@ -184,6 +196,10 @@ export class JsonRpcLineTransport implements JsonRpcTransportPeer {
       const line = this.buffer.slice(0, newline).trim()
       this.buffer = this.buffer.slice(newline + 1)
       if (!line) continue
+      if (Buffer.byteLength(line, 'utf8') > this.maximumFrameBytes) {
+        this.failProtocol(new Error(`JSON-RPC frame exceeds the ${this.maximumFrameBytes}-byte limit`))
+        return
+      }
       void this.handleLine(line)
     }
   }
@@ -203,7 +219,9 @@ export class JsonRpcLineTransport implements JsonRpcTransportPeer {
     try {
       message = JSON.parse(line)
     } catch {
-      // Only JSON syntax errors reach this catch; malformed peer lines are ignored.
+      // Fail closed and never echo the line: it may contain prompts, local
+      // paths, provider diagnostics, or credentials.
+      this.failProtocol(new Error('JSON-RPC peer emitted invalid JSON'))
       return
     }
     if (!message || typeof message !== 'object') return
@@ -258,7 +276,21 @@ export class JsonRpcLineTransport implements JsonRpcTransportPeer {
   }
 
   private write(message: Record<string, unknown>): void {
-    this.output.write(`${JSON.stringify(message)}\n`)
+    const line = `${JSON.stringify(message)}\n`
+    if (Buffer.byteLength(line, 'utf8') > this.maximumFrameBytes) {
+      throw new Error(`JSON-RPC frame exceeds the ${this.maximumFrameBytes}-byte limit`)
+    }
+    this.output.write(line)
+  }
+
+  private failProtocol(error: Error): void {
+    this.input.off('data', this.onData)
+    this.input.off('error', this.onInputError)
+    this.input.off('end', this.onInputEnd)
+    this.started = false
+    this.buffer = ''
+    this.input.pause()
+    this.failPending(error)
   }
 
   private failPending(error: Error): void {

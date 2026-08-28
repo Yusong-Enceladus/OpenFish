@@ -1,6 +1,6 @@
 # `@deepseek-ai/dsh-credentials-keychain`
 
-[中文](README.zh.md)
+English | [中文](README.zh.md)
 
 OpenFish's macOS Host credential provider. Each credential reference is stored as a generic password in the current user's login Keychain under the `app.openfish.credentials` service. `describe` returns only configured/source metadata; secret values are available only to Host-side consumers.
 

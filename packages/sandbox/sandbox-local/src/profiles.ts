@@ -5,6 +5,7 @@
  */
 
 import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-landlock-run'
+import { dirname, isAbsolute, relative, sep } from 'node:path'
 import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
@@ -14,7 +15,7 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
  * @returns profile arguments before the trailing separator and command argv.
  */
 export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
-  const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent']
+  const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent']
   const writable = new Set<string>()
   if (policy.mode === 'workspace-write') {
     if (policy.platformTemporaryWrites !== false) args.push('--tmpfs', '/tmp')
@@ -44,6 +45,30 @@ function sbplString(path: string): string {
   return `"${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`
 }
 
+/** Whether `path` is the protected root itself or one of its descendants. */
+function isWithin(path: string, root: string): boolean {
+  const child = relative(root, path)
+  return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`))
+}
+
+/**
+ * Exact ancestors that must remain traversable to reach an explicitly readable
+ * descendant. Seatbelt's `file-read-metadata` grant permits `lstat`/`realpath`
+ * on these already-known names without permitting directory enumeration or
+ * file contents from a protected parent tree.
+ */
+function readableAncestorMetadata(readableRoots: readonly string[], protectedRoots: readonly string[]): string[] {
+  const ancestors = new Set<string>()
+  for (const root of readableRoots) {
+    let current = dirname(root)
+    while (current !== dirname(current)) {
+      if (protectedRoots.some(protectedRoot => isWithin(current, protectedRoot))) ancestors.add(current)
+      current = dirname(current)
+    }
+  }
+  return [...ancestors]
+}
+
 /**
  * Build the sandbox-exec arguments and SBPL profile for one policy. The
  * writable roots come from the shared {@link writableRoots} helper (canonical,
@@ -64,7 +89,11 @@ export function seatbeltProfileArgs(policy: SandboxPolicy): string[] {
     const readableRoots = [...new Set(isolation.readableRoots.map(canonicalPath))]
     if (protectedRoots.length === 0) throw new Error('sandbox-local: isolation requires at least one protected read root')
     if (readableRoots.length === 0) throw new Error('sandbox-local: isolation requires at least one readable root')
+    const readableAncestors = readableAncestorMetadata(readableRoots, protectedRoots)
     forms.push(`(deny file-read* ${protectedRoots.map(root => `(subpath ${sbplString(root)})`).join(' ')})`)
+    if (readableAncestors.length > 0) {
+      forms.push(`(allow file-read-metadata ${readableAncestors.map(root => `(literal ${sbplString(root)})`).join(' ')})`)
+    }
     forms.push(`(allow file-read* ${readableRoots.map(root => `(subpath ${sbplString(root)})`).join(' ')})`)
     forms.push('(deny network-inbound)')
     forms.push('(deny process-info*)')

@@ -1,6 +1,6 @@
 # `@deepseek-ai/dsh-credentials-keychain`
 
-[English](README.md)
+[English](README.md) | 中文
 
 这是 OpenFish macOS Host 的凭证 Provider。每个凭证引用都会作为通用密码存入当前用户登录钥匙串中的 `app.openfish.credentials` 服务。`describe` 只返回是否已配置及来源元数据；秘密值仅对 Host 侧消费者可用。
 

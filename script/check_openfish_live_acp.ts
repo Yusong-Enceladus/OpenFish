@@ -19,8 +19,10 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import LocalSandboxProvider from '../packages/sandbox/sandbox-local/src/index.ts'
+import SandboxPolicyService from '../packages/sandbox/sandbox-policy/src/index.ts'
 import LocalSubprocessRuntime from '../packages/subprocess/subprocess-local/src/index.ts'
-import { parseHarnessPack } from '../packages/harness/harness/src/manifest.ts'
+import { builtInHarnessPacks } from '../packages/harness/harness/src/index.ts'
 import type { HarnessPack } from '../packages/harness/harness/src/types.ts'
 import {
   AcpHarnessAgent,
@@ -28,38 +30,11 @@ import {
   installHarnessPack,
 } from '../packages/harness/harness-acp/src/agent.ts'
 
-const definitions = {
-  omp: {
-    id: 'oh-my-pi', name: 'Oh My Pi', version: '18.0.3', publisher: 'Oh My Pi contributors',
-    distribution: { kind: 'bunx' as const, package: '@oh-my-pi/pi-coding-agent@18.0.3', args: ['acp'], env: {} },
-  },
-}
-
-function pack(kind: keyof typeof definitions): HarnessPack {
-  const definition = definitions[kind]
-  return parseHarnessPack({
-    schemaVersion: 0,
-    ...definition,
-    verified: false,
-    protocol: 'acp',
-    source: 'user',
-    modelConfiguration: {
-      owner: 'harness', required: false,
-      detail: 'Models and optional reasoning controls are discovered from the live ACP session.',
-    },
-    graph: {
-      level: 'opaque',
-      manifestVersion: 1,
-      boundary: `${definition.name} ACP process`,
-      evidence: [{ kind: 'declared', source: 'Live ACP preflight', version: definition.version }],
-      nodes: [{
-        id: 'runtime', kind: 'harness-runtime', title: `${definition.name} runtime`, editable: false,
-        responsibility: 'Runs behind the ACP boundary; this smoke makes no claim about private internals.',
-        evidence: [{ kind: 'declared', source: 'Live ACP preflight', version: definition.version }],
-      }],
-      edges: [],
-    },
-  })
+function pack(): HarnessPack {
+  const id = 'oh-my-pi'
+  const selected = builtInHarnessPacks().find(candidate => candidate.id === id)
+  if (selected === undefined) throw new Error(`the running OpenFish catalog has no ${id} baseline`)
+  return selected
 }
 
 async function main(): Promise<void> {
@@ -71,17 +46,24 @@ async function main(): Promise<void> {
   void new SessionStore(ctx)
   void new AgentRegistry(ctx)
   void new ApprovalService(ctx, { policy: 'never' })
+  const sandbox = await ctx.plugin(LocalSandboxProvider, {
+    runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5_000,
+  })
+  const policy = await ctx.plugin(SandboxPolicyService, {
+    mode: 'workspace-write', workspaceRoot: root,
+  })
   const runtime = await ctx.plugin(LocalSubprocessRuntime)
-  const selected = pack(kind)
+  const selected = pack()
   let first: AcpHarnessAgent | undefined
   let resumed: AcpHarnessAgent | undefined
   try {
     const installation = join(root, 'installed')
-    await installHarnessPack(ctx, selected, installation)
-    const auth = await discoverAcpAuthentication(ctx, selected, installation)
+    const runtimeDirectory = join(root, 'runtime')
+    await installHarnessPack(ctx, selected, installation, runtimeDirectory)
+    const auth = await discoverAcpAuthentication(ctx, selected, installation, runtimeDirectory)
 
     const initialSession = ctx.sessions.create(SessionId(`live-${kind}-first`), { meta: { cwd: root } })
-    first = new AcpHarnessAgent(ctx, initialSession.id, initialSession, selected, installation)
+    first = new AcpHarnessAgent(ctx, initialSession.id, initialSession, selected, installation, runtimeDirectory)
     await first.start()
     first.commitSelection()
     let catalog = first.harnessModelCatalog()
@@ -107,7 +89,7 @@ async function main(): Promise<void> {
     await first.dispose()
     first = undefined
     const resumedSession = ctx.sessions.create(SessionId(`live-${kind}-resumed`), { meta: { cwd: root } })
-    resumed = new AcpHarnessAgent(ctx, resumedSession.id, resumedSession, selected, installation)
+    resumed = new AcpHarnessAgent(ctx, resumedSession.id, resumedSession, selected, installation, runtimeDirectory)
     await resumed.start(remoteSessionId)
 
     // Deliberately report counts and booleans only: account names, model ids,
@@ -127,6 +109,8 @@ async function main(): Promise<void> {
     await resumed?.dispose()
     await first?.dispose()
     await runtime.dispose()
+    await policy.dispose()
+    await sandbox.dispose()
     await rm(root, { recursive: true, force: true })
   }
 }

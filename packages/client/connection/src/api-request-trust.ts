@@ -15,20 +15,10 @@
  */
 
 import { isLoopbackHostname } from './loopback-hostname.ts'
-
-/** The request facts the fence reads from either HTTP representation. */
-interface ApiTrustRequest {
-  headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
-  /** Peer address supplied by a transport bridge after accepting the socket. */
-  remoteAddress?: string
-  /** Node HTTP requests expose the peer on their socket. */
-  socket?: { readonly remoteAddress?: string | undefined; readonly encrypted?: boolean }
-  /** Transport-authenticated TLS state for fetch-shaped carriers. */
-  secure?: boolean
-}
+import type { ConnectionAuthenticationRequest, ConnectionTrustRequest } from './rpc.ts'
 
 function header(
-  headers: ApiTrustRequest['headers'],
+  headers: ConnectionTrustRequest['headers'],
   name: string,
 ): string | undefined {
   if (headers instanceof Headers) return headers.get(name) ?? undefined
@@ -102,7 +92,7 @@ function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): bool
  * @param trustedHosts - non-loopback authorities this deployment serves: exact `host:port`, or port-less `host` matching any port.
  * @returns true when the Host is ours (loopback or trusted) and any attached browser markers are same-origin.
  */
-export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: readonly string[]): boolean {
+export function isTrustedApiRequest(request: ConnectionTrustRequest, trustedHosts: readonly string[]): boolean {
   // Host fence (DNS-rebinding defense), applied to every request: the browser
   // fills Host from the URL it believes it is talking to, so a rebound page
   // carries the attacker's domain here even though the socket lands on this
@@ -140,7 +130,7 @@ export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: read
  * @param request - accepted carrier facts and HTTP headers to validate.
  * @returns true only when both the authority and socket peer are loopback.
  */
-export function isLoopbackApiRequest(request: ApiTrustRequest): boolean {
+export function isLoopbackApiRequest(request: ConnectionAuthenticationRequest): boolean {
   if (!isTrustedApiRequest(request, [])) return false
   const address = request.remoteAddress ?? request.socket?.remoteAddress
   if (address === undefined) return false
@@ -157,6 +147,6 @@ export function isLoopbackApiRequest(request: ApiTrustRequest): boolean {
  * @param request - accepted carrier facts to inspect.
  * @returns true only when the server or socket reports encryption.
  */
-export function isSecureApiRequest(request: ApiTrustRequest): boolean {
+export function isSecureApiRequest(request: ConnectionAuthenticationRequest): boolean {
   return request.secure === true || request.socket?.encrypted === true
 }

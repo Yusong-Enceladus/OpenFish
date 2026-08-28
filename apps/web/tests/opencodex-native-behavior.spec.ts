@@ -11,7 +11,7 @@ describe.skipIf(behaviorBinary === undefined)('OpenCodex native composed-runtime
     if (behaviorBinary === undefined) throw new Error('OPENCODEX_BEHAVIOR_BINARY must name the compiled Swift smoke binary')
 
     process.env.DSH_SNAPSHOT = 'replay'
-    const fixture = resolve(import.meta.dirname, 'snapshots/approval-composer/session.jsonl')
+    const fixture = resolve(import.meta.dirname, '../../../snapshots/web/approval-composer/session.jsonl')
     const prompts = fixtureUserPrompts(await readFile(fixture, 'utf8'))
     const prompt = prompts[0]
     if (prompt === undefined || prompts.length !== 1) {
@@ -22,6 +22,10 @@ describe.skipIf(behaviorBinary === undefined)('OpenCodex native composed-runtime
       const scaffold = await launchWebScaffold({
         extraOverlayPath: resolve(import.meta.dirname, 'fixtures/opencodex-native.patch.yml'),
         replayFixture: fixture,
+        // This product smoke intentionally adds Harness identity/runtime
+        // evidence and uses the executing Mac's time zone. Replay consumption
+        // remains strict; the Swift assertions own the durable product result.
+        compareReplaySession: false,
         paceMs: 1,
       })
       let primaryFailure: unknown

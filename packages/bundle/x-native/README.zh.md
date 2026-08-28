@@ -26,7 +26,7 @@
 - 本地客户端可直接配对。远程客户端必须通过 TLS Code Proof 兑换 Host 上创建的十分钟、一次性配对码：HMAC 使用带外配对码本身作为密钥，并绑定 Host Certificate Fingerprint，因此 Bootstrap Connection 中公开传输的 Code Id 无法制造有效证明。所得 bearer 会被普通 DSH HTTP 与 WebSocket 信任边界接受；设备列表、配对码创建与撤销其他设备仍只允许 Host 本地操作，已配对设备只能撤销自身。
 - LAN 与 Tailscale 共用同一条经过认证的 DSH carrier。relay 仍是可替换的传输插件，只在已挂载时报告。
 - 图片生成能力标志表示已挂载 provider registry；OpenCodex 刻意不内置图片模型。
-- 未指定 Workspace 的原生任务使用各自的 `$DSH_HOME/openfish/no-project/<session-id>` cwd，绝不继承 Host 进程的启动目录，也不会与其他 No Project 任务共享文件。
+- 未指定 Workspace 的原生任务使用各自的 `$DSH_HOME/openfish/sessions/no-workspace/<session-id>` cwd，绝不继承 Host 进程的启动目录，也不会与其他 No Project 任务共享文件。
 
 ## 组合
 

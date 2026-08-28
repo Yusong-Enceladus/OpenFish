@@ -54,3 +54,24 @@ export function harnessStartupError(name: string, signal: AbortSignal, cause: un
   if (reason instanceof Error) return reason
   return new Error(`${name} startup was cancelled`, { cause })
 }
+
+/**
+ * Identify protocol failures that make a resident Harness connection
+ * unusable even when the subprocess exit callback has not run yet.
+ * @param error - protocol or stream failure caught by the active turn.
+ * @returns true only for transport-owned closure diagnostics.
+ */
+export function harnessTransportClosed(error: unknown): boolean {
+  let message: string | undefined
+  try {
+    message = error instanceof Error
+      ? error.message
+      : typeof error === 'string' ? error : undefined
+  } catch {
+    return false
+  }
+  if (message === undefined) return false
+  return message === 'ACP connection closed'
+    || message.includes('app-server protocol stream closed')
+    || /(?:^|\s)(?:EPIPE|ECONNRESET)(?:\s|$)/u.test(message)
+}

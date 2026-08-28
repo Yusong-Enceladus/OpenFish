@@ -77,6 +77,10 @@ struct MobileConnectionProfile: Equatable, Sendable {
         return MobileConnectionProfile(baseURL: baseURL, bearerToken: nil, tlsFingerprint: nil)
     }
 
+    static func removeAuthorization(for url: URL) {
+        MobileCredentialStore.remove(for: url)
+    }
+
     static func validFingerprint(_ value: String?) -> Bool {
         value?.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil
     }
@@ -182,7 +186,8 @@ class MobileTLSDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
     ) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust,
-              let certificate = SecTrustGetCertificateAtIndex(trust, 0) else {
+              let certificateChain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let certificate = certificateChain.first else {
             completionHandler(.performDefaultHandling, nil)
             return
         }

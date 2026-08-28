@@ -69,6 +69,10 @@ pnpm --config.inject-workspace-packages=true \
   --config.node-linker=hoisted \
   --config.dangerously-allow-all-builds=true \
   --filter @deepseek-ai/dsh deploy "$STAGE_DIR/app"
+[[ -f "$STAGE_DIR/app/config/profiles/x/package.json" ]] || {
+  echo "package_openfish_host: shipped OpenFish profile is absent from the deployed Host" >&2
+  exit 1
+}
 tar -xJf "$ARCHIVE_PATH" -C "$STAGE_DIR/node" --strip-components=1
 tar -xzf "$UV_ARCHIVE_PATH" -C "$STAGE_DIR/uv" --strip-components=1
 
@@ -79,6 +83,9 @@ cp "$STAGE_DIR/uv/uv" "$RUNTIME_DIR/uv/uv"
 chmod +x "$RUNTIME_DIR/node/bin/node"
 chmod +x "$RUNTIME_DIR/uv/uv"
 node "$ROOT_DIR/scripts/sanitize-openfish-runtime.mjs" "$RUNTIME_DIR/app"
-RUNTIME_ID="$(cd "$RUNTIME_DIR/app" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}')"
+# The runtime identity covers the complete closed toolchain, not only the Host
+# JavaScript. Changing Node, npm, Bun, uv, or any deployed Host dependency must
+# retire a process launched by an earlier app bundle.
+RUNTIME_ID="$(cd "$RUNTIME_DIR" && find app node uv -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}')"
 printf '{"node":"%s","uv":"%s","architecture":"%s","runtimeId":"%s"}\n' "$NODE_VERSION" "$UV_VERSION" "$NODE_PLATFORM" "$RUNTIME_ID" > "$RUNTIME_DIR/runtime.json"
 echo "packaged standalone Open Fish Host runtime at $RUNTIME_DIR"

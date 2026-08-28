@@ -1,11 +1,9 @@
 /**
- * @deepseek-ai/dsh-host-webserver — Web route-registration plugin: a node:http
- * server plus the `webServer` service (HTTP and upgrade route registries,
- * index transform taps, and the single fallback seat for everything no route
- * claims). Knows no harness concepts and serves no files; the composing
- * application's frontend plugin owns dist serving through the fallback hook.
- * Web shape only — Electron loads dist over file:// and carries fetch over an
- * IPC bridge. This package never prints: the URL line belongs to the shell.
+ * @deepseek-ai/dsh-host-webserver — node:http route registration with optional
+ * gzip, index injection, and one fallback seat. It knows no harness concepts
+ * and serves no files; the composing application owns dist serving. Electron
+ * uses file:// plus IPC instead, and this package never prints the URL.
+ * Route handlers retain direct response ownership.
  */
 
 import { constants } from 'node:fs'
@@ -18,10 +16,26 @@ import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import compressionMiddleware from 'compression'
+import Negotiator from 'negotiator'
+import { renderIndexInjections, type IndexInjection } from './injections.ts'
+
+export { renderIndexInjections } from './injections.ts'
+export type { IndexInjection, IndexInjectionPlacement } from './injections.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     webServer: WebServer
+  }
+  interface Events {
+    /**
+     * Collect the structured index injection table. Emitted on every index
+     * render and every worker boot-payload request; listeners push their
+     * current rows, so a row's data is read fresh at emit time.
+     * @param table - Mutable row table; listeners append in activation order.
+     * @mode emit
+     */
+    'webserver/index-inject'(table: IndexInjection[]): void
   }
 }
 
@@ -45,7 +59,7 @@ export interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
 }
 
-/** Gateway config: the listen address. */
+/** Web server listen and response-compression config. */
 export interface Config {
   /** Listen host; the two supported values are loopback and all-interfaces. */
   host: '127.0.0.1' | '0.0.0.0'
@@ -59,9 +73,25 @@ export interface Config {
   remoteTlsCertificatePath?: string
   /** PEM private-key path for the remote TLS listener. */
   remoteTlsPrivateKeyPath?: string
+  /** Response compression for socket-backed HTTP requests. @default 'none' */
+  compression?: 'none' | 'gzip'
+  /** Gzip DEFLATE level from 0 through 9. @default 1 */
+  compressionLevel?: number
+  /** Minimum known response length eligible for gzip; unknown-length streams are eligible. @default 1024 */
+  compressionThresholdBytes?: number
 }
 
 const MAX_TLS_CREDENTIAL_BYTES = 1024 * 1024
+
+const DEFAULT_COMPRESSION = 'none' as const
+const DEFAULT_COMPRESSION_LEVEL = 1
+const DEFAULT_COMPRESSION_THRESHOLD_BYTES = 1024
+
+interface ResolvedConfig extends Config {
+  compression: 'none' | 'gzip'
+  compressionLevel: number
+  compressionThresholdBytes: number
+}
 
 /** Read one PEM file without following a replacement symlink or accepting a public private key. */
 async function readCredentialFile(path: string, privateKey: boolean): Promise<Buffer> {
@@ -80,6 +110,41 @@ async function readCredentialFile(path: string, privateKey: boolean): Promise<Bu
   }
 }
 
+type NodeMiddleware = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: () => void,
+) => void
+
+function createGzipMiddleware(config: ResolvedConfig): NodeMiddleware {
+  // `compression` is typed for Express, but its runtime uses only the
+  // node:http request and response members supplied here.
+  const middleware = compressionMiddleware({
+    level: config.compressionLevel,
+    threshold: config.compressionThresholdBytes,
+    filter(request, response) {
+      if (response.getHeader('content-range') !== undefined) return false
+      const contentType = response.getHeader('content-type')
+      if (typeof contentType === 'string' && contentType.toLowerCase().startsWith('text/event-stream')) return false
+      return compressionMiddleware.filter(request, response)
+    },
+  }) as unknown as NodeMiddleware
+
+  return (req, res, next) => {
+    // The Web Worker tunnel has no socket and transfers identity bytes.
+    if ((res as { socket?: unknown }).socket === undefined) {
+      next()
+      return
+    }
+    const encoding = new Negotiator(req).encoding(['gzip', 'identity'])
+    const gzipRequest = Object.create(req) as IncomingMessage
+    Object.defineProperty(gzipRequest, 'headers', {
+      value: { ...req.headers, 'accept-encoding': encoding === 'gzip' ? 'gzip' : 'identity' },
+    })
+    middleware(gzipRequest, res, next)
+  }
+}
+
 /**
  * The browser HTTP carrier service. Activation listens immediately. Route
  * registration order does not affect requests because configured named routes
@@ -95,6 +160,9 @@ export class WebServer extends Service {
     remoteTlsPort: z.natural().max(65535).default(0),
     remoteTlsCertificatePath: z.string().default(''),
     remoteTlsPrivateKeyPath: z.string().default(''),
+    compression: z.union([z.const('none'), z.const('gzip')]).default(DEFAULT_COMPRESSION),
+    compressionLevel: z.number().step(1).min(0).max(9).default(DEFAULT_COMPRESSION_LEVEL),
+    compressionThresholdBytes: z.natural().default(DEFAULT_COMPRESSION_THRESHOLD_BYTES),
   })
 
   private readonly exact = new Map<string, WebRoute>()
@@ -108,9 +176,12 @@ export class WebServer extends Service {
   private listenedPort!: number
   private listenedRemotePort: number | undefined
   private remoteFingerprint: string | undefined
+  private readonly gzip: NodeMiddleware | undefined
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'webServer')
+    const resolved = config as ResolvedConfig
+    this.gzip = resolved.compression === 'gzip' ? createGzipMiddleware(resolved) : undefined
   }
 
   /** The listening port (the OS-assigned value when config.port is 0). */
@@ -184,8 +255,9 @@ export class WebServer extends Service {
   }
 
   /**
-   * Register an index.html transform, applied by the fallback owner to every
-   * index response ({@link applyIndexTaps}) in registration order.
+   * Register a raw-HTML index transform, the escape hatch for markup no
+   * {@link IndexInjection} row expresses: {@link renderIndex} applies taps in
+   * registration order after rendering the structured rows.
    * @param transform - pure html-to-html function.
    * @returns the disposer removing the transform.
    */
@@ -216,30 +288,34 @@ export class WebServer extends Service {
       }
       await fallback(req, res)
     }
-    const handleFailure = (req: IncomingMessage, res: ServerResponse): void => {
-      handle(req, res).catch((err: unknown) => {
-        this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))
-        if (res.headersSent) {
-          res.destroy()
-          return
-        }
-        res.writeHead(400)
-        res.end()
-      })
+    const requestListener = (req: IncomingMessage, res: ServerResponse): void => {
+      const next = (): void => {
+        void handle(req, res).catch((err: unknown) => {
+          this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))
+          if (res.headersSent) {
+            res.destroy()
+            return
+          }
+          res.writeHead(400)
+          res.end()
+        })
+      }
+      if (this.gzip === undefined) next()
+      else this.gzip(req, res, next)
     }
     // Last-resort guard: handle() rejecting would otherwise be an unhandled
     // rejection killing the process on one malformed request (bad %-escape,
     // client dropping mid-body). Per-request failures log and answer 400 —
     // never a process exit.
     const remote = await this.remoteTlsConfiguration()
-    this.server = createServer(handleFailure)
+    this.server = createServer(requestListener)
     this.installUpgradeHandler(this.server)
     if (remote !== undefined) {
       this.remoteServer = createSecureServer({
         cert: remote.certificate,
         key: remote.privateKey,
         minVersion: 'TLSv1.3',
-      }, handleFailure)
+      }, requestListener)
       this.installUpgradeHandler(this.remoteServer)
       this.remoteFingerprint = new X509Certificate(remote.certificate).fingerprint256
         .replaceAll(':', '')
@@ -367,6 +443,28 @@ export class WebServer extends Service {
     let out = html
     for (const transform of this.indexTaps) out = transform(out)
     return out
+  }
+
+  /**
+   * Gather the structured injection table: one `webserver/index-inject` emit,
+   * every subscriber pushes its current rows. Fresh per call, so subscribers
+   * read live state (module graph, theme preference) at emit time.
+   * @returns rows in subscriber activation order.
+   */
+  collectIndexInjections(): IndexInjection[] {
+    const table: IndexInjection[] = []
+    this.ctx.emit('webserver/index-inject', table)
+    return table
+  }
+
+  /**
+   * Render one index.html body: the structured injection table first, then
+   * the raw `tapIndex` transforms over the result.
+   * @param html - the raw index.html body.
+   * @returns the transformed body.
+   */
+  renderIndex(html: string): string {
+    return this.applyIndexTaps(renderIndexInjections(html, this.collectIndexInjections()))
   }
 }
 

@@ -26,6 +26,8 @@ import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-sett
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-commands'
 import type { PermissionSelect, PresetOption } from './types.ts'
+// The command callback reads the live Agent face (session), not only its client identity.
+import type {} from '@deepseek-ai/dsh-agent'
 
 // The `permissions` projection-key declaration lives in src/types.ts (its one
 // home); this re-export projects the type face onto the package root AND
@@ -99,6 +101,22 @@ export interface KnobState {
   /** Last `approval/policy` payload, or null. */
   approval: ApprovalPolicy | null
 }
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    permissions: KnobState
+  }
+}
+
+const knobStateSchema: zod.ZodType<KnobState> = zod.object({
+  preset: zod.string().nullable(),
+  sandbox: zod.union([
+    zod.literal('read-only'),
+    zod.literal('workspace-write'),
+    zod.literal('danger-full-access'),
+  ]).nullable(),
+  approval: zod.union([zod.literal('ask'), zod.literal('never')]).nullable(),
+}).strict()
 
 /** State for the empty log: every knob at its composition default. */
 const EMPTY_KNOBS: KnobState = { preset: null, sandbox: null, approval: null }
@@ -243,10 +261,10 @@ export class PermissionPresetService extends Service {
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projectionCtx.sessionProjections.register<'permissions', KnobState>({
         key: 'permissions',
-        schema: selectSchema,
+        stateSchema: knobStateSchema,
         init: () => EMPTY_KNOBS,
         apply: applyKnobEvent,
-        view: state => this.selectFor(state),
+        wire: { viewSchema: selectSchema, view: state => this.selectFor(state) },
         stateVersion: 1,
       })
     })
@@ -263,21 +281,23 @@ export class PermissionPresetService extends Service {
         // surface that renders `name · text` (the web command row) would
         // otherwise read `permission · Permission preset: workspace-write.`
         handler: async ({ agent, rawInput }) => {
+          const session = this.ctx.sessions.get(agent.id)
+          if (session === undefined) throw new Error(`permission: live session "${agent.id}" is not attached`)
           const name = rawInput.trim()
           if (name === '') {
-            return { kind: 'success', text: `current preset ${this.current(agent.session.events)} (available: ${this.names.join(', ')})` }
+            return { kind: 'success', text: `current preset ${this.current(session.events)} (available: ${this.names.join(', ')})` }
           }
           if (!this.names.includes(name)) {
             return { kind: 'error', text: `unknown preset "${name}" (available: ${this.names.join(', ')})` }
           }
           const spec = this.resolve(name)
           const effective = agent.sandboxAuthority?.mode
-            ?? effectiveSandboxMode(agent.session.events)
+            ?? effectiveSandboxMode(session.events)
             ?? this.ctx.shell.sandboxMode
           if (spec.sandbox !== effective && agent.sandboxAuthority !== undefined) {
             await agent.sandboxAuthority.reconfigure(spec.sandbox)
           }
-          this.apply(agent.session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
+          this.apply(session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
           return { kind: 'success', text: `preset ${name}` }
         },
       })

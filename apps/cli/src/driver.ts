@@ -236,12 +236,14 @@ function inspectBundle(root: string, candidate: CandidateSpec, active: boolean):
 
 function embeddedNpmCli(): string | undefined {
   const runtimeRoot = process.env.OPENFISH_EMBEDDED_RUNTIME_ROOT
-  const candidates = [
-    ...(runtimeRoot === undefined || runtimeRoot === ''
-      ? []
-      : [join(runtimeRoot, 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')]),
-    resolve(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ]
+  if (runtimeRoot !== undefined && runtimeRoot !== '') {
+    const packaged = join(runtimeRoot, 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    if (!existsSync(packaged)) {
+      throw new Error('The packaged OpenFish runtime is incomplete: its pinned npm client is missing')
+    }
+    return packaged
+  }
+  const candidates = [resolve(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')]
   return candidates.find(existsSync)
 }
 
@@ -492,7 +494,9 @@ function ensureProfile(name: string): string {
   ensureShippedProfile(name)
   const directory = resolveProfileDir(name)
   if (!existsSync(join(directory, 'package.json'))) {
-    initProfile(directory, PROFILE_TEMPLATES[name] ?? DEFAULT_PROFILE_BUNDLES)
+    const template = PROFILE_TEMPLATES[name]
+    if (template === undefined) initProfile(directory, DEFAULT_PROFILE_BUNDLES)
+    else initProfile(directory, template.bundles, template.patchReload)
   }
   return directory
 }

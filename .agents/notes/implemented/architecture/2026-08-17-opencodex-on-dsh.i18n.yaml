@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-17-opencodex-on-dsh.md
-2026-08-17-opencodex-on-dsh.md: 2f5de8ae16654dbe1169d4ed123e8707b255e1a9
-2026-08-17-opencodex-on-dsh.zh.md: 8e863783da7e1f531fd110a3559859fb26d44e5d
+2026-08-17-opencodex-on-dsh.md: 40a073f84871998f110a485008d59fcc3c778b12
+2026-08-17-opencodex-on-dsh.zh.md: c9d23aafaec4ec706e0604c95e6eb8e06c1de019

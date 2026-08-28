@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/openfish-value-evidence.md
-openfish-value-evidence.md: 46d62dadd610f4a220dbda45cb675c8ef59871f0
-openfish-value-evidence.zh.md: 72b53ce28a8c3cbbbd82eee3ed76b7a442c2afc7
+openfish-value-evidence.md: c6f304b7708fa40ae2d27937a73eb492325e7aee
+openfish-value-evidence.zh.md: ae5dd2b3816d625ae18d25b70f1f1f620479cdd5

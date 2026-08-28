@@ -17,7 +17,9 @@ NODE="$RUNTIME/node/bin/node"
 BUN="$RUNTIME/app/node_modules/bun/bin/bun.exe"
 UV="$RUNTIME/uv/uv"
 HOST="$RUNTIME/app/lib/bin.js"
-[[ -x "$NODE" && -x "$BUN" && -x "$UV" && -f "$HOST" ]] || {
+HOST_NPM="$RUNTIME/app/node_modules/npm/bin/npm-cli.js"
+DRIVER_NPM="$RUNTIME/node/lib/node_modules/npm/bin/npm-cli.js"
+[[ -x "$NODE" && -x "$BUN" && -x "$UV" && -f "$HOST" && -f "$HOST_NPM" && -f "$DRIVER_NPM" ]] || {
   echo "smoke_openfish_bundle: embedded Node/Bun/uv/Host runtime is incomplete" >&2
   exit 1
 }

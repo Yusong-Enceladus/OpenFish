@@ -1,7 +1,7 @@
 # X native-surface bundle. This is the first product-specific patch layer over
 # the dsh web composition: it adds a native-client bridge without changing any
 # existing host/agent behavior.
-- id: api-gateway
+- id: session-controller
   config:
     # A task without a project still needs a stable working directory. Keep it
     # in Open Fish state rather than inheriting whichever folder launched the
@@ -17,11 +17,14 @@
     - id: openfish-harnesses
       name: '@deepseek-ai/dsh-harness'
       config: {}
+    - id: openfish-harness-controller
+      name: '@deepseek-ai/dsh-api-harness-controller'
+      inject: [typert, harnesses]
     - id: openfish-harness-acp
       name: '@deepseek-ai/dsh-harness-acp'
       inject: [harnesses, agents, sessions, subprocess, sandbox, sandboxPolicy, approval, userQuestions, credentials, attachments]
     - id: x-native
       name: '@deepseek-ai/dsh-bundle-x-native'
-      inject: [webServer, connection]
+      inject: [webServer, connection, typert, typertGateway, sessionController, workspaceController]
       config:
         protocolVersion: v2

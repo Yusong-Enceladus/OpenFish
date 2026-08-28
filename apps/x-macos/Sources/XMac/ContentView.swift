@@ -327,6 +327,10 @@ private struct OpenCodexSidebar: View {
                             WorkspaceSection(store: store, workspace: nil)
                         }
 
+                        if !store.otherLocationSessions.isEmpty {
+                            WorkspaceSection(store: store, workspace: nil, looseKind: .external)
+                        }
+
                         if !store.archivedSessions.isEmpty {
                             ArchivedTasksSection(store: store)
                         }
@@ -516,15 +520,43 @@ private struct ArchivedTasksSection: View {
     }
 }
 
+private enum LooseSessionSectionKind: Equatable {
+    case noProject
+    case external
+}
+
 private struct WorkspaceSection: View {
     @ObservedObject var store: OpenCodexStore
     let workspace: WorkspaceView?
+    var looseKind: LooseSessionSectionKind = .noProject
     @State private var isExpanded = true
     @State private var isRenaming = false
     @State private var renameText = ""
     @State private var confirmDelete = false
 
-    private var sessions: [SessionSummary] { store.sessions(in: workspace) }
+    init(
+        store: OpenCodexStore,
+        workspace: WorkspaceView?,
+        looseKind: LooseSessionSectionKind = .noProject
+    ) {
+        _store = ObservedObject(wrappedValue: store)
+        self.workspace = workspace
+        self.looseKind = looseKind
+    }
+
+    private var sessions: [SessionSummary] {
+        if workspace != nil { return store.sessions(in: workspace) }
+        return looseKind == .noProject ? store.sessions(in: nil) : store.otherLocationSessions
+    }
+
+    private var sectionTitle: String {
+        workspace?.title ?? (looseKind == .noProject ? "No Project" : "Other locations")
+    }
+
+    private var sectionIcon: String {
+        if workspace != nil { return "folder" }
+        return looseKind == .noProject ? "tray" : "externaldrive"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -536,10 +568,10 @@ private struct WorkspaceSection: View {
                         .font(.system(size: 9, weight: .bold))
                         .frame(width: 10)
                         .foregroundStyle(.tertiary)
-                    Image(systemName: workspace == nil ? "tray" : "folder")
+                    Image(systemName: sectionIcon)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text(workspace?.title ?? "No Project")
+                    Text(sectionTitle)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
                     Spacer()
@@ -553,6 +585,17 @@ private struct WorkspaceSection: View {
                         }
                         .buttonStyle(.plain)
                         .help("New task in \(workspace.title)")
+                        .disabled(!store.canStartNewTask)
+                    } else if looseKind == .noProject {
+                        Button {
+                            store.beginNewTask(in: nil)
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11.5, weight: .bold))
+                                .frame(width: 24, height: 24)
+                        }
+                        .buttonStyle(.plain)
+                        .help("New No Project task")
                         .disabled(!store.canStartNewTask)
                     }
                 }
@@ -730,7 +773,7 @@ private struct SessionRow: View {
     }
 
     private var workspaceTitle: String {
-        store.workspaces.first(where: { $0.sessionIds.contains(session.sessionId) })?.title ?? "No Project"
+        store.workspaceTitle(for: session)
     }
 }
 
@@ -2177,7 +2220,7 @@ private struct RunIdentityLine: View {
     }
 
     private var reasoning: String {
-        store.currentReasoningName ?? (store.currentReasoningOptions.isEmpty ? "Not exposed" : "Auto")
+        store.currentReasoningLabel
     }
 
     var body: some View {
@@ -2487,6 +2530,11 @@ private func harnessNeedsExecutionConsent(_ harness: HarnessCatalogEntry) -> Boo
 private func harnessCanPrepare(_ harness: HarnessCatalogEntry) -> Bool {
     guard harness.publication?.status != "revoked" else { return false }
     return harness.available
+        || (harness.installation.status == "installed"
+            && harness.auth.status == "unknown"
+            && harness.driver.loaded
+            && harness.driver.authorization != "required"
+            && harness.unavailableReason == harness.auth.detail)
         || (harness.driverBundle != nil
             && (harness.driver.authorization == "required" || !harness.driver.loaded)
             && OpenFishDriverManager.isAvailable)
@@ -2733,7 +2781,12 @@ private struct HarnessPicker: View {
                                     .font(.system(size: 11.5))
                                     .foregroundStyle(inspectedHarness.available ? Color.secondary : harnessCanPrepare(inspectedHarness) ? Color.orange : Color.red)
                                 Spacer()
-                                if !inspectedHarness.auth.methods.isEmpty {
+                                if inspectedHarness.auth.status == "unknown" {
+                                    Button(inspectedHarness.installation.status == "installed" ? "Inspect setup again" : "Install to inspect setup") {
+                                        requestMutation("install", harness: inspectedHarness)
+                                    }
+                                    .disabled(!harnessCanPrepare(inspectedHarness) || store.harnessOperationId != nil)
+                                } else if !inspectedHarness.auth.methods.isEmpty {
                                     Menu(accountButtonTitle(inspectedHarness)) {
                                         ForEach(inspectedHarness.auth.methods) { method in
                                             Button {
@@ -2945,7 +2998,7 @@ private struct HarnessCredentialsSheet: View {
                 ? "OpenFish will open the installed Harness's official sign-in in Terminal and wait for it to finish. No secret is returned to the app."
                 : selection.method.fields.isEmpty
                 ? "Confirm this sign-in method before OpenFish asks the installed Harness to use it. No secret is returned to the app."
-                : "Secrets are written to the Host credential service and are never returned to the app or stored in the Harness Pack.")
+                : "Configuration values are written to the Host credential service and are never stored in the Harness Pack. Secret fields are never returned to the app.")
                 .font(.callout).foregroundStyle(.secondary)
             GroupBox("Account and billing") {
                 VStack(alignment: .leading, spacing: 5) {
@@ -2972,9 +3025,15 @@ private struct HarnessCredentialsSheet: View {
                     }
                 }
             }
+            if saving {
+                HarnessOperationStatus(store: store)
+            }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button(saving && store.canCancelHarnessOperation ? "Cancel operation" : "Cancel") {
+                    if saving && store.canCancelHarnessOperation { store.cancelHarnessOperation() }
+                    else { dismiss() }
+                }
                 Button(selection.method.kind == "terminal" ? "Open sign-in" : (selection.method.fields.isEmpty ? "Confirm and use" : "Save and use")) {
                     let submitted = values
                     values = [:]
@@ -3002,6 +3061,7 @@ private struct HarnessCredentialsSheet: View {
         }
         .padding(22)
         .frame(width: 440)
+        .interactiveDismissDisabled(saving)
     }
 }
 
@@ -3014,6 +3074,36 @@ private struct HarnessPackEditor: View {
         let inputs: [String]
         let outputs: [String]
         let observes: [String]
+        let editable: Bool
+        let ports: [HarnessGraphPort]?
+        let configSchema: HarnessNodeConfigSchema?
+        let defaultConfig: [String: JSONValue]?
+
+        init(
+            id: String,
+            title: String,
+            kind: String,
+            responsibility: String,
+            inputs: [String],
+            outputs: [String],
+            observes: [String],
+            editable: Bool = false,
+            ports: [HarnessGraphPort]? = nil,
+            configSchema: HarnessNodeConfigSchema? = nil,
+            defaultConfig: [String: JSONValue]? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.kind = kind
+            self.responsibility = responsibility
+            self.inputs = inputs
+            self.outputs = outputs
+            self.observes = observes
+            self.editable = editable
+            self.ports = ports
+            self.configSchema = configSchema
+            self.defaultConfig = defaultConfig
+        }
     }
     private struct GraphSnapshot: Equatable {
         let level: String
@@ -3028,7 +3118,7 @@ private struct HarnessPackEditor: View {
         "model.completed", "tool.activity", "output.activity", "approval.requested", "approval.resolved",
     ]
     private static let reservedHarnessIDs = Set(["dsh", "codex", "oh-my-pi"])
-    private static let componentTemplates: [ComponentTemplate] = [
+    private static let descriptiveTemplates: [ComponentTemplate] = [
         .init(id: "protocol", title: "Protocol boundary", kind: "protocol-adapter", responsibility: "Translates Host requests and Harness updates across the declared protocol boundary.", inputs: ["Host request"], outputs: ["Harness update"], observes: ["protocol.ready"]),
         .init(id: "context", title: "Context assembly", kind: "context-runtime", responsibility: "Builds model-visible input from the sources this Harness actually owns.", inputs: ["instructions", "task context"], outputs: ["model input"], observes: []),
         .init(id: "session", title: "Agent session", kind: "agent-session", responsibility: "Owns task lifecycle, turns, cancellation, and resumable session state.", inputs: ["task message", "session controls"], outputs: ["turn updates"], observes: ["session.ready", "turn.started", "turn.completed", "turn.failed"]),
@@ -3073,6 +3163,7 @@ private struct HarnessPackEditor: View {
     @State private var authAccountLabel = ""
     @State private var authBilling = "unknown"
     @State private var authAccountDetail = ""
+    @State private var discoverAuthenticationAtRuntime = true
     @State private var agentAuthMetaKey = ""
     @State private var agentAuthFieldProperty = ""
     @State private var modelOwner = "harness"
@@ -3121,6 +3212,41 @@ private struct HarnessPackEditor: View {
         protocolName != "dsh" && store.harnesses.contains { $0.protocolName == protocolName && $0.driver.loaded }
     }
 
+    private var driverAuthoring: HarnessAuthoringContract? {
+        let candidates = store.harnesses.filter { $0.protocolName == protocolName && $0.driver.loaded }
+        if let existing, let exact = candidates.first(where: { $0.id == existing.id }) {
+            return exact.authoring
+        }
+        return candidates.first?.authoring
+    }
+
+    private var driverComponentTemplates: [ComponentTemplate] {
+        (driverAuthoring?.nodeKinds ?? []).map { definition in
+            ComponentTemplate(
+                id: definition.kind,
+                title: definition.name,
+                kind: definition.kind,
+                responsibility: definition.responsibility,
+                inputs: definition.inputs,
+                outputs: definition.outputs,
+                observes: definition.observes ?? [],
+                editable: definition.editable,
+                ports: definition.ports,
+                configSchema: definition.configSchema,
+                defaultConfig: definition.defaultConfig
+            )
+        }
+    }
+
+    private var componentTemplates: [ComponentTemplate] {
+        let driverKinds = Set(driverComponentTemplates.map(\.kind))
+        return driverComponentTemplates + Self.descriptiveTemplates.filter { !driverKinds.contains($0.kind) }
+    }
+
+    private var driverBindingKinds: [HarnessBindingKindDefinition] {
+        driverAuthoring?.bindingKinds ?? []
+    }
+
     private var protocolUsesBundledDriver: Bool {
         ["dsh", "acp", "codex-app-server"].contains(protocolName)
     }
@@ -3137,27 +3263,106 @@ private struct HarnessPackEditor: View {
     private var changeSummary: [String] {
         guard let existing else { return ["New Pack \(version)"] }
         var changes: [String] = []
-        if version != existing.version { changes.append("Version \(existing.version) → \(version)") }
-        if name != existing.name || description != (existing.description ?? "") { changes.append("Identity or description") }
-        if protocolName != existing.protocolName || distributionKind != existing.distribution?.kind
-            || packageOrCommand != (existing.distribution?.package ?? existing.distribution?.archive ?? existing.distribution?.command ?? "") {
-            changes.append("Driver or distribution")
+        if version != existing.version { changes.append("Version · \(existing.version) → \(version)") }
+        if name != existing.name { changes.append("Name · \(existing.name) → \(name)") }
+        if description != (existing.description ?? "") { changes.append("Description changed") }
+        if publisher != existing.publisher { changes.append("Publisher · \(existing.publisher) → \(publisher)") }
+        if license != (existing.license ?? "") { changes.append("License changed") }
+        if repository != (existing.repository ?? "") { changes.append("Repository changed") }
+        if protocolName != existing.protocolName { changes.append("Driver protocol · \(existing.protocolName) → \(protocolName)") }
+        let previousDistribution = existing.distribution?.package
+            ?? existing.distribution?.archive
+            ?? existing.distribution?.command
+            ?? "none"
+        if distributionKind != existing.distribution?.kind || packageOrCommand != previousDistribution {
+            changes.append("Distribution · \(existing.distribution?.kind ?? "none") \(previousDistribution) → \(distributionKind) \(packageOrCommand)")
+        }
+        let nextArguments = arguments.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        if nextArguments != (existing.distribution?.args ?? []) { changes.append("Launch arguments changed") }
+        let nextEnvironmentNames = Set(distributionEnvironment.split(whereSeparator: \.isNewline).compactMap {
+            $0.split(separator: "=", maxSplits: 1).first.map(String.init)
+        })
+        if nextEnvironmentNames != Set(existing.distribution?.env.keys ?? Dictionary<String, String>().keys) {
+            changes.append("Launch environment names changed; values remain hidden")
+        }
+        if binaryCommand != (existing.distribution?.kind == "binary" ? existing.distribution?.command ?? "" : "")
+            || sha256 != (existing.distribution?.sha256 ?? "") {
+            changes.append("Binary command or integrity declaration changed")
         }
         if driverPackage != (existing.driverBundle?.package ?? "")
             || driverSpec != (existing.driverBundle?.spec ?? "")
             || driverRequiresInstallScripts != (existing.driverBundle?.requiresInstallScripts ?? false) {
-            changes.append("Driver Bundle source")
+            changes.append("Exact Driver Bundle changed")
         }
         let storedPositions = Dictionary(uniqueKeysWithValues: existing.graph.nodes.enumerated().map { index, node in
             let x = node.position?.x ?? node.config?["x"]?.doubleValue ?? Double(110 + (index % 3) * 190)
             let y = node.position?.y ?? node.config?["y"]?.doubleValue ?? Double(70 + (index / 3) * 100)
             return (node.id, CGPoint(x: x, y: y))
         })
-        if graphLevel != existing.graph.level || nodes != existing.graph.nodes || edges != existing.graph.edges
-            || positions != storedPositions {
-            changes.append("Architecture and executable controls")
+        if graphLevel != existing.graph.level { changes.append("Architecture level · \(existing.graph.level) → \(graphLevel)") }
+        if graphBoundary != (existing.graph.boundary ?? "Harness process") { changes.append("Harness boundary changed") }
+        if graphEvidenceSource != (existing.graph.evidence?.first?.source ?? "Pack declaration") { changes.append("Architecture evidence source changed") }
+        let previousByID = Dictionary(existing.graph.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let currentByID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let added = Set(currentByID.keys).subtracting(previousByID.keys).sorted()
+        let removed = Set(previousByID.keys).subtracting(currentByID.keys).sorted()
+        if !added.isEmpty { changes.append("Components added · \(added.joined(separator: ", "))") }
+        if !removed.isEmpty { changes.append("Components removed · \(removed.joined(separator: ", "))") }
+        for nodeID in Set(previousByID.keys).intersection(currentByID.keys).sorted() {
+            guard let before = previousByID[nodeID], let after = currentByID[nodeID], before != after else { continue }
+            var parts: [String] = []
+            if before.title != after.title || before.kind != after.kind || before.responsibility != after.responsibility {
+                parts.append("identity/responsibility")
+            }
+            if before.inputs != after.inputs || before.outputs != after.outputs || before.ports != after.ports {
+                parts.append("ports/data flow")
+            }
+            if before.editable != after.editable || before.configSchema != after.configSchema || before.config != after.config {
+                parts.append("executable controls")
+            }
+            if before.evidence != after.evidence || before.observes != after.observes { parts.append("evidence bindings") }
+            changes.append("Component \(nodeID) · \((parts.isEmpty ? ["manifest"] : parts).joined(separator: ", "))")
         }
-        if authMethodId != (existing.auth.methods.first?.id ?? "") || modelOwner != (existing.modelConfiguration?.owner ?? "harness") { changes.append("Account or model contract") }
+        if edges != existing.graph.edges { changes.append("Declared connections changed") }
+        if positions != storedPositions {
+            changes.append("Canvas layout changed (presentation only)")
+        }
+        let nextTerminalArguments = terminalAuthArguments
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        if authMethodId != (existing.auth.methods.first?.id ?? "")
+            || authMethodName != (existing.auth.methods.first?.name ?? "")
+            || authKind != (existing.auth.methods.first?.kind ?? "agent")
+            || authFieldRef != (existing.auth.methods.first?.fields.first?.ref ?? "")
+            || authFieldName != (existing.auth.methods.first?.fields.first?.name ?? "")
+            || authFieldEnv != (existing.auth.methods.first?.fields.first?.env ?? "")
+            || authAccountLabel != (existing.auth.methods.first?.account?.label ?? existing.account?.label ?? "")
+            || authBilling != (existing.auth.methods.first?.account?.billing ?? existing.account?.billing ?? "unknown")
+            || authAccountDetail != (existing.auth.methods.first?.account?.detail ?? existing.account?.detail ?? "")
+            || agentAuthMetaKey != (existing.auth.methods.first?.agent?.metaKey ?? "")
+            || agentAuthFieldProperty != (authFieldRef.isEmpty
+                ? ""
+                : existing.auth.methods.first?.agent?.fieldMap[authFieldRef] ?? "")
+            || nextTerminalArguments != (existing.auth.methods.first?.terminal?.args ?? []) {
+            changes.append("Authentication/account contract changed")
+        }
+        let nextTerminalEnvironmentNames = Set(terminalAuthEnvironment.split(whereSeparator: \.isNewline).compactMap {
+            $0.split(separator: "=", maxSplits: 1).first.map(String.init)
+        })
+        if nextTerminalEnvironmentNames != Set(existing.auth.methods.first?.terminal?.env.keys ?? Dictionary<String, String>().keys) {
+            changes.append("Authentication environment names changed; values remain hidden")
+        }
+        if discoverAuthenticationAtRuntime != (existing.authenticationDiscovery?.source == "runtime") {
+            changes.append("Authentication discovery changed")
+        }
+        let previousModelDetail = existing.modelConfiguration?.detail
+            ?? "Models and model-specific controls are discovered from the running Harness."
+        if modelOwner != (existing.modelConfiguration?.owner ?? "harness")
+            || modelConfigurationRequired != (existing.modelConfiguration?.required ?? false)
+            || modelConfigurationDetail != previousModelDetail {
+            changes.append("Model ownership contract changed")
+        }
         return changes
     }
 
@@ -3304,6 +3509,28 @@ private struct HarnessPackEditor: View {
             if visited.count != nodes.count { issues.append("Connect every declared architecture component into one truthful Harness boundary.") }
         }
         if graphLevel != "composable" && nodes.contains(where: \.editable) { issues.append("Only composable graphs may expose editable nodes.") }
+        for node in nodes where node.editable {
+            guard let nodeKind = driverAuthoring?.nodeKinds.first(where: { $0.kind == node.kind }) else {
+                issues.append("Editable component \(node.title) needs a node kind published by the loaded \(protocolName) Driver.")
+                continue
+            }
+            if !nodeKind.editable {
+                issues.append("The \(protocolName) Driver declares component kind \(node.kind) as explanatory, not executable.")
+            }
+            for field in node.configSchema?.fields ?? [] {
+                guard let binding = driverBindingKinds.first(where: { $0.kind == field.binding.kind }) else {
+                    issues.append("Control \(field.name) uses a binding kind the loaded Driver did not publish.")
+                    continue
+                }
+                if !binding.fieldTypes.contains(field.type) {
+                    issues.append("Driver binding \(binding.name) cannot execute a \(field.type) control.")
+                }
+                if let pattern = binding.targetPattern,
+                   field.binding.target.range(of: pattern, options: .regularExpression) == nil {
+                    issues.append("Control \(field.name) has an invalid \(binding.targetLabel.lowercased()).")
+                }
+            }
+        }
         func isRuntimeSignal(_ signal: String) -> Bool {
             Self.runtimeSignals.contains(signal)
                 || (signal.hasPrefix("driver.\(protocolName).")
@@ -3355,23 +3582,6 @@ private struct HarnessPackEditor: View {
             let observations = edge.observes ?? []
             if Set(observations).count != observations.count || observations.contains(where: { !isRuntimeSignal($0) }) {
                 issues.append("Connection observations must be unique built-in ids or use driver.\(protocolName).<signal>.")
-            }
-        }
-        if protocolName == "acp" {
-            for node in nodes where node.editable {
-                if let schema = node.configSchema, !schema.fields.isEmpty {
-                    if schema.fields.contains(where: { $0.binding.kind != "acp-session-option" || $0.binding.target.isEmpty }) {
-                        issues.append("ACP executable controls must bind to a live ACP session option id.")
-                    }
-                    continue
-                }
-                guard let options = node.config?["acpSessionOptions"]?.objectValue, !options.isEmpty else {
-                    issues.append("Editable ACP component \(node.title) needs at least one live session option mapping.")
-                    continue
-                }
-                if options.contains(where: { $0.key.isEmpty || ($0.value.stringValue == nil && $0.value.boolValue == nil) }) {
-                    issues.append("ACP option mappings use a non-empty option id and a text or boolean value.")
-                }
             }
         }
         return issues
@@ -3487,6 +3697,12 @@ private struct HarnessPackEditor: View {
                 }
                 if editorPage == "Access" {
                 Section("Authentication (optional)") {
+                    Toggle("Discover sign-in methods from the installed Harness", isOn: $discoverAuthenticationAtRuntime)
+                    Text(discoverAuthenticationAtRuntime
+                         ? "Before installation, OpenFish shows sign-in as unknown. After installation, the Driver must report the actual methods or explicitly confirm that no sign-in is required."
+                         : "The methods declared below are the complete sign-in contract. If the list is empty, OpenFish will state that this Harness requires no sign-in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if let preservedCount = existing?.auth.methods.dropFirst().count, preservedCount > 0 {
                         Label(
                             "This Pack also declares \(preservedCount) advanced authentication \(preservedCount == 1 ? "method" : "methods"). They are preserved byte-for-field when this primary method is edited or the optional form is left empty.",
@@ -3558,7 +3774,9 @@ private struct HarnessPackEditor: View {
                 Button { redoGraph() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
                     .disabled(graphRedo.isEmpty)
             }
-            Text("Composable editable nodes may declare {\"acpSessionOptions\": {\"option-id\": \"value\"}}. OpenFish applies these defaults to new sessions and validates every id and value against the Harness's live ACP capability directory.")
+            Text(driverBindingKinds.isEmpty
+                 ? "This Driver exposes no executable authoring vocabulary. You can document evidence-backed structure, but OpenFish will not pretend those nodes change Harness behavior."
+                 : "Executable controls use binding kinds published by the loaded Driver. OpenFish validates the manifest first, then live-preflights targets without sending a model prompt.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             EditableHarnessGraphCanvas(
@@ -3586,9 +3804,12 @@ private struct HarnessPackEditor: View {
                         }))
                         TextField("Title", text: Binding(get: { nodes[index].title }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: $0, editable: node.editable, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, ports: node.ports, evidence: node.evidence, observes: node.observes, configSchema: node.configSchema, config: node.config) }))
                         TextField("Kind", text: Binding(get: { nodes[index].kind }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: $0, title: node.title, editable: node.editable, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, ports: node.ports, evidence: node.evidence, observes: node.observes, configSchema: node.configSchema, config: node.config) }))
-                        Toggle("Editable", isOn: Binding(get: { nodes[index].editable }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: $0, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, ports: node.ports, evidence: node.evidence, observes: node.observes, configSchema: node.configSchema, config: node.config) }))
+                        Toggle("Executable", isOn: Binding(get: { nodes[index].editable }, set: { nodes[index] = HarnessGraphNode(id: node.id, kind: node.kind, title: node.title, editable: $0, responsibility: node.responsibility, inputs: node.inputs, outputs: node.outputs, ports: node.ports, evidence: node.evidence, observes: node.observes, configSchema: node.configSchema, config: node.config) }))
                             .toggleStyle(.checkbox)
-                            .disabled(graphLevel != "composable")
+                            .disabled(
+                                graphLevel != "composable"
+                                    || driverAuthoring?.nodeKinds.first(where: { $0.kind == node.kind })?.editable != true
+                            )
                         Button(role: .destructive) {
                             nodes.remove(at: index)
                             positions.removeValue(forKey: node.id)
@@ -3641,14 +3862,25 @@ private struct HarnessPackEditor: View {
                         .font(.caption2).foregroundStyle(.secondary)
                     HarnessNodeConfigEditor(
                         node: Binding(get: { nodes[index] }, set: { nodes[index] = $0 }),
-                        protocolName: protocolName
+                        bindingKinds: driverBindingKinds
                     )
                 }
             }
             HStack {
                 Menu {
-                    ForEach(Self.componentTemplates) { template in
-                        Button(template.title) { addComponent(template) }
+                    if !driverComponentTemplates.isEmpty {
+                        Section("Driver components") {
+                            ForEach(driverComponentTemplates) { template in
+                                Button(template.title) { addComponent(template) }
+                            }
+                        }
+                    }
+                    Section("Evidence-only components") {
+                        ForEach(Self.descriptiveTemplates.filter { template in
+                            !Set(driverComponentTemplates.map(\.kind)).contains(template.kind)
+                        }) { template in
+                            Button(template.title) { addComponent(template) }
+                        }
                     }
                 } label: {
                     Label("Add component", systemImage: "plus")
@@ -3816,10 +4048,14 @@ private struct HarnessPackEditor: View {
     private func addComponent(_ template: ComponentTemplate) {
         let nodeID = uniqueNodeID(template.id)
         let node = HarnessGraphNode(
-            id: nodeID, kind: template.kind, title: template.title, editable: false,
+            id: nodeID, kind: template.kind, title: template.title,
+            editable: graphLevel == "composable" && template.editable && template.configSchema != nil,
             responsibility: template.responsibility, inputs: template.inputs, outputs: template.outputs,
+            ports: template.ports,
             evidence: [HarnessGraphEvidence(kind: "declared", source: graphEvidenceSource, version: version)],
-            observes: template.observes.isEmpty ? nil : template.observes, config: nil
+            observes: template.observes.isEmpty ? nil : template.observes,
+            configSchema: template.configSchema,
+            config: template.defaultConfig
         )
         nodes.append(node)
         positions[nodeID] = CGPoint(x: 140 + (nodes.count % 4) * 155, y: 90 + (nodes.count / 4) * 100)
@@ -3847,27 +4083,31 @@ private struct HarnessPackEditor: View {
             selectedEditorNodeId = runtime.id
             return
         }
-        let selected = ["protocol", "context", "session", "model", "tools", "permissions", "execution", "output", "persistence"]
+        let modelKind = driverAuthoring?.nodeKinds.contains(where: { $0.kind == "model-router" }) == true
+            ? "model-router" : "model-client"
+        let selected = ["protocol-adapter", "context-runtime", "agent-session", modelKind, "tool-runtime", "permission-policy", "execution-boundary", "output-stream", "session-storage"]
         nodes = []
         edges = []
         positions = [:]
-        for templateID in selected {
-            if let template = Self.componentTemplates.first(where: { $0.id == templateID }) { addComponent(template) }
+        for kind in selected {
+            if let template = componentTemplates.first(where: { $0.kind == kind }) { addComponent(template) }
         }
+        let idsByKind = Dictionary(uniqueKeysWithValues: nodes.map { ($0.kind, $0.id) })
+        func nodeID(_ kind: String) -> String { idsByKind[kind] ?? kind }
         edges = [
-            HarnessGraphEdge(from: "protocol", to: "session", label: "task and lifecycle request", observes: ["session.ready", "turn.started"]),
-            HarnessGraphEdge(from: "session", to: "context", label: "turn context", observes: ["turn.started"]),
-            HarnessGraphEdge(from: "context", to: "model", label: "model-visible input", observes: ["turn.started"]),
-            HarnessGraphEdge(from: "model", to: "tools", label: "tool request", observes: ["tool.activity"]),
-            HarnessGraphEdge(from: "tools", to: "permissions", label: "guarded effect", observes: ["approval.requested"]),
-            HarnessGraphEdge(from: "permissions", to: "execution", label: "permission decision"),
-            HarnessGraphEdge(from: "execution", to: "session", label: "tool result", observes: ["tool.activity"]),
-            HarnessGraphEdge(from: "model", to: "output", label: "model stream", observes: ["model.completed", "output.activity"]),
-            HarnessGraphEdge(from: "session", to: "persistence", label: "resumable state", observes: ["turn.completed", "turn.failed"]),
+            HarnessGraphEdge(from: nodeID("protocol-adapter"), to: nodeID("agent-session"), label: "task and lifecycle request", observes: ["session.ready", "turn.started"]),
+            HarnessGraphEdge(from: nodeID("agent-session"), to: nodeID("context-runtime"), label: "turn context", observes: ["turn.started"]),
+            HarnessGraphEdge(from: nodeID("context-runtime"), to: nodeID(modelKind), label: "model-visible input", observes: ["turn.started"]),
+            HarnessGraphEdge(from: nodeID(modelKind), to: nodeID("tool-runtime"), label: "tool request", observes: ["tool.activity"]),
+            HarnessGraphEdge(from: nodeID("tool-runtime"), to: nodeID("permission-policy"), label: "guarded effect", observes: ["approval.requested"]),
+            HarnessGraphEdge(from: nodeID("permission-policy"), to: nodeID("execution-boundary"), label: "permission decision"),
+            HarnessGraphEdge(from: nodeID("execution-boundary"), to: nodeID("agent-session"), label: "tool result", observes: ["tool.activity"]),
+            HarnessGraphEdge(from: nodeID(modelKind), to: nodeID("output-stream"), label: "model stream", observes: ["model.completed", "output.activity"]),
+            HarnessGraphEdge(from: nodeID("agent-session"), to: nodeID("session-storage"), label: "resumable state", observes: ["turn.completed", "turn.failed"]),
         ]
-        edgeFrom = "protocol"
-        edgeTo = "session"
-        selectedEditorNodeId = "protocol"
+        edgeFrom = nodeID("protocol-adapter")
+        edgeTo = nodeID("agent-session")
+        selectedEditorNodeId = edgeFrom
     }
 
     private func save(runPreflight: Bool) {
@@ -3887,6 +4127,7 @@ private struct HarnessPackEditor: View {
                 authMethodId: authMethodId, authMethodName: authMethodName, authKind: authKind,
                 authFieldRef: authFieldRef, authFieldName: authFieldName, authFieldEnv: authFieldEnv,
                 authAccountLabel: authAccountLabel, authBilling: authBilling, authAccountDetail: authAccountDetail,
+                discoverAuthenticationAtRuntime: discoverAuthenticationAtRuntime,
                 agentAuthMetaKey: agentAuthMetaKey, agentAuthFieldProperty: agentAuthFieldProperty,
                 modelOwner: modelOwner, modelConfigurationRequired: modelConfigurationRequired,
                 modelConfigurationDetail: modelConfigurationDetail,
@@ -3951,6 +4192,7 @@ private struct HarnessPackEditor: View {
         driverPackage = existing.driverBundle?.package ?? ""
         driverSpec = existing.driverBundle?.spec ?? ""
         driverRequiresInstallScripts = existing.driverBundle?.requiresInstallScripts ?? false
+        discoverAuthenticationAtRuntime = existing.authenticationDiscovery?.source == "runtime"
         modelOwner = existing.modelConfiguration?.owner ?? "harness"
         modelConfigurationRequired = existing.modelConfiguration?.required ?? false
         modelConfigurationDetail = existing.modelConfiguration?.detail
@@ -4020,11 +4262,24 @@ private struct HarnessTypedFieldDraft: Identifiable {
 
 private struct HarnessNodeConfigEditor: View {
     @Binding var node: HarnessGraphNode
-    let protocolName: String
+    let bindingKinds: [HarnessBindingKindDefinition]
     @State private var text = "{}"
     @State private var error: String?
     @State private var fields: [HarnessTypedFieldDraft] = []
     @State private var showingAdvanced = false
+
+    private var supportedFieldTypes: [String] {
+        let supported = Set(bindingKinds.flatMap(\.fieldTypes))
+        return ["string", "boolean", "select", "secret-reference"].filter { supported.contains($0) }
+    }
+
+    private func bindings(for type: String) -> [HarnessBindingKindDefinition] {
+        bindingKinds.filter { $0.fieldTypes.contains(type) }
+    }
+
+    private func binding(_ kind: String) -> HarnessBindingKindDefinition? {
+        bindingKinds.first { $0.kind == kind }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -4034,14 +4289,17 @@ private struct HarnessNodeConfigEditor: View {
                         .font(.caption.weight(.semibold))
                     Spacer()
                     Button("Add control") {
+                        guard let binding = bindingKinds.first,
+                              let fieldType = binding.fieldTypes.first else { return }
                         let index = fields.count + 1
                         fields.append(.init(
-                            fieldID: "option_\(index)", name: "Option \(index)", kind: "string",
-                            bindingKind: protocolName == "acp" ? "acp-session-option" : "",
+                            fieldID: "option_\(index)", name: "Option \(index)", kind: fieldType,
+                            bindingKind: binding.kind,
                             target: "", required: true, choices: "", stringValue: "", boolValue: false
                         ))
                     }
                     .controlSize(.small)
+                    .disabled(bindingKinds.isEmpty)
                 }
                 ForEach($fields) { $field in
                     VStack(alignment: .leading, spacing: 7) {
@@ -4049,14 +4307,18 @@ private struct HarnessNodeConfigEditor: View {
                             TextField("Field id", text: $field.fieldID).textFieldStyle(.roundedBorder)
                             TextField("Label", text: $field.name).textFieldStyle(.roundedBorder)
                             Picker("Type", selection: $field.kind) {
-                                Text("Text").tag("string")
-                                Text("Boolean").tag("boolean")
-                                Text("Choice").tag("select")
-                                if protocolName != "acp" {
-                                    Text("Credential reference").tag("secret-reference")
-                                }
+                                if supportedFieldTypes.contains("string") { Text("Text").tag("string") }
+                                if supportedFieldTypes.contains("boolean") { Text("Boolean").tag("boolean") }
+                                if supportedFieldTypes.contains("select") { Text("Choice").tag("select") }
+                                if supportedFieldTypes.contains("secret-reference") { Text("Credential reference").tag("secret-reference") }
                             }
                             .labelsHidden().frame(width: 148)
+                            .onChange(of: field.kind) { _, type in
+                                if !bindings(for: type).contains(where: { $0.kind == field.bindingKind }),
+                                   let replacement = bindings(for: type).first {
+                                    field.bindingKind = replacement.kind
+                                }
+                            }
                             Toggle("Required", isOn: $field.required).toggleStyle(.checkbox)
                             Button(role: .destructive) {
                                 fields.removeAll { $0.id == field.id }
@@ -4064,13 +4326,16 @@ private struct HarnessNodeConfigEditor: View {
                                 .buttonStyle(.borderless)
                         }
                         HStack(spacing: 7) {
-                            if protocolName == "acp" {
-                                Text("ACP option").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            } else {
-                                TextField("Driver binding kind", text: $field.bindingKind).textFieldStyle(.roundedBorder)
+                            Picker("Driver binding", selection: $field.bindingKind) {
+                                ForEach(bindings(for: field.kind)) { binding in
+                                    Text(binding.name).tag(binding.kind)
+                                }
                             }
-                            TextField(protocolName == "acp" ? "Live option id" : "Binding target", text: $field.target)
+                            .labelsHidden()
+                            .frame(width: 150)
+                            TextField(binding(field.bindingKind)?.targetLabel ?? "Binding target", text: $field.target)
                                 .textFieldStyle(.roundedBorder)
+                                .help(binding(field.bindingKind)?.targetPlaceholder ?? "Driver-owned executable target")
                             if field.kind == "boolean" {
                                 Toggle(field.boolValue ? "On" : "Off", isOn: $field.boolValue)
                                     .toggleStyle(.switch).frame(width: 76)
@@ -4091,9 +4356,9 @@ private struct HarnessNodeConfigEditor: View {
                     .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 8))
                 }
                 HStack(alignment: .firstTextBaseline) {
-                    Text(protocolName == "acp"
-                         ? "Each control binds to a standard live ACP session option. Preflight launches the installed Harness, verifies every id and value, then tears it down without sending a model prompt."
-                         : "The selected Driver must validate every binding kind and target before this Pack can run.")
+                    Text(bindingKinds.isEmpty
+                         ? "The loaded Driver exposes no executable binding vocabulary, so this node must remain explanatory."
+                         : "Each control binds through a Driver-published semantic. Live preflight verifies targets and values, then tears the Harness down without sending a model prompt.")
                         .font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button("Apply controls") { applyTypedFields() }
@@ -4145,16 +4410,7 @@ private struct HarnessNodeConfigEditor: View {
             }
             return
         }
-        fields = (node.config?["acpSessionOptions"]?.objectValue ?? [:])
-            .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
-            .map { key, value in
-                HarnessTypedFieldDraft(
-                    fieldID: key, name: key.replacingOccurrences(of: "_", with: " ").capitalized,
-                    kind: value.boolValue == nil ? "string" : "boolean",
-                    bindingKind: "acp-session-option", target: key, required: true, choices: "",
-                    stringValue: value.stringValue ?? "", boolValue: value.boolValue ?? false
-                )
-            }
+        fields = []
     }
 
     private func replacing(schema: HarnessNodeConfigSchema?, config: [String: JSONValue]) {
@@ -4185,13 +4441,11 @@ private struct HarnessNodeConfigEditor: View {
             error = "Every control needs a Driver binding target."
             return
         }
-        if protocolName != "acp", fields.contains(where: { $0.bindingKind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+        if fields.contains(where: { $0.bindingKind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
             error = "Every control needs a Driver binding kind."
             return
         }
-        var config = node.config ?? [:]
-        for old in node.configSchema?.fields ?? [] { config.removeValue(forKey: old.id) }
-        config.removeValue(forKey: "acpSessionOptions")
+        var config: [String: JSONValue] = [:]
         var schemaFields: [HarnessConfigField] = []
         for (index, draft) in fields.enumerated() {
             let choices = parsedChoices(draft.choices)
@@ -4209,12 +4463,21 @@ private struct HarnessNodeConfigEditor: View {
                 return
             }
             let fieldID = ids[index]
+            guard let binding = binding(draft.bindingKind), binding.fieldTypes.contains(draft.kind) else {
+                error = "The loaded Driver does not support \(draft.kind) through binding \(draft.bindingKind)."
+                return
+            }
+            if let pattern = binding.targetPattern,
+               targets[index].range(of: pattern, options: .regularExpression) == nil {
+                error = "\(draft.name) needs a valid \(binding.targetLabel.lowercased())."
+                return
+            }
             schemaFields.append(HarnessConfigField(
                 id: fieldID, name: draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fieldID : draft.name,
                 type: draft.kind, required: draft.required,
                 choices: draft.kind == "select" ? choices : nil,
                 binding: HarnessConfigBinding(
-                    kind: protocolName == "acp" ? "acp-session-option" : draft.bindingKind,
+                    kind: draft.bindingKind,
                     target: targets[index]
                 )
             ))
@@ -4230,6 +4493,47 @@ private struct HarnessNodeConfigEditor: View {
             guard case let .object(config) = value else {
                 error = "Node config must be a JSON object."
                 return
+            }
+            guard let schema = node.configSchema else {
+                guard config.isEmpty else {
+                    error = "Define Driver-backed typed controls before adding executable config."
+                    return
+                }
+                replacing(schema: nil, config: [:])
+                error = nil
+                return
+            }
+            let fieldsByID = Dictionary(uniqueKeysWithValues: schema.fields.map { ($0.id, $0) })
+            let undeclared = config.keys.filter { fieldsByID[$0] == nil }.sorted()
+            guard undeclared.isEmpty else {
+                error = "Undeclared config field: \(undeclared.joined(separator: ", ")). Add a typed Driver binding first."
+                return
+            }
+            for field in schema.fields {
+                guard let configured = config[field.id] else {
+                    if field.required {
+                        error = "Required config field \(field.name) is missing."
+                        return
+                    }
+                    continue
+                }
+                switch (field.type, configured) {
+                case ("boolean", .bool): break
+                case ("string", .string), ("secret-reference", .string): break
+                case ("select", .string(let selected)):
+                    guard field.choices?.contains(where: { $0.id == selected }) == true else {
+                        error = "Value for \(field.name) must match a declared choice id."
+                        return
+                    }
+                default:
+                    error = "\(field.name) accepts only its declared \(field.type) scalar value; nested JSON and numbers are not executable Pack config."
+                    return
+                }
+                if field.type == "secret-reference",
+                   configured.stringValue?.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) == nil {
+                    error = "\(field.name) must contain a Host credential reference such as OPENAI_API_KEY, never a secret value."
+                    return
+                }
             }
             replacing(schema: node.configSchema, config: config)
             load()
@@ -4251,6 +4555,7 @@ private struct HarnessGraphPreview: View {
     @State private var offset: CGSize = .zero
     @GestureState private var gestureOffset: CGSize = .zero
     @State private var query = ""
+    @FocusState private var focusedNodeId: String?
 
     var body: some View {
         GeometryReader { proxy in
@@ -4323,6 +4628,7 @@ private struct HarnessGraphPreview: View {
                         ))
                     }
                     .buttonStyle(.plain)
+                    .focused($focusedNodeId, equals: node.id)
                     .position(points[node.id] ?? .zero)
                 }
 
@@ -4354,12 +4660,17 @@ private struct HarnessGraphPreview: View {
                 )
             )
             .clipped()
+            .onMoveCommand { direction in
+                guard interactive else { return }
+                moveFocus(direction)
+            }
             .overlay(alignment: .topTrailing) {
                 if interactive {
                     HStack(spacing: 5) {
                         TextField("Find node", text: $query)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 118)
+                            .onSubmit { focusFirstMatch() }
                         Button { scale = min(2.5, scale + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
                         Button { scale = max(0.55, scale - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
                         Button { scale = 1; offset = .zero; query = "" } label: { Image(systemName: "arrow.counterclockwise") }
@@ -4458,6 +4769,27 @@ private struct HarnessGraphPreview: View {
     private func matches(_ node: HarnessGraphNode) -> Bool {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return !needle.isEmpty && (node.title.localizedCaseInsensitiveContains(needle) || node.kind.localizedCaseInsensitiveContains(needle))
+    }
+
+    private func focusFirstMatch() {
+        guard let match = graph.nodes.first(where: matches) else { return }
+        focusedNodeId = match.id
+        onSelect?(match.id)
+    }
+
+    private func moveFocus(_ direction: MoveCommandDirection) {
+        guard !graph.nodes.isEmpty else { return }
+        let current = graph.nodes.firstIndex { $0.id == (focusedNodeId ?? selectedNodeId) } ?? 0
+        let delta: Int
+        switch direction {
+        case .left, .up: delta = -1
+        case .right, .down: delta = 1
+        @unknown default: delta = 0
+        }
+        let next = min(graph.nodes.count - 1, max(0, current + delta))
+        let id = graph.nodes[next].id
+        focusedNodeId = id
+        onSelect?(id)
     }
 
     private func nodeColor(_ node: HarnessGraphNode) -> Color {
@@ -5653,7 +5985,7 @@ private struct ReasoningPicker: View {
             HStack(spacing: 5) {
                 Image(systemName: "brain.head.profile")
                     .font(.system(size: 10))
-                Text(store.currentReasoningName ?? (store.currentReasoningOptions.isEmpty ? "Reasoning · Auto" : "Reasoning"))
+                Text(store.currentReasoningLabel)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7, weight: .bold))
@@ -5740,14 +6072,17 @@ private struct HarnessAccountBadge: View {
     private var runtimeAccount: HarnessCatalogEntry.AccountDescriptor? { store.sessionModels?.account }
     private var title: String {
         runtimeAccount?.label ?? method?.account?.label ?? method?.name ?? harness?.account?.label
-            ?? (harness?.auth.status == "not-required" ? "Billing not declared" : "Sign-in required")
+            ?? (harness?.auth.status == "not-required"
+                ? "Billing not declared"
+                : harness?.auth.status == "unknown" ? "Account discovered after install" : "Sign-in required")
     }
     private var detail: String {
         if let runtimeAccount { return runtimeAccount.detail }
         if let account = method?.account { return account.detail }
         if let account = harness?.account { return account.detail }
         if let method { return "\(harness?.name ?? "This Harness") is using the \(method.name) authentication method owned by its installed runtime. Billing was not declared by this Harness Pack." }
-        return "Open Harness settings to choose and verify how this Harness authenticates and who pays for model usage."
+        return harness?.auth.detail
+            ?? "Open Harness settings to choose and verify how this Harness authenticates and who pays for model usage."
     }
 
     var body: some View {
@@ -6027,11 +6362,16 @@ private struct HarnessOnboardingView: View {
             }
 
             Divider()
-            HStack {
-                Label("Credentials stay in the Mac Host credential service.", systemImage: "lock.shield")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let harness = selectedHarness { primaryControl(for: harness) }
+            VStack(alignment: .leading, spacing: 10) {
+                if store.harnessOperationId != nil {
+                    HarnessOperationStatus(store: store)
+                }
+                HStack {
+                    Label("Credentials stay in the Mac Host credential service.", systemImage: "lock.shield")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let harness = selectedHarness { primaryControl(for: harness) }
+                }
             }
         }
         .padding(26)
@@ -6085,7 +6425,14 @@ private struct HarnessOnboardingView: View {
             && harness.modelConfiguration?.required == true
             && store.hostModels.groups.isEmpty
         let ready = harnessCanPrepare(harness) && !needsHostModels
-        if harness.auth.status != "not-required" && harness.auth.status != "configured" {
+        if harness.auth.status == "unknown" {
+            Button(harness.installation.status == "installed" ? "Inspect sign-in setup again" : "Install and inspect setup") {
+                requestDefault(harness)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(store.harnessOperationId != nil || !ready)
+        } else if harness.auth.status != "not-required" && harness.auth.status != "configured" {
             Menu("Choose sign-in for \(harness.name)") {
                 ForEach(harness.auth.methods) { method in
                     Button(method.name) { configure(harness, method: method) }
@@ -6176,7 +6523,7 @@ private struct HarnessChoiceCard: View {
                 Spacer()
                 Text(harness.auth.status == "configured" || harness.auth.status == "not-required"
                     ? harness.compatibility.classification.replacingOccurrences(of: "-", with: " ").capitalized
-                    : "Sign-in needed")
+                    : harness.auth.status == "unknown" ? "Setup discovered after install" : "Sign-in needed")
             }
             .font(.caption2).foregroundStyle(.secondary)
         }
@@ -6237,19 +6584,13 @@ private struct HarnessProgressiveLensPanel: View {
     }
 
     private var recommendedUse: String {
-        switch harness.id {
-        case "codex":
-            return "OpenAI-first coding tasks using an existing ChatGPT or OpenAI API account."
-        case "dsh":
-            return "Composable coding workflows that need DSH presets, providers, skills, and approval-aware tools."
-        case "oh-my-pi", "omp":
-            return "A lightweight, extensible coding loop with Pi-compatible packages and ACP interoperability."
-        default:
-            if harness.protocolName.lowercased() == "acp" {
-                return "Trying an ACP-compatible coding Harness while keeping task identity and permissions visible in OpenFish."
-            }
-            return harness.description ?? "Advanced users evaluating this Harness's declared runtime and compatibility contract."
+        if let description = harness.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+            return description
         }
+        if harness.protocolName.lowercased() == "acp" {
+            return "Tasks supported by this Pack's ACP agent, with account, model, workspace, and permission ownership kept visible."
+        }
+        return "Tasks supported by this Pack's declared Driver and runtime capability contract."
     }
 
     private var lifecycleSummary: String {
@@ -6286,7 +6627,7 @@ private struct HarnessProgressiveLensPanel: View {
             return harness.auth.methods.first(where: { $0.id == selected })?.name ?? selected
         }
         if harness.auth.status != "not-required" {
-            return harness.auth.status.replacingOccurrences(of: "-", with: " ")
+            return harness.auth.detail ?? harness.auth.status.replacingOccurrences(of: "-", with: " ")
         }
         return harness.modelConfiguration?.detail
             ?? harness.account?.label
@@ -6403,6 +6744,28 @@ private struct DshProviderQuickSetup: View {
     }
 }
 
+private struct HarnessOperationStatus: View {
+    @ObservedObject var store: OpenCodexStore
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text(store.harnessOperationPhase ?? "Preparing Harness…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            if store.canCancelHarnessOperation {
+                Button("Cancel") { store.cancelHarnessOperation() }
+                    .controlSize(.small)
+            }
+        }
+        .padding(9)
+        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .contain)
+    }
+}
+
 private struct HarnessSettingsView: View {
     @ObservedObject var store: OpenCodexStore
     @State private var authSelection: HarnessAuthSelection?
@@ -6438,6 +6801,9 @@ private struct HarnessSettingsView: View {
                 Button("Import Pack") { chooseHarnessPackImport(store: store) }
                 Button("Create Pack") { showingCreateEditor = true }
                     .buttonStyle(.borderedProminent)
+            }
+            if store.harnessOperationId != nil {
+                HarnessOperationStatus(store: store)
             }
             VStack(spacing: 10) {
                 ForEach(filtered) { harness in
@@ -7554,7 +7920,7 @@ private struct ImportArchiveControl: View {
     var body: some View {
         GroupBox("Import and migration") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("DSH exports retain descendant tasks and referenced images. Codex rollout JSONL is converted into a replayable DSH transcript; DSH remains the only state owner after import.")
+                Text("Exports retain descendant tasks and referenced images. Imports currently convert supported DSH and Codex JSONL or ZIP sources into replayable DSH transcripts; imported attachments and source-side child relationships are not copied.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

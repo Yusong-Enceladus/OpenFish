@@ -56,6 +56,37 @@ async function authorizePackDriver(
   )
 }
 
+async function contextWithSessions(): Promise<Context> {
+  const context = new Context()
+  await context.plugin(SessionStore)
+  return context
+}
+
+function publishDriverAgent(
+  context: Context,
+  request: HarnessSessionRequest | HarnessForkRequest,
+  candidate: HarnessPack,
+): Agent {
+  const existing = context.sessions.get(request.sessionId)
+  if (existing !== undefined) return { id: request.sessionId, session: existing } as Agent
+  const seed = 'seed' in request ? request.seed : undefined
+  const session = context.sessions.create(request.sessionId, {
+    ...(seed === undefined ? {} : { seed }),
+    meta: { cwd: request.cwd },
+  })
+  if (session.events.findLast(event => event.type === 'harness/selected') === undefined) {
+    session.append('harness/selected', {
+      harnessId: candidate.id,
+      version: candidate.version,
+      protocol: candidate.protocol,
+      ...(request.authMethod === undefined ? {} : { authMethod: request.authMethod }),
+      ...(request.workspaceMode === undefined ? {} : { workspaceMode: request.workspaceMode }),
+      ...(request.capabilities === undefined ? {} : { capabilities: [...request.capabilities] }),
+    })
+  }
+  return { id: request.sessionId, session } as Agent
+}
+
 describe('Harness lifecycle and Driver SDK', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -110,7 +141,7 @@ describe('Harness lifecycle and Driver SDK', () => {
       const restoredRow = (await restored.list()).find(item => item.id === 'community.driver-demo')
       expect(restoredRow).toMatchObject({ isDefault: true, version: '1.0.0', installation: { installedVersion: '1.0.0' }, source: 'user' })
       const stored = JSON.parse(await readFile(join(stateDir, 'state.json'), 'utf8')) as { version: number }
-      expect(stored.version).toBe(6)
+      expect(stored.version).toBe(7)
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -246,6 +277,8 @@ describe('Harness lifecycle and Driver SDK', () => {
       available: async () => undefined,
       install: async () => undefined,
       discoverAuth: async () => [{ id: 'local-login', name: 'Live local login', kind: 'agent', fields: [] }],
+      authenticateInteractive: async () => undefined,
+      missingCredentials: async () => [],
       create: async request => ({ id: request.sessionId }) as Agent,
       resume: async request => ({ id: request.sessionId }) as Agent,
       dispose: async () => undefined,
@@ -265,12 +298,70 @@ describe('Harness lifecycle and Driver SDK', () => {
     }
   })
 
+  it('keeps ACP Registry authentication unknown until the installed Harness reports it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async input => String(input).includes('community.test')
+      ? new Response(JSON.stringify({ version: 0, packs: [], revocations: [] }))
+      : new Response(JSON.stringify({
+        version: '1.0.0',
+        agents: [{
+          id: 'future-registry', name: 'Future Registry', version: '3.2.1',
+          distribution: { npx: { package: '@future/registry-acp' } },
+        }],
+      }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-runtime-auth-'))
+    const context = new Context()
+    const driver: HarnessDriver = {
+      apiVersion: 1,
+      protocol: 'acp',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.auth', status: 'runtime', source: 'runtime' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      ],
+      available: async () => undefined,
+      install: async () => undefined,
+      discoverAuth: async () => [],
+      create: async request => ({ id: request.sessionId }) as Agent,
+      resume: async request => ({ id: request.sessionId }) as Agent,
+      dispose: async () => undefined,
+    }
+    try {
+      const service = new HarnessService(context, {
+        stateDir,
+        registryUrl: 'https://registry.test/index.json',
+        communityRegistryUrl: 'https://community.test/index.json',
+      })
+      service.registerDriver(driver)
+      await service.refresh()
+      const before = (await service.list()).find(item => item.id === 'future-registry')
+      expect(before?.auth).toMatchObject({
+        status: 'unknown', methods: [],
+        detail: expect.stringContaining('does not declare account requirements'),
+      })
+      await service.install('future-registry' as never)
+      const after = (await service.list()).find(item => item.id === 'future-registry')
+      expect(after?.auth).toMatchObject({
+        status: 'not-required', methods: [],
+        detail: expect.stringContaining('advertised no required sign-in method'),
+      })
+      await service.selectDefault('future-registry' as never)
+      expect(await service.defaultId()).toBe('future-registry')
+    } finally {
+      await context.fiber.dispose()
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
   it('runs and resumes a new non-ACP protocol through only the public Driver contract', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-new-driver-'))
     const requests: Array<{ operation: 'create' | 'resume'; request: HarnessSessionRequest; version: string }> = []
     const disposed: Array<{ sessionId: string; version: string }> = []
-    const agent = (request: HarnessSessionRequest): Agent => ({ id: request.sessionId }) as Agent
+    const context = await contextWithSessions()
+    const agent = (request: HarnessSessionRequest, candidate: HarnessPack): Agent =>
+      publishDriverAgent(context, request, candidate)
     const driver: HarnessDriver = {
       apiVersion: 1,
       protocol: 'community-protocol',
@@ -285,16 +376,16 @@ describe('Harness lifecycle and Driver SDK', () => {
       install: async () => undefined,
       create: async (request, candidate) => {
         requests.push({ operation: 'create', request, version: candidate.version })
-        return agent(request)
+        return agent(request, candidate)
       },
       resume: async (request, candidate) => {
         requests.push({ operation: 'resume', request, version: candidate.version })
-        return agent(request)
+        return agent(request, candidate)
       },
       dispose: async (sessionId, candidate) => { disposed.push({ sessionId, version: candidate.version }) },
     }
     try {
-      const service = new HarnessService(new Context(), { stateDir, packs: [pack('1.0.0')] })
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
       const unregister = service.registerDriver(driver)
       await authorizePackDriver(service)
       await service.install('community.driver-demo' as never)
@@ -339,6 +430,58 @@ describe('Harness lifecycle and Driver SDK', () => {
         status: 'supported', source: 'host',
       })
     } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects and cleans up a malformed Driver session without exposing Driver secrets', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-invalid-driver-session-'))
+    const context = await contextWithSessions()
+    const discarded: string[] = []
+    const driver: HarnessDriver = {
+      apiVersion: 1,
+      protocol: 'community-protocol',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.auth', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      ],
+      available: async () => undefined,
+      install: async () => undefined,
+      create: async (request, candidate) => ({
+        ...publishDriverAgent(context, request, candidate),
+        id: 'sk-test-supersecret123456',
+      }) as Agent,
+      resume: async request => ({ id: request.sessionId }) as Agent,
+      dispose: async () => undefined,
+      discard: async (sessionId) => { discarded.push(String(sessionId)) },
+    }
+    try {
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
+      service.registerDriver(driver)
+      await authorizePackDriver(service)
+      await service.install('community.driver-demo' as never)
+      await service.selectAuth('community.driver-demo' as never, 'local-login')
+      let diagnostic = ''
+      try {
+        await service.create(
+          'community.driver-demo' as never,
+          'invalid-driver-session' as never,
+          join(stateDir, 'no-project', 'invalid-driver-session'),
+          'no-project',
+        )
+      } catch (error: unknown) {
+        diagnostic = error instanceof Error ? error.message : String(error)
+      }
+      expect(discarded).toEqual(['invalid-driver-session'])
+      expect(diagnostic).toContain('invalid create result')
+      expect(diagnostic).toContain('[redacted]')
+      expect(diagnostic).not.toContain('supersecret')
+    } finally {
+      await context.fiber.dispose()
       await rm(stateDir, { recursive: true, force: true })
     }
   })
@@ -450,6 +593,7 @@ describe('Harness lifecycle and Driver SDK', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-driver-fork-'))
     const requests: Array<{ request: HarnessForkRequest; version: string }> = []
+    const context = await contextWithSessions()
     const sourceCapabilities = [
       { id: 'session.create', status: 'supported', source: 'driver' },
       { id: 'session.resume', status: 'supported', source: 'driver' },
@@ -468,12 +612,12 @@ describe('Harness lifecycle and Driver SDK', () => {
       resume: async request => ({ id: request.sessionId }) as Agent,
       fork: async (request, candidate) => {
         requests.push({ request, version: candidate.version })
-        return { id: request.sessionId } as Agent
+        return publishDriverAgent(context, request, candidate)
       },
       dispose: async () => undefined,
     }
     try {
-      const service = new HarnessService(new Context(), { stateDir, packs: [pack('1.0.0')] })
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
       service.registerDriver(driver)
       await authorizePackDriver(service)
       await service.install('community.driver-demo' as never)
@@ -520,9 +664,10 @@ describe('Harness lifecycle and Driver SDK', () => {
     }
   })
 
-  it('keeps the active snapshot usable and removes staging files when an update fails', async () => {
+  it('keeps the active snapshot usable and removes staged install/runtime files when low disk interrupts an update', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-update-rollback-'))
+    const context = await contextWithSessions()
     const driver: HarnessDriver = {
       apiVersion: 1,
       protocol: 'community-protocol',
@@ -534,10 +679,73 @@ describe('Harness lifecycle and Driver SDK', () => {
         { id: 'architecture.manifest', status: 'supported', source: 'pack' },
       ],
       available: async () => undefined,
-      install: async (candidate, directory) => {
+      install: async (candidate, directory, runtimeDirectory) => {
         await mkdir(directory, { recursive: true })
         await writeFile(join(directory, 'version.txt'), candidate.version)
-        if (candidate.version === '2.0.0') throw new Error('synthetic interrupted update')
+        await mkdir(runtimeDirectory, { recursive: true })
+        await writeFile(join(runtimeDirectory, 'runtime-version.txt'), candidate.version)
+        if (candidate.version === '2.0.0') {
+          throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+        }
+      },
+      create: async (request, candidate) => publishDriverAgent(context, request, candidate),
+      resume: async (request, candidate) => publishDriverAgent(context, request, candidate),
+      dispose: async () => undefined,
+    }
+    try {
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
+      service.registerDriver(driver)
+      await authorizePackDriver(service)
+      await service.install('community.driver-demo' as never)
+      await service.selectAuth('community.driver-demo' as never, 'local-login')
+      await service.upsert(pack('2.0.0'))
+      await expect(service.install('community.driver-demo' as never)).rejects.toThrow('no space left on device')
+
+      expect((await service.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
+        installation: {
+          status: 'installed', installedVersion: '1.0.0', availableVersion: '2.0.0',
+          error: 'ENOSPC: no space left on device',
+        },
+      })
+      const installParent = join(stateDir, 'installed', 'community.driver-demo')
+      expect((await readdir(installParent)).some(name => name.includes('.installing-'))).toBe(false)
+      expect(await readFile(join(installParent, '1.0.0', 'version.txt'), 'utf8')).toBe('1.0.0')
+      expect(await readFile(join(stateDir, 'runtime', 'community.driver-demo', '1.0.0', 'runtime-version.txt'), 'utf8'))
+        .toBe('1.0.0')
+      await expect(lstat(join(stateDir, 'runtime', 'community.driver-demo', '2.0.0')))
+        .rejects.toMatchObject({ code: 'ENOENT' })
+      const agent = await service.create(
+        'community.driver-demo' as never,
+        'still-runs-old-version' as never,
+        join(stateDir, 'no-project'),
+      )
+      expect(agent.id).toBe('still-runs-old-version')
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes only truthful Host transaction phases while an install is running', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-install-phase-'))
+    let releaseInstall!: () => void
+    let announceInstall!: () => void
+    const installing = new Promise<void>((resolve) => { announceInstall = () => resolve() })
+    const released = new Promise<void>((resolve) => { releaseInstall = () => resolve() })
+    const driver: HarnessDriver = {
+      apiVersion: 1,
+      protocol: 'community-protocol',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.auth', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      ],
+      available: async () => undefined,
+      install: async () => {
+        announceInstall()
+        await released
       },
       create: async request => ({ id: request.sessionId }) as Agent,
       resume: async request => ({ id: request.sessionId }) as Agent,
@@ -547,26 +755,78 @@ describe('Harness lifecycle and Driver SDK', () => {
       const service = new HarnessService(new Context(), { stateDir, packs: [pack('1.0.0')] })
       service.registerDriver(driver)
       await authorizePackDriver(service)
-      await service.install('community.driver-demo' as never)
-      await service.selectAuth('community.driver-demo' as never, 'local-login')
-      await service.upsert(pack('2.0.0'))
-      await expect(service.install('community.driver-demo' as never)).rejects.toThrow('interrupted update')
-
+      const operation = service.install('community.driver-demo' as never)
+      await installing
       expect((await service.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
         installation: {
-          status: 'installed', installedVersion: '1.0.0', availableVersion: '2.0.0',
-          error: 'synthetic interrupted update',
+          status: 'installing', operationPhase: 'staging',
+          operationDetail: expect.stringContaining('isolated runtime'),
         },
       })
-      const installParent = join(stateDir, 'installed', 'community.driver-demo')
-      expect((await readdir(installParent)).some(name => name.includes('.installing-'))).toBe(false)
-      expect(await readFile(join(installParent, '1.0.0', 'version.txt'), 'utf8')).toBe('1.0.0')
-      const agent = await service.create(
-        'community.driver-demo' as never,
-        'still-runs-old-version' as never,
-        join(stateDir, 'no-project'),
-      )
-      expect(agent.id).toBe('still-runs-old-version')
+      releaseInstall()
+      await operation
+      expect((await service.list()).find(item => item.id === 'community.driver-demo')?.installation)
+        .not.toHaveProperty('operationPhase')
+    } finally {
+      releaseInstall()
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('cancels a managed install without publishing a failed row or retaining staged runtime files', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-install-cancel-'))
+    let installStarted!: () => void
+    const started = new Promise<void>((resolve) => { installStarted = () => resolve() })
+    const driver: HarnessDriver = {
+      apiVersion: 1,
+      protocol: 'community-protocol',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.auth', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+      ],
+      available: async () => undefined,
+      install: async (_candidate, directory, runtimeDirectory, signal) => {
+        if (signal === undefined) throw new Error('Install did not receive the caller cancellation signal')
+        await mkdir(directory, { recursive: true })
+        await mkdir(runtimeDirectory, { recursive: true })
+        await writeFile(join(directory, 'partial.txt'), 'staged')
+        await writeFile(join(runtimeDirectory, 'partial.txt'), 'runtime')
+        installStarted()
+        await new Promise<void>((_resolve, reject) => {
+          const aborted = () => {
+            const reason: unknown = signal.reason
+            reject(reason instanceof Error ? reason : new Error('Harness install aborted'))
+          }
+          signal.addEventListener('abort', aborted, { once: true })
+        })
+      },
+      create: async request => ({ id: request.sessionId }) as Agent,
+      resume: async request => ({ id: request.sessionId }) as Agent,
+      dispose: async () => undefined,
+    }
+    try {
+      const service = new HarnessService(new Context(), { stateDir, packs: [pack('1.0.0')] })
+      service.registerDriver(driver)
+      await authorizePackDriver(service)
+      const controller = new AbortController()
+      const operation = service.install('community.driver-demo' as never, controller.signal)
+      await started
+      controller.abort(new Error('user cancelled install'))
+      await expect(operation).rejects.toThrow('user cancelled install')
+      expect((await service.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
+        installation: { status: 'not-installed' },
+      })
+      const installation = (await service.list()).find(item => item.id === 'community.driver-demo')?.installation
+      expect(installation).not.toHaveProperty('error')
+      expect(installation).not.toHaveProperty('operationPhase')
+      expect((await readdir(join(stateDir, 'installed', 'community.driver-demo')))
+        .some(name => name.includes('.installing-'))).toBe(false)
+      await expect(lstat(join(stateDir, 'runtime', 'community.driver-demo', '1.0.0')))
+        .rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -704,6 +964,7 @@ describe('Harness lifecycle and Driver SDK', () => {
   it('injects shell-owned archive support without requiring every Driver to reimplement it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-host-capability-'))
+    const context = await contextWithSessions()
     const requests: HarnessSessionRequest[] = []
     const driver: HarnessDriver = {
       apiVersion: 1,
@@ -717,15 +978,15 @@ describe('Harness lifecycle and Driver SDK', () => {
       ],
       available: async () => undefined,
       install: async () => undefined,
-      create: async (request) => {
+      create: async (request, candidate) => {
         requests.push(request)
-        return { id: request.sessionId } as Agent
+        return publishDriverAgent(context, request, candidate)
       },
       resume: async request => ({ id: request.sessionId }) as Agent,
       dispose: async () => undefined,
     }
     try {
-      const service = new HarnessService(new Context(), { stateDir, packs: [pack('1.0.0')] })
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
       service.registerDriver(driver)
       await authorizePackDriver(service)
       await service.install('community.driver-demo' as never)
@@ -792,12 +1053,12 @@ describe('Harness lifecycle and Driver SDK', () => {
       await service.refresh()
 
       expect((await service.list()).find(item => item.id === 'codex')).toMatchObject({
-        version: '0.149.0', installation: { availableVersion: '0.149.0' },
-        distribution: { kind: 'npx', package: '@openai/codex@0.149.0' },
+        version: '0.150.1', installation: { availableVersion: '0.150.1' },
+        distribution: { kind: 'npx', package: '@openai/codex@0.150.1' },
       })
       expect((await service.list()).find(item => item.id === 'oh-my-pi')).toMatchObject({
-        version: '18.0.3', installation: { availableVersion: '18.0.3' },
-        distribution: { kind: 'bunx', package: '@oh-my-pi/pi-coding-agent@18.0.3' },
+        version: '18.0.9', installation: { availableVersion: '18.0.9' },
+        distribution: { kind: 'bunx', package: '@oh-my-pi/pi-coding-agent@18.0.9' },
       })
     } finally {
       await rm(stateDir, { recursive: true, force: true })
@@ -818,6 +1079,8 @@ describe('Harness lifecycle and Driver SDK', () => {
       ],
       available: async () => undefined,
       install: async () => undefined,
+      authenticateInteractive: async () => undefined,
+      missingCredentials: async () => [],
       create: async request => ({ id: request.sessionId }) as Agent,
       resume: async request => ({ id: request.sessionId }) as Agent,
       dispose: async () => undefined,
@@ -833,14 +1096,14 @@ describe('Harness lifecycle and Driver SDK', () => {
       await online.refresh()
       await online.install('codex' as never)
       expect((await online.list()).find(item => item.id === 'codex')).toMatchObject({
-        version: '0.149.0', installation: { installedVersion: '0.149.0', availableVersion: '0.149.0' },
+        version: '0.150.1', installation: { installedVersion: '0.150.1', availableVersion: '0.150.1' },
       })
 
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
       const offline = new HarnessService(new Context(), { stateDir })
       offline.registerDriver(driver)
       expect((await offline.list()).find(item => item.id === 'codex')).toMatchObject({
-        version: '0.149.0', installation: { installedVersion: '0.149.0', availableVersion: '0.149.0' },
+        version: '0.150.1', installation: { installedVersion: '0.150.1', availableVersion: '0.150.1' },
       })
     } finally {
       await rm(stateDir, { recursive: true, force: true })
@@ -1078,6 +1341,7 @@ describe('Harness lifecycle and Driver SDK', () => {
 
   it('blocks revoked versions for new work while retaining exact-version resume', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-community-revocation-'))
+    const context = await contextWithSessions()
     const communityPack = {
       schemaVersion: 0, id: 'community.driver-demo', name: 'Published demo', version: '3.0.0', publisher: 'Community',
       license: 'MIT', repository: 'https://github.com/example/driver-demo',
@@ -1102,7 +1366,7 @@ describe('Harness lifecycle and Driver SDK', () => {
       available: async () => undefined,
       install: async () => undefined,
       create: async request => ({ id: request.sessionId }) as Agent,
-      resume: async request => ({ id: request.sessionId }) as Agent,
+      resume: async (request, candidate) => publishDriverAgent(context, request, candidate),
       dispose: async () => undefined,
     }
     try {
@@ -1119,7 +1383,7 @@ describe('Harness lifecycle and Driver SDK', () => {
         if (url.includes('registry.test')) return new Response(JSON.stringify({ version: '1', agents: [] }))
         return new Response(JSON.stringify({ version: '17.4.0' }))
       }))
-      const service = new HarnessService(new Context(), {
+      const service = new HarnessService(context, {
         stateDir, registryUrl: 'https://registry.test/index.json', communityRegistryUrl: 'https://community.test/index.json',
       })
       service.registerDriver(driver)

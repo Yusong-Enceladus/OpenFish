@@ -5,7 +5,15 @@ import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
+import type {
+  CredentialInfo,
+  CredentialKey,
+  CredentialRecord,
+  CredentialRecordEntry,
+  CredentialRecordInfo,
+  CredentialRef,
+  ResolvedCredential,
+} from '@deepseek-ai/dsh-credentials'
 import { HarnessService, type HarnessId } from '@deepseek-ai/dsh-harness'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -89,6 +97,16 @@ class EmptyCredentials extends CredentialProvider {
   }
   override set(_ref: CredentialRef, _value: string): Promise<void> { return Promise.resolve() }
   override unset(_ref: CredentialRef): Promise<void> { return Promise.resolve() }
+  override readRecord(_key: CredentialKey): Promise<CredentialRecord | undefined> { return Promise.resolve(undefined) }
+  override describeRecord(_key: CredentialKey): Promise<CredentialRecordInfo> {
+    return Promise.resolve({ configured: false, writable: true })
+  }
+  override listRecords(): Promise<readonly CredentialRecordEntry[]> { return Promise.resolve([]) }
+  override modifyRecord(
+    _key: CredentialKey,
+    mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+  ): Promise<CredentialRecord | undefined> { return mutate(undefined) }
+  override deleteRecord(_key: CredentialKey): Promise<void> { return Promise.resolve() }
 }
 
 /** Protocol tests exercise the Driver; resident isolation has its own real-provider E2E suite. */
@@ -211,6 +229,106 @@ describe('unknown ACP Harness end-to-end contract', () => {
     }
   })
 
+  it('recovers a crashed resident Harness without replaying an uncertain prompt', async () => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), 'openfish-acp-crash-recovery-'))
+    const crashPack = packWithEnvironment({
+      OPENFISH_ACP_CRASH_ONCE_MARKER: join(noProject, 'crashed-once'),
+    })
+    try {
+      const session = ctx.sessions.create(SessionId('future-crash-recovery'), { meta: { cwd: noProject } })
+      const agent = new AcpHarnessAgent(
+        ctx, session.id, session, crashPack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+      await agent.selectHarnessModel('future/model-b', 'quick')
+
+      agent.followup(prompt('do-not-replay'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'turn/end')?.data.reason).toMatchObject({
+        kind: 'error',
+        error: {
+          code: 'ACP_ERROR',
+          message: expect.stringContaining('restored the pinned Harness session'),
+        },
+      })
+      expect(session.events.filter(event => event.type === 'assistant/message')).toHaveLength(0)
+      expect(agent.harnessModelCatalog()).toMatchObject({
+        current: 'future/model-b', currentReasoningEffort: 'quick',
+      })
+
+      agent.followup(prompt('after-recovery'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'future:after-recovery' })
+      await agent.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it('restarts around the pinned remote session when permissions change', async () => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), 'openfish-acp-permission-change-'))
+    try {
+      const session = ctx.sessions.create(SessionId('future-permission-change'), { meta: { cwd: noProject } })
+      const agent = new AcpHarnessAgent(
+        ctx, session.id, session, pack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+      await agent.selectHarnessModel('future/model-b', 'quick')
+
+      await agent.sandboxAuthority.reconfigure('read-only')
+      expect(agent.sandboxAuthority.mode).toBe('read-only')
+      expect(agent.harnessModelCatalog()).toMatchObject({
+        current: 'future/model-b', currentReasoningEffort: 'quick',
+      })
+      expect(session.events.filter(event => event.type === 'harness/selected')).toHaveLength(1)
+
+      agent.followup(prompt('after-permission-change'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'future:after-permission-change' })
+      await agent.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['auth-expired', 'authentication expired'],
+    ['quota-failure', 'provider quota exceeded'],
+  ])('surfaces a redacted %s provider failure and keeps the resident session usable', async (failurePrompt, expected) => {
+    const ctx = await runtime()
+    const noProject = await mkdtemp(join(tmpdir(), `openfish-acp-${failurePrompt}-`))
+    try {
+      const session = ctx.sessions.create(SessionId(`future-${failurePrompt}`), { meta: { cwd: noProject } })
+      const agent = new AcpHarnessAgent(
+        ctx, session.id, session, pack, noProject, join(noProject, 'runtime'),
+      )
+      await agent.start()
+      agent.commitSelection()
+
+      agent.followup(prompt(failurePrompt))
+      await agent.whenIdle()
+      const failure = session.events.findLast(event => event.type === 'turn/end')
+      expect(failure?.data.reason).toMatchObject({
+        kind: 'error', error: { code: 'ACP_ERROR', message: expect.stringContaining(expected) },
+      })
+      expect(JSON.stringify(failure)).not.toContain('sk-test-supersecret123456')
+
+      agent.followup(prompt('after-provider-failure'))
+      await agent.whenIdle()
+      expect(session.events.findLast(event => event.type === 'assistant/message')?.data.message.content)
+        .toContainEqual({ type: 'text', text: 'future:after-provider-failure' })
+      await agent.dispose()
+    } finally {
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
   it('runs a user-authored Pack through managed install, preflight, default selection, and No Project creation', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-custom-pack-state-'))
@@ -245,6 +363,15 @@ describe('unknown ACP Harness end-to-end contract', () => {
         installation: { status: 'installed', installedVersion: '9.4.1' },
         compatibility: { status: 'compatible', classification: 'supported' },
         driver: { apiVersion: 1, protocol: 'acp', loaded: true, authorization: 'not-required' },
+        authoring: {
+          nodeKinds: expect.arrayContaining([
+            expect.objectContaining({ kind: 'model-router', editable: true }),
+            expect.objectContaining({ kind: 'agent-session', editable: true }),
+          ]),
+          bindingKinds: expect.arrayContaining([
+            expect.objectContaining({ kind: 'acp-session-option' }),
+          ]),
+        },
       })
 
       const agent = await ctx.harnesses.create(
