@@ -604,7 +604,11 @@ export class SessionManager {
     }
   }
 
-  /** Remove one never-started draft from both the Host and the local list. */
+  /**
+   * Remove one never-started draft from both the Host and the local list.
+   * @param sessionId - Draft Session identity.
+   * @returns Host confirmation or a transport/business failure.
+   */
   async discard(sessionId: SessionId): Promise<ClientResult<{ discarded: true }>> {
     try {
       const result = toSessionResult(await this.remote.session.discard({ sessionId }))

@@ -10,7 +10,7 @@ This release is for developers and early adopters who can inspect an agent's act
 - Per-install default Harness selection and per-task Harness selection.
 - No Project tasks stored in a dedicated OpenFish location rather than Desktop.
 - Protocol-driven ACP model, reasoning, mode, and configuration controls.
-- Progressive Lens Harness views on Mac and iPhone: a plain-language Simple view, an evidence-backed Architecture Manifest, a runtime-observation view, and a macOS Manifest Editor for custom Pack creation, graph editing, prompt-free live preflight, import, and credential-free export. A preflight may still create provider-owned state or incur provider-specific setup cost.
+- Progressive Lens Harness views on Mac and iPhone: a plain-language Simple view, an evidence-backed Architecture Manifest, and a bounded ordered Runtime trace projected only from Pack-declared content-free signals. Selecting a component filters the trace to the steps that touched it. The macOS Manifest Editor supports custom Pack creation, graph editing, prompt-free live preflight, import, and credential-free export. A preflight may still create provider-owned state or incur provider-specific setup cost.
 - A generated community Pack catalog whose pull-request publishing path does not require an OpenFish app release.
 - Exact self-installing Driver Bundle descriptors for public non-ACP Packs. After explicit local code consent, the Mac app uses its packaged Node/npm runtime to stage and structurally admit the exact Bundle, restart only its verified embedded Host, negotiate Driver API v1, and continue setup; the iPhone hands this operation to the paired Mac.
 - Session pinning to the Harness Pack version that created the task.

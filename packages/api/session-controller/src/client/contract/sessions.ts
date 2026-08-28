@@ -40,9 +40,16 @@ export interface ISessions {
     agentPreset?: string
     harnessId?: string
   }): Promise<SessionId>
-  /** Remove a never-started draft and its managed No Project directory. */
+  /**
+   * Remove a never-started draft and its managed No Project directory.
+   * @param id - Draft Session identity.
+   */
   discard(id: SessionId): Promise<void>
-  /** Reconcile a Host-confirmed DSH composition choice into the list row. */
+  /**
+   * Reconcile a Host-confirmed DSH composition choice into the list row.
+   * @param id - Session identity whose row should be updated.
+   * @param agentPreset - Host-confirmed DSH Agent preset.
+   */
   noteAgentPreset(id: SessionId, agentPreset: string): void
   /**
    * Select a session as current.

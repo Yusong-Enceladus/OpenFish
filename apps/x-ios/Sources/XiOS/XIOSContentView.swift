@@ -11,6 +11,7 @@ private enum MobileOpenFishDemoMode {
     static let showsFatal = ProcessInfo.processInfo.arguments.contains("--openfish-demo-fatal")
     static let showsEmpty = ProcessInfo.processInfo.arguments.contains("--openfish-demo-empty")
     static let showsHarnessSetup = ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-catalog")
+    static let showsHarnessRuntime = ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-runtime")
     static let showsInteractions = ProcessInfo.processInfo.arguments.contains("--openfish-demo-interactions")
 
     @MainActor
@@ -266,7 +267,10 @@ public struct OpenCodexIOSView: View {
                     .presentationDetents([.medium, .large])
             }
             .sheet(item: $inspectedHomeHarness) { harness in
-                MobileHarnessDetailView(store: store, harness: harness, initialLens: "Architecture") {
+                MobileHarnessDetailView(
+                    store: store, harness: harness,
+                    initialLens: MobileOpenFishDemoMode.showsHarnessRuntime ? "Runtime" : "Architecture"
+                ) {
                     Task { await store.selectDefaultHarness(harness) }
                     inspectedHomeHarness = nil
                 }
@@ -302,6 +306,9 @@ public struct OpenCodexIOSView: View {
                 }
 #endif
                 chooseInitialWorkspaceIfNeeded()
+                if MobileOpenFishDemoMode.showsHarnessRuntime {
+                    inspectedHomeHarness = homeHarness
+                }
             }
             .onChange(of: store.workspaces) { _, _ in chooseInitialWorkspaceIfNeeded() }
             .onChange(of: store.sessions) { _, _ in chooseInitialWorkspaceIfNeeded() }
@@ -1025,6 +1032,15 @@ private struct MobileHarnessDetailView: View {
         return runtime
     }
 
+    private var runtimeObservations: [MobileHarnessRuntimeProjection.Observation] {
+        let values = matchingRuntime?.observations ?? []
+        guard let selectedNodeId else { return values }
+        return values.filter { observation in
+            observation.kind == "node" ? observation.id == selectedNodeId
+                : observation.from == selectedNodeId || observation.to == selectedNodeId
+        }
+    }
+
     private var truthExplanation: String {
         switch harness.graph.level {
         case "composable": return "This Pack declares editable nodes. Use the Manifest Editor on the Mac to change them."
@@ -1121,9 +1137,37 @@ private struct MobileHarnessDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             MobileHarnessArchitectureFlow(
                                 graph: harness.graph, runtime: matchingRuntime,
-                                selectedNodeId: selectedNodeId, onSelect: { selectedNodeId = $0 }
+                                selectedNodeId: selectedNodeId,
+                                onSelect: { selectedNodeId = selectedNodeId == $0 ? nil : $0 }
                             )
-                            if let runtime = matchingRuntime, !runtime.nodes.isEmpty {
+                            if !runtimeObservations.isEmpty {
+                                HStack {
+                                    Label(selectedNodeId == nil ? "Live execution trace" : "Filtered trace", systemImage: "waveform.path.ecg")
+                                        .font(.headline)
+                                    Spacer()
+                                    if selectedNodeId != nil {
+                                        Button("Show all") { selectedNodeId = nil }
+                                            .font(.footnote.weight(.semibold))
+                                    }
+                                }
+                                Text("Content-free · newest last · \(matchingRuntime?.observations?.count ?? 0) retained")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                LazyVStack(spacing: 0) {
+                                    ForEach(Array(runtimeObservations.enumerated()), id: \.element.stableID) { index, observation in
+                                        MobileHarnessTraceRow(
+                                            observation: observation,
+                                            graph: harness.graph,
+                                            deltaMilliseconds: index == 0 ? nil : observation.time - runtimeObservations[index - 1].time
+                                        )
+                                        if index < runtimeObservations.count - 1 { Divider() }
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                                .accessibilityIdentifier("OpenFish.iOS.HarnessTrace")
+                            } else if let runtime = matchingRuntime, !runtime.nodes.isEmpty, runtime.observations == nil {
+                                Text("Latest observed state").font(.headline)
                                 ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
                                     if let activity = runtime.nodes[nodeID] {
                                         MobileLensFact(
@@ -1146,7 +1190,18 @@ private struct MobileHarnessDetailView: View {
                                     }
                                 }
                             } else {
-                                ContentUnavailableView("No runtime evidence yet", systemImage: "waveform.path.ecg", description: Text("Start a task with this Harness. Only observed declared components will appear."))
+                                ContentUnavailableView(
+                                    selectedNodeId == nil ? "No runtime evidence yet" : "No evidence for this component",
+                                    systemImage: "waveform.path.ecg",
+                                    description: Text(selectedNodeId == nil
+                                                      ? "Start a task with this Harness. Only the ordered path through observed declared components will appear; prompt and credential content stays out of the trace."
+                                                      : "Choose another component or Show all to inspect the complete task trace.")
+                                )
+                                if selectedNodeId != nil {
+                                    Button("Show complete trace") { selectedNodeId = nil }
+                                        .buttonStyle(.bordered)
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
                         }
                     } else {
@@ -1616,6 +1671,65 @@ private struct MobileLensFact: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 13))
+    }
+}
+
+private struct MobileHarnessTraceRow: View {
+    let observation: MobileHarnessRuntimeProjection.Observation
+    let graph: MobileHarness.Graph
+    let deltaMilliseconds: Double?
+
+    private var title: String {
+        if observation.kind == "node" {
+            return graph.nodes.first(where: { $0.id == observation.id })?.title ?? observation.id
+        }
+        let from = graph.nodes.first(where: { $0.id == observation.from })?.title ?? observation.from ?? "Unknown"
+        let to = graph.nodes.first(where: { $0.id == observation.to })?.title ?? observation.to ?? "Unknown"
+        return "\(from) → \(to)"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle().fill(statusColor).frame(width: 8, height: 8).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text("#\(observation.seq)").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                }
+                Text("\(observation.status.capitalized) · \(observation.activity)")
+                    .font(.footnote).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let signal = observation.signal {
+                        Text(signal).font(.caption2.monospaced()).lineLimit(1)
+                    }
+                    Spacer(minLength: 2)
+                    if let deltaMilliseconds, deltaMilliseconds >= 0 {
+                        Text(deltaLabel(deltaMilliseconds))
+                    }
+                    Text(relativeDate(observation.time)).font(.caption2)
+                }
+                .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(observation.status), \(observation.activity)")
+        .accessibilityIdentifier("OpenFish.iOS.HarnessTrace.\(observation.seq)")
+    }
+
+    private var statusColor: Color {
+        switch observation.status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func deltaLabel(_ milliseconds: Double) -> String {
+        milliseconds < 1_000 ? "+\(Int(milliseconds)) ms" : String(format: "+%.1f s", milliseconds / 1_000)
     }
 }
 

@@ -133,6 +133,10 @@ async function importCodexCaBundle(runtimeDirectory: string, source: string): Pr
 /**
  * Resolve auth fields plus Codex's documented custom-CA variables. Optional
  * platform trust is copied into the same private boundary as credentials.
+ * @param ctx - Host context containing the credential service.
+ * @param method - Selected Harness authentication method.
+ * @param runtimeDirectory - Private isolated Codex runtime directory.
+ * @returns Environment variables for the isolated Codex process.
  */
 export async function codexAuthenticationEnvironment(
   ctx: Context,

@@ -168,7 +168,11 @@ export class ApiSessionAgentController {
     })
   }
 
-  /** Dispose an ordinary DSH Agent only when this controller owns its handle. */
+  /**
+   * Dispose an ordinary DSH Agent only when this controller owns its handle.
+   * @param sessionId - Session whose owned live handle should be disposed.
+   * @returns Whether this controller owned and disposed the handle.
+   */
   async disposeOwnedAgent(sessionId: SessionId): Promise<boolean> {
     const handle = this.ownedHandles.get(sessionId)
     if (handle === undefined) return false
@@ -177,7 +181,11 @@ export class ApiSessionAgentController {
     return true
   }
 
-  /** Adopt the lifetime handle returned by a Session Controller-owned create/fork. */
+  /**
+   * Adopt the lifetime handle returned by a Session Controller-owned create/fork.
+   * @param handle - Newly created Agent lifetime handle.
+   * @returns The live Agent retained by this controller.
+   */
   adoptOwnedAgent(handle: AgentHandle): Agent {
     return this.ownHandle(handle).agent
   }
@@ -253,6 +261,9 @@ export class ApiSessionAgentController {
    * @param cwd - directory the Session must own.
    * @param checkPersistedIdentity - whether to inspect a cold identity before creation.
    * @param presetId - optional Agent preset the Session must own.
+   * @param harnessId - optional selected Harness identity.
+   * @param workspaceMode - durable workspace ownership mode.
+   * @param signal - optional cancellation for creation or resume.
    * @returns the matching live ordinary Agent.
    */
   async ensureSession(

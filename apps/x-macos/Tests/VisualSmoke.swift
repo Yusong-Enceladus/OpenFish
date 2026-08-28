@@ -35,6 +35,15 @@ struct VisualSmoke {
         inspector.isInspectorPresented = true
         try render(inspector, scheme: .dark, to: outputDirectory.appending(path: "opencodex-inspector.png"))
 
+        let runtime = OpenCodexStore.visualFixture()
+        guard runtime.currentHarnessRuntime?.observations?.count == 17 else {
+            throw VisualSmokeError.harnessRuntimeTraceIsUnavailable
+        }
+        try renderHarnessOnboarding(
+            runtime, lens: "Runtime", scheme: .dark,
+            to: outputDirectory.appending(path: "opencodex-harness-runtime.png")
+        )
+
         guard let harness = inspector.currentHarness else { throw VisualSmokeError.harnessStudioDataIsUnavailable }
         let exportedPack = outputDirectory.appending(path: "codex.openfish-harness.json")
         guard await inspector.exportHarness(harness, to: exportedPack),
@@ -45,7 +54,7 @@ struct VisualSmoke {
                 && !exportedText.contains("sk-") else {
             throw VisualSmokeError.harnessStudioExportFailed
         }
-        print("OpenFish visual smoke rendered task, new-task, model effort, and inspector fixtures at 1260×820")
+        print("OpenFish visual smoke rendered task, new-task, model effort, runtime trace, and inspector fixtures at 1260×820")
     }
 
     @MainActor
@@ -59,7 +68,14 @@ struct VisualSmoke {
 
     @MainActor
     private static func renderHarnessOnboarding(_ store: OpenCodexStore, scheme: ColorScheme, to output: URL) throws {
-        let root = HarnessOnboardingPreview(store: store, initialLens: "How it works")
+        try renderHarnessOnboarding(store, lens: "How it works", scheme: scheme, to: output)
+    }
+
+    @MainActor
+    private static func renderHarnessOnboarding(
+        _ store: OpenCodexStore, lens: String, scheme: ColorScheme, to output: URL
+    ) throws {
+        let root = HarnessOnboardingPreview(store: store, initialLens: lens)
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: "en_US"))
             .frame(width: 1_260, height: 820)
@@ -91,4 +107,5 @@ private enum VisualSmokeError: Error {
     case newTaskControlsAreUnavailable
     case harnessStudioDataIsUnavailable
     case harnessStudioExportFailed
+    case harnessRuntimeTraceIsUnavailable
 }

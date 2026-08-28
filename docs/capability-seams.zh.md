@@ -9,6 +9,19 @@
 
 ```mermaid
 flowchart LR
+  pkg_harness["harness"]
+  svc_harnesses["ctx.harnesses<br/>Open Fish Harness Pack registry"]
+  pkg_harness_acp["harness-acp"]
+  pkg_apiproxy["apiproxy"]
+  pkg_api_harness_controller["api-harness-controller"]
+  svc_harnessController["ctx.harnessController<br/>Harness remote control plane"]
+  pkg_x_native["x-native"]
+  pkg_harnesses["harnesses"]
+  pkg_voice["voice"]
+  svc_voice["ctx.voice<br/>Device-local voice Provider registry"]
+  pkg_voice_apple["voice-apple"]
+  svc_xNative["ctx.xNative<br/>OpenFish native bootstrap"]
+  pkg_connection["connection"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
   pkg_attachment_local["attachment-local"]
@@ -224,6 +237,7 @@ flowchart LR
   pkg_agent_loop --> svc_agentLoop
   pkg_agent_presets --> svc_agentPresets
   pkg_api_gateway --> svc_typertGateway
+  pkg_api_harness_controller --> svc_harnessController
   pkg_api_session_controller --> svc_sessionController
   pkg_api_session_controller --> svc_sessionFileReferences
   pkg_api_session_controller --> svc_sessionSkillCatalog
@@ -257,6 +271,7 @@ flowchart LR
   pkg_fs_local --> svc_fs
   pkg_fs_sandbox --> svc_fs
   pkg_goal --> svc_goals
+  pkg_harness --> svc_harnesses
   pkg_host_directory_picker --> svc_directoryPicker
   pkg_host_directory_picker_browse --> svc_directoryPicker
   pkg_host_directory_picker_native --> svc_directoryPicker
@@ -326,6 +341,8 @@ flowchart LR
   pkg_typert_registry --> svc_typert
   pkg_user_approval --> svc_approval
   pkg_user_questions --> svc_userQuestions
+  pkg_voice --> svc_voice
+  pkg_voice_apple --> svc_voice
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
   pkg_web_search_deepseek --> svc_web
@@ -335,6 +352,7 @@ flowchart LR
   pkg_workflow --> svc_workflowEngine
   pkg_workflow_worker_thread --> svc_workflowEngine
   pkg_workspace --> svc_workspaceRegistry
+  pkg_x_native --> svc_xNative
   svc_agentDefaultModel --> pkg_api_session_controller
   svc_agentDefaultModel --> pkg_headless
   svc_agentLoop --> pkg_agent_spine_demo
@@ -365,6 +383,9 @@ flowchart LR
   svc_e2b --> pkg_subprocess_e2b
   svc_fileReferences --> pkg_api_session_controller
   svc_fs --> pkg_tool_fs
+  svc_harnessController --> pkg_x_native
+  svc_harnesses --> pkg_apiproxy
+  svc_harnesses --> pkg_harness_acp
   svc_invariants --> pkg_agent
   svc_invariants --> pkg_agent_loop
   svc_invariants --> pkg_scope
@@ -451,6 +472,7 @@ flowchart LR
   svc_typert --> pkg_api_gateway
   svc_typert --> pkg_typert_loader
   svc_userQuestions --> pkg_tool_ask_user
+  svc_voice --> pkg_x_native
   svc_web --> pkg_tool_web
   svc_webServer --> pkg_client_connection
   svc_webServer --> pkg_client_hmr
@@ -461,10 +483,17 @@ flowchart LR
   svc_workspaceRegistry --> pkg_api_session_controller
   svc_workspaceRegistry --> pkg_api_workspace_controller
   svc_fs -. event gate .-> pkg_fs_observation_policy
+  svc_harnessController -. event gate .-> pkg_harnesses
+  svc_xNative -. event gate .-> pkg_connection
+  svc_xNative -. event gate .-> pkg_voice
 ```
 
 | ctx 键 | 角色 | 所属包 | 实现 | 直接消费方 | 配套插件 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.harnesses` | `core` | [`harness`](../packages/harness/harness) | - | [`harness-acp`](../packages/harness/harness-acp), `apiproxy` | - | 负责 Pack 准入、ACP Registry 发现、运行时配方、如实的架构图，以及按 effect 限定作用域的协议 Driver。 |
+| `ctx.harnessController` | `core` | [`api-harness-controller`](../packages/api/harness-controller) | - | `x-native` | `harnesses` | 暴露目录、生命周期、认证、默认项选择与发布方法，同时把可执行代码许可留在 Host 本地。 |
+| `ctx.voice` | `seam` | [`voice`](../packages/voice/voice) | [`voice-apple`](../packages/voice/voice-apple) | `x-native` | - | 负责可移植的 STT/TTS 能力词汇；平台适配器在设备本地处理音频，最终转录文本进入普通的 `session.prompt` 路径。 |
+| `ctx.xNative` | `bundle` | `x-native` | - | - | `connection`, [`voice`](../packages/voice/voice) | 发布原生发现、实时组合能力、配对与认证信息，但不拥有会话或工作区业务状态。 |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | [`api-session-controller`](../packages/api/session-controller), [`tool-fs`](../packages/fs/tool-fs), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-deepseek`](../packages/llm/llm-deepseek) | - | 宿主会在会话事件之前提交已接受的图片；提供方适配器将已授权的持久引用解析为提供方原生内容。 |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | 适配器注册提供方实现；agent loop（智能体循环）与压缩功能调用提供方无关的流服务。 |
 | `ctx.deepseekLlmApiExtensions` | `seam` | [`deepseek-llm-api-extensions`](../packages/llm/deepseek-llm-api-extensions) | [`session-log-deepseek`](../packages/session/session-log-deepseek), [`plugin-package-inventory-deepseek`](../packages/llm/plugin-package-inventory-deepseek) | [`llm-deepseek`](../packages/llm/llm-deepseek) | - | 插件准备彼此独立的顶层字段；官方适配器会合并这些字段，并在 HTTP 接受后提交其交付状态。 |

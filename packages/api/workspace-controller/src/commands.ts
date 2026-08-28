@@ -162,7 +162,11 @@ export class WorkspaceCommands {
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
 
-  /** Remove one known Session from the registry-global archive set. */
+  /**
+   * Remove one known Session from the registry-global archive set.
+   * @param request - Session identity to restore.
+   * @returns The complete resulting archive set.
+   */
   async unarchiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     try {
       await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)

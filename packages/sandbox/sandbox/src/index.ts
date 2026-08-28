@@ -23,8 +23,9 @@ export { canonicalPath, writableRoots } from './roots.ts'
 /**
  * File-effect policy for confined processes. `read-only` permits only required
  * sinks such as `/dev/null`; `workspace-write` also permits the workspace and a
- * backend-defined temp area; `danger-full-access` bypasses confinement. Network
- * Additional resident-runtime isolation is expressed explicitly through
+ * backend-defined temp area; `danger-full-access` bypasses confinement. These
+ * labels govern file effects only. Additional resident-runtime isolation is
+ * expressed through
  * {@link SandboxPolicy.isolation}; ordinary one-shot callers retain the
  * historical file-effect-only policy.
  */

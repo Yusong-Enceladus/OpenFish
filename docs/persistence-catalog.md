@@ -443,7 +443,7 @@ Source: [`packages/goal/goal/src/domain.ts:66`](../packages/goal/goal/src/domain
 'harness/native-event': { harnessId: HarnessId; event: unknown }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:88`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:91`](../packages/harness/harness/src/index.ts)
 
 <a id="harnessremote-session--log-only"></a>
 
@@ -458,7 +458,7 @@ Source: [`packages/harness/harness/src/index.ts:88`](../packages/harness/harness
 }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:82`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:85`](../packages/harness/harness/src/index.ts)
 
 <a id="harnessruntime-edge--log-only"></a>
 
@@ -479,7 +479,7 @@ Source: [`packages/harness/harness/src/index.ts:82`](../packages/harness/harness
 }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:99`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:102`](../packages/harness/harness/src/index.ts)
 
 <a id="harnessruntime-node--log-only"></a>
 
@@ -497,7 +497,7 @@ Source: [`packages/harness/harness/src/index.ts:99`](../packages/harness/harness
 }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:90`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:93`](../packages/harness/harness/src/index.ts)
 
 <a id="harnessselected--log-only"></a>
 
@@ -519,7 +519,7 @@ Source: [`packages/harness/harness/src/index.ts:90`](../packages/harness/harness
 }
 ```
 
-Source: [`packages/harness/harness/src/index.ts:69`](../packages/harness/harness/src/index.ts)
+Source: [`packages/harness/harness/src/index.ts:72`](../packages/harness/harness/src/index.ts)
 
 ### `hook/*`
 
@@ -627,7 +627,7 @@ Source: [`packages/api/session-controller/src/types.ts:40`](../packages/api/sess
 'permission/preset': { preset: string }
 ```
 
-Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
+Source: [`packages/interaction/permission-presets/src/index.ts:52`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `plan/*`
 

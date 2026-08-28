@@ -998,6 +998,191 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'harnessController',
+    summary: 'Host service backing the generated `ctx.remote.harness` namespace.',
+    description: 'Host service backing the generated `ctx.remote.harness` namespace.',
+    methods: [
+      {
+        signature: '@Remote(\'list\') async list(request: HarnessListRequest): Promise<HarnessListValue>',
+        description: 'List locally known built-ins, registry entries, community Packs, and user Packs.',
+        parameters: [{ name: 'request', description: 'Optional bounded catalog query.' }],
+        returns: 'Matching Harness catalog entries.',
+      },
+      {
+        signature: '@Remote(\'resolve\') async resolve(request: HarnessResolveRequest): Promise<HarnessResolveValue>',
+        description: 'Resolve the exact version and authentication identity recorded by a task.',
+        parameters: [{ name: 'request', description: 'Pinned Harness identity recorded by the task.' }],
+        returns: 'The exact resolved Harness catalog entry.',
+      },
+      {
+        signature: '@Remote(\'refresh\') async refresh(signal: AbortSignal): Promise<HarnessListValue>',
+        description: 'Refresh public catalogs without hiding the deterministic bundled baseline.',
+        parameters: [{ name: 'signal', description: 'Cancellation for the catalog refresh.' }],
+        returns: 'The complete catalog after refresh.',
+      },
+      {
+        signature: '@Remote(\'mutate\') async mutate(request: HarnessMutationRequest, signal: AbortSignal): Promise<HarnessListValue>',
+        description: 'Run lifecycle operations that never accept third-party-code consent remotely.',
+        parameters: [{ name: 'request', description: 'Requested lifecycle or selection mutation.' }, { name: 'signal', description: 'Cancellation for process-owning lifecycle work.' }],
+        returns: 'The complete catalog after mutation.',
+      },
+      {
+        signature: '@Remote(\'manage\') async manage(request: HarnessManageRequest, signal: AbortSignal): Promise<HarnessListValue>',
+        description: 'Run Mac-authorized executable-code and Pack-authoring operations. The carrier enforces Host-local authority before dispatching this method.',
+        parameters: [{ name: 'request', description: 'Host-authorized management or authoring operation.' }, { name: 'signal', description: 'Cancellation for installation, probing, or publication work.' }],
+        returns: 'The complete catalog after management.',
+      },
+    ],
+  },
+  {
+    key: 'harnesses',
+    summary: 'Catalog plus effect-scoped protocol drivers.',
+    description: 'Catalog plus effect-scoped protocol drivers.',
+    methods: [
+      {
+        signature: 'registerDriver(driver: HarnessDriver): () => void',
+        description: 'Register one protocol implementation until its owning effect unloads.',
+        parameters: [{ name: 'driver', description: 'Protocol implementation to reserve.' }],
+        returns: 'Disposer that removes only this exact registration.',
+      },
+      {
+        signature: 'async authorizeDriverBundle( id: HarnessId, version: string, packageName: string, spec: string, ): Promise<void>',
+        description: 'Record one exact Driver Bundle only after the loopback-pinned Mac bridge admitted it and observed the matching Driver in the restarted Host. Remote clients cannot call the authoring plane that exposes this method.',
+        parameters: [{ name: 'id', description: 'Exact Harness Pack identity.' }, { name: 'version', description: 'Exact admitted Pack version.' }, { name: 'packageName', description: 'Driver package identity declared by the Pack.' }, { name: 'spec', description: 'Exact immutable Driver installation spec.' }],
+      },
+      {
+        signature: 'async refresh(signal?: AbortSignal): Promise<void>',
+        description: 'Refresh ACP Registry metadata without deleting user or built-in Packs.',
+        parameters: [{ name: 'signal', description: 'Optional cancellation for the registry request.' }],
+      },
+      {
+        signature: 'async list(): Promise<HarnessCatalogEntry[]>',
+        description: 'List every Pack with its current driver availability.',
+        parameters: [],
+        returns: 'Detached catalog rows in insertion order.',
+      },
+      {
+        signature: 'async describe(id: HarnessId, version?: string, authMethod?: string): Promise<HarnessCatalogEntry>',
+        description: 'Resolve the exact installed Pack and authentication choice pinned by a task.',
+        parameters: [{ name: 'id', description: 'Stable Harness identity recorded by the task.' }, { name: 'version', description: 'Exact Pack version recorded by the task.' }, { name: 'authMethod', description: 'Exact non-secret authentication method recorded by the task.' }],
+        returns: 'Detached catalog row describing what that task actually runs.',
+      },
+      {
+        signature: 'async install(id: HarnessId, signal?: AbortSignal): Promise<void>',
+        description: 'Install or update one Pack with a recoverable previous-version snapshot.',
+        parameters: [{ name: 'id', description: 'Catalog identity to install.' }, { name: 'signal', description: 'Optional package-download cancellation.' }],
+      },
+      {
+        signature: 'async probe(id: HarnessId, signal?: AbortSignal): Promise<void>',
+        description: 'Run a non-secret live preflight without sending a model prompt. Provider-owned state or setup cost remains provider-specific.',
+        parameters: [{ name: 'id', description: 'Installed Harness Pack to probe.' }, { name: 'signal', description: 'Optional cancellation for installation and protocol checks.' }],
+      },
+      {
+        signature: 'async uninstall(id: HarnessId): Promise<void>',
+        description: 'Remove managed package files while retaining the discoverable catalog row.',
+        parameters: [{ name: 'id', description: 'Installed Harness identity.' }],
+      },
+      {
+        signature: 'async rollback(id: HarnessId): Promise<void>',
+        description: 'Activate the most recently retained installed Pack snapshot.',
+        parameters: [{ name: 'id', description: 'Installed Harness identity.' }],
+      },
+      {
+        signature: 'async selectAuth(id: HarnessId, method?: string): Promise<void>',
+        description: 'Persist a non-secret authentication preference for the next launch.',
+        parameters: [{ name: 'id', description: 'Harness whose login mode is selected.' }, { name: 'method', description: 'Pack-declared method id, or absent to clear the preference.' }],
+      },
+      {
+        signature: 'async authenticateInteractive(id: HarnessId, methodId: string, signal?: AbortSignal): Promise<void>',
+        description: 'Launch one explicitly selected interactive authentication flow.',
+        parameters: [{ name: 'id', description: 'Installed Harness whose terminal login should run.' }, { name: 'methodId', description: 'Pack-declared terminal authentication method.' }, { name: 'signal', description: 'Optional cancellation forwarded to the Driver login flow.' }],
+      },
+      {
+        signature: 'async selectDefault(id: HarnessId): Promise<void>',
+        description: 'Persist the cross-device default chosen by native Open Fish clients.',
+        parameters: [{ name: 'id', description: 'Harness to use for new tasks by default.' }],
+      },
+      {
+        signature: 'async clearDefault(): Promise<void>',
+        description: 'Explicitly clear the default so first-run clients must ask the user.',
+        parameters: [],
+      },
+      {
+        signature: 'async defaultId(): Promise<HarnessId | undefined>',
+        description: 'Read the explicit cross-device default.',
+        parameters: [],
+        returns: 'Selected Harness id, or absent before onboarding completes.',
+      },
+      {
+        signature: 'async upsert(input: unknown): Promise<HarnessPack>',
+        description: 'Create or replace one user Pack without editing Open Fish source.',
+        parameters: [{ name: 'input', description: 'Untrusted Pack v0 document from the graphical editor or API.' }],
+        returns: 'Admitted user Pack.',
+      },
+      {
+        signature: 'async validatePublication(input: unknown): Promise<HarnessPack>',
+        description: 'Validate one public community submission without mutating the local catalog.',
+        parameters: [{ name: 'input', description: 'Untrusted Pack-shaped publication payload.' }],
+        returns: 'Exact installed, preflighted, and admitted Pack safe to submit for review.',
+      },
+      {
+        signature: 'async recordCommunitySubmission(input: HarnessCommunitySubmissionRecord): Promise<void>',
+        description: 'Persist the review identity returned by the documented community backend. This method records no credential or Pack content and never treats a submitted review as catalog inclusion.',
+        parameters: [{ name: 'input', description: 'Exact local Pack identity and GitHub review facts.' }],
+      },
+      {
+        signature: 'async recordCommunityRevocationSubmission(input: HarnessCommunitySubmissionRecord): Promise<void>',
+        description: 'Persist the public review identity for an exact-version revocation request.',
+        parameters: [{ name: 'input', description: 'Exact local Pack identity and GitHub revocation review facts.' }],
+      },
+      {
+        signature: 'async removeUserPack(id: HarnessId): Promise<void>',
+        description: 'Remove one user-authored Pack definition.',
+        parameters: [{ name: 'id', description: 'User Pack identity.' }],
+      },
+      {
+        signature: 'require(id: HarnessId): HarnessPack',
+        description: 'Resolve a Pack by stable id.',
+        parameters: [{ name: 'id', description: 'Exact Pack identity.' }],
+        returns: 'Admitted Pack definition.',
+      },
+      {
+        signature: 'runtimeBinding(id: HarnessId, version?: string): { pack: HarnessPack; driver?: HarnessDriver } | undefined',
+        description: 'Resolve the exact Pack and effect-scoped Driver used to project one task\'s runtime evidence.',
+        parameters: [{ name: 'id', description: 'Stable Harness Pack identity.' }, { name: 'version', description: 'Optional exact installed version pinned by a task.' }],
+        returns: 'Matching runtime binding, or undefined when the identity is unavailable.',
+      },
+      {
+        signature: 'async create( id: HarnessId, sessionId: SessionId, cwd: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], signal?: AbortSignal, ): Promise<Agent>',
+        description: 'Create a non-DSH session through its registered protocol driver.',
+        parameters: [{ name: 'id', description: 'Selected Harness Pack identity.' }, { name: 'sessionId', description: 'New local session identity.' }, { name: 'cwd', description: 'Absolute session working directory.' }, { name: 'workspaceMode', description: 'Explicit project or no-project workspace contract.' }, { name: 'signal', description: 'Optional cancellation for creation and live capability discovery.' }],
+        returns: 'Published external Agent.',
+      },
+      {
+        signature: 'async resume( id: HarnessId, sessionId: SessionId, cwd: string, version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], signal?: AbortSignal, ): Promise<Agent>',
+        description: 'Resume a persisted non-DSH session through its registered protocol driver.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Existing local session identity.' }, { name: 'cwd', description: 'Persisted absolute working directory.' }, { name: 'version', description: 'Exact installed Pack version recorded by the session.' }, { name: 'authMethod', description: 'Exact non-secret authentication choice recorded by the session.' }, { name: 'workspaceMode', description: 'Persisted project or no-project workspace contract.' }, { name: 'signal', description: 'Optional cancellation for resume and live capability discovery.' }],
+        returns: 'Restored external Agent.',
+      },
+      {
+        signature: 'async fork( id: HarnessId, sourceSessionId: SessionId, sessionId: SessionId, cwd: string, seed: SessionEvent[], version?: string, authMethod?: string, workspaceMode?: HarnessSessionRequest[\'workspaceMode\'], ): Promise<Agent>',
+        description: 'Fork one external Harness through its protocol Driver. The Driver owns both the real remote branch and publication of the local seeded Agent; this service still owns exact-version, authentication, installation, and capability admission.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sourceSessionId', description: 'Existing local source task identity.' }, { name: 'sessionId', description: 'New local child task identity.' }, { name: 'cwd', description: 'Absolute working directory for the child task.' }, { name: 'seed', description: 'Durable source events copied into the child task.' }, { name: 'version', description: 'Exact installed Pack version pinned by the source task.' }, { name: 'authMethod', description: 'Exact non-secret authentication choice pinned by the source task.' }, { name: 'workspaceMode', description: 'Project or no-project workspace contract pinned by the source task.' }],
+        returns: 'Published external child Agent.',
+      },
+      {
+        signature: 'async disposeSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>',
+        description: 'Stop and detach one live external Harness session through the exact Driver and Pack version that created it. This is an in-memory lifecycle action; the durable transcript remains available for a later resume.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Live local task identity to detach.' }, { name: 'version', description: 'Optional exact installed Pack version pinned by the task.' }],
+      },
+      {
+        signature: 'async discardSession(id: HarnessId, sessionId: SessionId, version?: string): Promise<void>',
+        description: 'Permanently discard one live, never-started external Harness draft. Unlike ordinary disposal, a Driver may use this boundary to remove a provider-side thread that it had to create for live model/configuration discovery. The API Proxy proves the task is blank before calling here.',
+        parameters: [{ name: 'id', description: 'Persisted Harness Pack identity.' }, { name: 'sessionId', description: 'Blank local draft identity to discard.' }, { name: 'version', description: 'Optional exact installed Pack version pinned by the draft.' }],
+      },
+    ],
+  },
+  {
     key: 'inspector',
     summary: 'Shared Host/Client service façade over the realm\'s source publisher.',
     description: 'Shared Host/Client service façade over the realm\'s source publisher.',
@@ -1346,9 +1531,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current attached state or persisted header and event prefix.',
       },
       {
-        signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
+        signature: '@Remote(\'list\') async list(request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
         description: 'Read all visible Session rows without resuming an Agent.',
-        parameters: [{ name: '_request', description: 'reserved empty list request.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
+        parameters: [{ name: 'request', description: 'reserved list request carrying an optional future cursor.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
         returns: 'visible Session summaries ordered by activity.',
       },
       {
@@ -1358,16 +1543,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'authorized bounded Session search results.',
       },
       {
-        signature: '@Remote(\'create\') create(request: SessionCreateRequest): Promise<SessionCreateValue>',
+        signature: '@Remote(\'create\') create(request: SessionCreateRequest, signal: AbortSignal): Promise<SessionCreateValue>',
         description: 'Create or idempotently adopt one ordinary Session.',
-        parameters: [{ name: 'request', description: 'requested identity, location, and Agent preset.' }],
+        parameters: [{ name: 'request', description: 'requested identity, location, and Agent preset.' }, { name: 'signal', description: 'cancellation for preparation and Harness startup.' }],
         returns: 'the Session identity and resolved preset when configured.',
       },
       {
-        signature: '@Remote(\'selectModel\') selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue>',
+        signature: '@Remote(\'discard\') discard(request: SessionDiscardRequest): Promise<SessionDiscardValue>',
+        description: 'Remove a never-started draft, including its provider thread and managed No Project directory.',
+        parameters: [{ name: 'request', description: 'Draft Session identity.' }],
+        returns: 'Confirmation that the draft was discarded.',
+      },
+      {
+        signature: '@Remote(\'models\') models(request: SessionModelsRequest, signal: AbortSignal): Promise<SessionModels>',
+        description: 'Read model, reasoning, account, and Harness configuration from the exact live task runtime.',
+        parameters: [{ name: 'request', description: 'Exact Session identity.' }, { name: 'signal', description: 'Cancellation for runtime discovery.' }],
+        returns: 'The task-local model and Harness configuration directory.',
+      },
+      {
+        signature: '@Remote(\'selectModel\') selectModel(request: SessionSelectModelRequest, signal: AbortSignal): Promise<SessionSelectModelValue>',
         description: 'Select one Session-local model after explicitly resuming the Session.',
-        parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }],
+        parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }, { name: 'signal', description: 'cancellation for live Harness or provider selection.' }],
         returns: 'the normalized selection installed for the Session.',
+      },
+      {
+        signature: '@Remote(\'setHarnessConfig\') setHarnessConfig( request: SessionSetHarnessConfigRequest, signal: AbortSignal, ): Promise<SessionSetHarnessConfigValue>',
+        description: 'Apply one configuration option advertised by this task\'s live Harness.',
+        parameters: [{ name: 'request', description: 'Session, option, and requested value.' }, { name: 'signal', description: 'Cancellation for the live Harness mutation.' }],
+        returns: 'The refreshed Harness configuration directory.',
       },
       {
         signature: '@Remote(\'modelCatalog\') modelCatalog(): Promise<ModelCatalog>',
@@ -2798,6 +3001,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Host service backing the generated `ctx.remote.workspace` namespace.',
     methods: [
       {
+        signature: '@Remote(\'list\') list(): WorkspaceListValue',
+        description: 'Read the complete current Workspace projection without opening a stream.',
+        parameters: [],
+        returns: 'The current Workspace baseline and archive set.',
+      },
+      {
         signature: '@Remote(\'create\') create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue>',
         description: 'Create or idempotently resolve one Workspace over an existing directory.',
         parameters: [{ name: 'request', description: 'directory path to register.' }],
@@ -2832,6 +3041,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Hide one known Session from Workspace grouping surfaces.',
         parameters: [{ name: 'request', description: 'Session identity to archive.' }],
         returns: 'the complete resulting archive set.',
+      },
+      {
+        signature: '@Remote(\'unarchiveSession\') unarchiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue>',
+        description: 'Restore one known Session to ordinary Workspace grouping surfaces.',
+        parameters: [{ name: 'request', description: 'Session identity to restore.' }],
+        returns: 'The complete resulting archive set.',
       },
       {
         signature: '@Remote({ mode: \'stream\' }) follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame>',
@@ -2928,6 +3143,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the live `/api` method manifest without taking ownership of those methods.',
         parameters: [],
         returns: 'Methods sorted by endpoint, or an empty list when Typert is absent.',
+      },
+      {
+        signature: '@Remote({ mode: \'stream\' }) follow(request: NativeFollowRequest, signal: AbortSignal): AsyncIterable<NativeFollowFrame>',
+        description: 'Merge canonical Remote Event, Workspace, Session control, and selected-task streams.',
+        parameters: [{ name: 'request', description: 'Optional selected Session and durable subagent parent proof.' }, { name: 'signal', description: 'Native reconnect-generation cancellation.' }],
+        returns: 'The canonical merged native event stream.',
+      },
+      {
+        signature: '@Remote(\'history\') history(request: NativeHistoryRequest, signal: AbortSignal): Promise<NativeHistoryValue>',
+        description: 'Read one native transcript page without restoring the removed ApiProxy transport.',
+        parameters: [{ name: 'request', description: 'Session, optional parent proof, and pagination boundary.' }, { name: 'signal', description: 'Request cancellation.' }],
+        returns: 'One bounded native transcript page.',
+      },
+      {
+        signature: '@Remote(\'import\') import(request: NativeImportRequest, signal: AbortSignal): Promise<NativeImportValue>',
+        description: 'Import bounded Codex or DSH archives as replayable DSH-owned tasks.',
+        parameters: [{ name: 'request', description: 'Target Workspace, archive format, and in-memory files.' }, { name: 'signal', description: 'Import cancellation.' }],
+        returns: 'Every newly created replayable task.',
+      },
+      {
+        signature: '@Remote(\'describe\') async describe(signal: AbortSignal): Promise<NativeHostDescription>',
+        description: 'Return diagnostics without exposing the Host launch directory to paired devices.',
+        parameters: [{ name: 'signal', description: 'Request cancellation for the Session/model reads.' }],
+        returns: 'Privacy-minimized Host diagnostics.',
       },
       {
         signature: 'pair(request: PairRequest): Promise<PairResponse>',
@@ -3690,12 +3929,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BinaryHarnessDistribution',
+    declaration: 'export interface BinaryHarnessDistribution {\n    kind: \'binary\';\n    archive: string;\n    sha256?: string;\n    command: string;\n    args: string[];\n    env: Record<string, string>;\n}',
+  },
+  {
     name: 'BorrowedSessionSource',
     declaration: 'export type BorrowedSessionSource = Disposable & ({\n    readonly source: \'prepared\';\n    readonly inspection: SessionInspection;\n    readonly revision: SessionPersistenceRevision;\n    readonly preparedSession: Session;\n} | {\n    readonly source: \'live\';\n    readonly inspection: SessionInspection;\n});',
   },
   {
     name: 'Branded',
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BunxHarnessDistribution',
+    declaration: 'export interface BunxHarnessDistribution {\n    kind: \'bunx\';\n    package: string;\n    args: string[];\n    env: Record<string, string>;\n}',
   },
   {
     name: 'ChunkRowEvent',
@@ -4194,6 +4441,226 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GrantRecord {\n    readonly kind: \'grant\';\n    readonly payload: unknown;\n}',
   },
   {
+    name: 'HarnessAccountDescriptor',
+    declaration: 'export interface HarnessAccountDescriptor {\n    label: string;\n    billing: \'subscription\' | \'usage\' | \'local\' | \'harness-managed\' | \'unknown\';\n    detail: string;\n}',
+  },
+  {
+    name: 'HarnessAuthentication',
+    declaration: 'export interface HarnessAuthentication {\n    methods: HarnessAuthMethod[];\n    selectedMethod?: string;\n    status: \'unknown\' | \'not-required\' | \'needs-selection\' | \'needs-credentials\' | \'configured\';\n    missingFields: string[];\n    detail: string;\n}',
+  },
+  {
+    name: 'HarnessAuthenticationDiscovery',
+    declaration: 'export interface HarnessAuthenticationDiscovery {\n    source: \'pack\' | \'runtime\';\n    detail: string;\n}',
+  },
+  {
+    name: 'HarnessAuthField',
+    declaration: 'export interface HarnessAuthField {\n    ref: string;\n    name: string;\n    env?: string;\n    required: boolean;\n    secret: boolean;\n    placeholder?: string;\n}',
+  },
+  {
+    name: 'HarnessAuthMethod',
+    declaration: 'export interface HarnessAuthMethod {\n    id: string;\n    name: string;\n    kind: \'agent\' | \'environment\' | \'terminal\';\n    fields: HarnessAuthField[];\n    account?: HarnessAccountDescriptor;\n    agent?: {\n        metaKey: string;\n        fieldMap: Record<string, string>;\n    };\n    terminal?: {\n        args: string[];\n        env: Record<string, string>;\n    };\n}',
+  },
+  {
+    name: 'HarnessAuthoringContract',
+    declaration: 'export interface HarnessAuthoringContract {\n    nodeKinds: HarnessNodeKindDefinition[];\n    bindingKinds: HarnessBindingKindDefinition[];\n}',
+  },
+  {
+    name: 'HarnessAuthoringValue',
+    declaration: 'export interface HarnessAuthoringValue {\n    readonly nodeKinds: readonly HarnessNodeKindValue[];\n    readonly bindingKinds: readonly HarnessBindingKindDefinition[];\n}',
+  },
+  {
+    name: 'HarnessBindingKindDefinition',
+    declaration: 'export interface HarnessBindingKindDefinition {\n    kind: string;\n    name: string;\n    description: string;\n    fieldTypes: HarnessConfigField[\'type\'][];\n    targetLabel: string;\n    targetPlaceholder?: string;\n    targetPattern?: string;\n}',
+  },
+  {
+    name: 'HarnessBuiltinRuntimeSignal',
+    declaration: 'export type HarnessBuiltinRuntimeSignal = \'protocol.ready\' | \'session.ready\' | \'turn.started\' | \'turn.completed\' | \'turn.failed\' | \'model.completed\' | \'tool.activity\' | \'output.activity\' | \'approval.requested\' | \'approval.resolved\';',
+  },
+  {
+    name: 'HarnessCapability',
+    declaration: 'export interface HarnessCapability {\n    id: HarnessCapabilityId;\n    status: \'supported\' | \'runtime\' | \'unsupported\';\n    source: \'host\' | \'pack\' | \'driver\' | \'runtime\';\n    detail?: string;\n}',
+  },
+  {
+    name: 'HarnessCapabilityId',
+    declaration: 'export type HarnessCapabilityId = \'lifecycle.install\' | \'lifecycle.update\' | \'lifecycle.rollback\' | \'lifecycle.uninstall\' | \'session.create\' | \'session.resume\' | \'session.cancel\' | \'session.fork\' | \'session.archive\' | \'workspace.project\' | \'workspace.no-project\' | \'configuration.models\' | \'configuration.reasoning\' | \'configuration.auth\' | \'configuration.agent-presets\' | \'interaction.tools\' | \'interaction.approvals\' | \'interaction.questions\' | \'interaction.files\' | \'interaction.events\' | \'architecture.manifest\' | \'architecture.runtime-observation\' | \'architecture.edit\' | \'diagnostics.preflight\' | \'builder.manifest\' | \'builder.test\' | \'builder.publish\';',
+  },
+  {
+    name: 'HarnessCatalogEntry',
+    declaration: 'export interface HarnessCatalogEntry extends HarnessPack {\n    isDefault: boolean;\n    available: boolean;\n    unavailableReason?: string;\n    installation: HarnessInstallation;\n    auth: HarnessAuthentication;\n    compatibility: HarnessCompatibility;\n    publication?: HarnessPublication;\n    capabilities: HarnessCapability[];\n    authoring: HarnessAuthoringContract;\n    driver: {\n        apiVersion: 1;\n        protocol: string;\n        loaded: boolean;\n        authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
+  },
+  {
+    name: 'HarnessCatalogValue',
+    declaration: 'export interface HarnessCatalogValue {\n    readonly schemaVersion: 0;\n    readonly id: HarnessId;\n    readonly name: string;\n    readonly version: string;\n    readonly description?: string;\n    readonly publisher: string;\n    readonly license?: string;\n    readonly repository?: string;\n    readonly icon?: string;\n    readonly verified: boolean;\n    readonly protocol: string;\n    readonly account?: HarnessAccountDescriptor;\n    readonly modelConfiguration?: HarnessModelConfiguration;\n    readonly authMethods?: readonly HarnessAuthMethod[];\n    readonly authenticationDiscovery?: HarnessAuthenticationDiscovery;\n    readonly driverBundle?: HarnessDriverBundleRequirement;\n    readonly distribution?: HarnessDistribution;\n    readonly graph: HarnessGraphValue;\n    readonly source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n    readonly isDefault: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly installation: HarnessInstallation;\n    readonly auth: HarnessAuthentication;\n    readonly compatibility: HarnessCompatibility;\n    readonly publication?: HarnessPublication;\n    readonly capabilities: readonly HarnessCapability[];\n    readonly authoring: HarnessAuthoringValue;\n    readonly driver: {\n        readonly apiVersion: 1;\n        readonly protocol: string;\n        readonly loaded: boolean;\n        readonly authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
+  },
+  {
+    name: 'HarnessCommunitySubmissionRecord',
+    declaration: 'export interface HarnessCommunitySubmissionRecord {\n    id: HarnessId;\n    version: string;\n    reviewUrl: string;\n    branch: string;\n    submittedAt: string;\n    review: \'pending\' | \'changes-requested\' | \'closed\' | \'merged\';\n}',
+  },
+  {
+    name: 'HarnessCompatibility',
+    declaration: 'export interface HarnessCompatibility {\n    status: \'untested\' | \'ready\' | \'compatible\' | \'failed\';\n    classification: \'supported\' | \'experimental\' | \'opaque-but-runnable\' | \'incompatible\';\n    checkedAt?: string;\n    message?: string;\n}',
+  },
+  {
+    name: 'HarnessConfigBinding',
+    declaration: 'export interface HarnessConfigBinding {\n    kind: string;\n    target: string;\n}',
+  },
+  {
+    name: 'HarnessConfigChoice',
+    declaration: 'export interface HarnessConfigChoice {\n    id: string;\n    name: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'HarnessConfigField',
+    declaration: 'export interface HarnessConfigField {\n    id: string;\n    name: string;\n    description?: string;\n    type: \'string\' | \'boolean\' | \'select\' | \'secret-reference\';\n    required: boolean;\n    choices?: HarnessConfigChoice[];\n    binding: HarnessConfigBinding;\n}',
+  },
+  {
+    name: 'HarnessConfigOption',
+    declaration: 'export interface HarnessConfigOption {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly category?: string;\n    readonly type: \'select\' | \'boolean\';\n    readonly currentValue: string | boolean;\n    readonly values: readonly HarnessConfigValue[];\n}',
+  },
+  {
+    name: 'HarnessConfigValue',
+    declaration: 'export interface HarnessConfigValue {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly group?: string;\n    readonly groupName?: string;\n}',
+  },
+  {
+    name: 'HarnessDistribution',
+    declaration: 'export type HarnessDistribution = NpxHarnessDistribution | BunxHarnessDistribution | UvxHarnessDistribution | BinaryHarnessDistribution | ExecutableHarnessDistribution;',
+  },
+  {
+    name: 'HarnessDriver',
+    declaration: 'export interface HarnessDriver {\n    readonly apiVersion: number;\n    readonly protocol: string;\n    capabilities(pack: HarnessPack): Promise<HarnessCapability[]>;\n    authoring?(pack: HarnessPack): Promise<HarnessAuthoringContract>;\n    validatePack?(pack: HarnessPack): Promise<string[]>;\n    runtimeSignals?(event: SessionEvent, pack: HarnessPack): readonly HarnessRuntimeObservation[];\n    available(pack: HarnessPack): Promise<string | undefined>;\n    preflight?(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<HarnessPreflightResult>;\n    create(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<Agent>;\n    resume(request: HarnessSessionRequest, pack: HarnessPack, signal?: AbortSignal): Promise<Agent>;\n    fork?(request: HarnessForkRequest, pack: HarnessPack): Promise<Agent>;\n    dispose(sessionId: SessionId, pack: HarnessPack): Promise<void>;\n    discard?(sessionId: SessionId, pack: HarnessPack): Promise<void>;\n    install?(pack: HarnessPack, directory: string, runtimeDirectory: string, signal?: AbortSignal): Promise<void>;\n    missingCredentials?(pack: HarnessPack, authMethod?: string, locations?: {\n        installationDirectory: string;\n        runtimeDirectory: string;\n    }): Promise<string[]>;\n    discoverAuth?(pack: HarnessPack, installationDirectory: string, runtimeDirectory: string): Promise<HarnessAuthMethod[]>;\n    authenticateInteractive?(pack: HarnessPack, installationDirectory: string, runtimeDirec /* …truncated — full shape in source */',
+  },
+  {
+    name: 'HarnessDriverBundleRequirement',
+    declaration: 'export interface HarnessDriverBundleRequirement {\n    apiVersion: 1;\n    package: string;\n    spec: string;\n    requiresInstallScripts: boolean;\n}',
+  },
+  {
+    name: 'HarnessForkRequest',
+    declaration: 'export interface HarnessForkRequest extends HarnessSessionRequest {\n    sourceSessionId: SessionId;\n    seed: SessionEvent[];\n}',
+  },
+  {
+    name: 'HarnessGraph',
+    declaration: 'export interface HarnessGraph {\n    level: HarnessGraphLevel;\n    manifestVersion?: 1;\n    boundary?: string;\n    evidence?: HarnessGraphEvidence[];\n    nodes: HarnessGraphNode[];\n    edges: HarnessGraphEdge[];\n}',
+  },
+  {
+    name: 'HarnessGraphEdge',
+    declaration: 'export interface HarnessGraphEdge {\n    from: string;\n    to: string;\n    fromPort?: string;\n    toPort?: string;\n    label?: string;\n    observes?: HarnessRuntimeSignal[];\n}',
+  },
+  {
+    name: 'HarnessGraphEdgeValue',
+    declaration: 'export interface HarnessGraphEdgeValue {\n    readonly from: string;\n    readonly to: string;\n    readonly fromPort?: string;\n    readonly toPort?: string;\n    readonly label?: string;\n    readonly observes?: readonly string[];\n}',
+  },
+  {
+    name: 'HarnessGraphEvidence',
+    declaration: 'export interface HarnessGraphEvidence {\n    kind: \'declared\' | \'source-derived\' | \'runtime-observed\';\n    source: string;\n    version?: string;\n}',
+  },
+  {
+    name: 'HarnessGraphLevel',
+    declaration: 'export type HarnessGraphLevel = \'opaque\' | \'observable\' | \'composable\';',
+  },
+  {
+    name: 'HarnessGraphNode',
+    declaration: 'export interface HarnessGraphNode {\n    id: string;\n    kind: string;\n    title: string;\n    editable: boolean;\n    responsibility?: string;\n    inputs?: string[];\n    outputs?: string[];\n    ports?: HarnessGraphPort[];\n    evidence?: HarnessGraphEvidence[];\n    observes?: HarnessRuntimeSignal[];\n    position?: HarnessGraphPosition;\n    configSchema?: HarnessNodeConfigSchema;\n    config?: Record<string, HarnessNodeConfigValue>;\n}',
+  },
+  {
+    name: 'HarnessGraphNodeValue',
+    declaration: 'export interface HarnessGraphNodeValue {\n    readonly id: string;\n    readonly kind: string;\n    readonly title: string;\n    readonly editable: boolean;\n    readonly responsibility?: string;\n    readonly inputs?: readonly string[];\n    readonly outputs?: readonly string[];\n    readonly ports?: readonly HarnessGraphPort[];\n    readonly evidence?: readonly HarnessGraphEvidence[];\n    readonly observes?: readonly string[];\n    readonly position?: {\n        readonly x: number;\n        readonly y: number;\n    };\n    readonly configSchema?: HarnessNodeConfigSchema;\n    readonly config?: Readonly<Record<string, HarnessNodeConfigValue>>;\n}',
+  },
+  {
+    name: 'HarnessGraphPort',
+    declaration: 'export interface HarnessGraphPort {\n    id: string;\n    name: string;\n    direction: \'input\' | \'output\';\n    dataType: string;\n    required?: boolean;\n}',
+  },
+  {
+    name: 'HarnessGraphPosition',
+    declaration: 'export interface HarnessGraphPosition {\n    x: number;\n    y: number;\n}',
+  },
+  {
+    name: 'HarnessGraphValue',
+    declaration: 'export interface HarnessGraphValue {\n    readonly level: \'opaque\' | \'observable\' | \'composable\';\n    readonly manifestVersion?: 1;\n    readonly boundary?: string;\n    readonly evidence?: readonly HarnessGraphEvidence[];\n    readonly nodes: readonly HarnessGraphNodeValue[];\n    readonly edges: readonly HarnessGraphEdgeValue[];\n}',
+  },
+  {
+    name: 'HarnessId',
+    declaration: 'export type HarnessId = Branded<\'HarnessId\'>;',
+  },
+  {
+    name: 'HarnessInstallation',
+    declaration: 'export interface HarnessInstallation {\n    status: \'builtin\' | \'not-installed\' | \'installing\' | \'installed\' | \'failed\';\n    operationPhase?: \'staging\' | \'discovering-auth\' | \'verifying\' | \'activating\' | \'health-check\';\n    operationDetail?: string;\n    installedVersion?: string;\n    availableVersion: string;\n    previousVersions: string[];\n    integrity: {\n        status: \'trusted-runtime\' | \'checksum-declared\' | \'checksum-verified\' | \'version-pinned\' | \'local-executable\' | \'unverified\';\n        source: string;\n        digest?: string;\n        detail: string;\n    };\n    error?: string;\n}',
+  },
+  {
+    name: 'HarnessListRequest',
+    declaration: 'export interface HarnessListRequest {\n    readonly query?: string;\n}',
+  },
+  {
+    name: 'HarnessListValue',
+    declaration: 'export interface HarnessListValue {\n    readonly items: readonly HarnessCatalogValue[];\n}',
+  },
+  {
+    name: 'HarnessManageAction',
+    declaration: 'export type HarnessManageAction = \'install\' | \'update\' | \'probe\' | \'remove\' | \'login\' | \'upsert\' | \'validate-publication\' | \'submit-publication\' | \'submit-revocation\' | \'authorize-driver\';',
+  },
+  {
+    name: 'HarnessManageRequest',
+    declaration: 'export interface HarnessManageRequest {\n    readonly action: HarnessManageAction;\n    readonly id?: string;\n    readonly version?: string;\n    readonly driverPackage?: string;\n    readonly driverSpec?: string;\n    readonly authMethod?: string;\n    readonly reason?: string;\n    readonly acceptUnverified?: boolean;\n    readonly pack?: JsonValue;\n}',
+  },
+  {
+    name: 'HarnessModelConfiguration',
+    declaration: 'export interface HarnessModelConfiguration {\n    owner: \'host\' | \'harness\';\n    required: boolean;\n    detail: string;\n}',
+  },
+  {
+    name: 'HarnessMutationAction',
+    declaration: 'export type HarnessMutationAction = \'install\' | \'uninstall\' | \'update\' | \'rollback\' | \'auth\' | \'probe\' | \'default\' | \'clear-default\';',
+  },
+  {
+    name: 'HarnessMutationRequest',
+    declaration: 'export interface HarnessMutationRequest {\n    readonly action: HarnessMutationAction;\n    readonly id?: string;\n    readonly authMethod?: string;\n    readonly acceptUnverified?: boolean;\n}',
+  },
+  {
+    name: 'HarnessNodeConfigSchema',
+    declaration: 'export interface HarnessNodeConfigSchema {\n    version: 1;\n    fields: HarnessConfigField[];\n}',
+  },
+  {
+    name: 'HarnessNodeConfigValue',
+    declaration: 'export type HarnessNodeConfigValue = string | boolean;',
+  },
+  {
+    name: 'HarnessNodeKindDefinition',
+    declaration: 'export interface HarnessNodeKindDefinition {\n    kind: string;\n    name: string;\n    description: string;\n    responsibility: string;\n    editable: boolean;\n    inputs: string[];\n    outputs: string[];\n    ports?: HarnessGraphPort[];\n    observes?: HarnessRuntimeSignal[];\n    configSchema?: HarnessNodeConfigSchema;\n    defaultConfig?: Record<string, HarnessNodeConfigValue>;\n}',
+  },
+  {
+    name: 'HarnessNodeKindValue',
+    declaration: 'export interface HarnessNodeKindValue {\n    readonly kind: string;\n    readonly name: string;\n    readonly description: string;\n    readonly responsibility: string;\n    readonly editable: boolean;\n    readonly inputs: readonly string[];\n    readonly outputs: readonly string[];\n    readonly ports?: readonly HarnessGraphPort[];\n    readonly observes?: readonly string[];\n    readonly configSchema?: HarnessNodeConfigSchema;\n    readonly defaultConfig?: Readonly<Record<string, HarnessNodeConfigValue>>;\n}',
+  },
+  {
+    name: 'HarnessPack',
+    declaration: 'export interface HarnessPack {\n    schemaVersion: 0;\n    id: HarnessId;\n    name: string;\n    version: string;\n    description?: string;\n    publisher: string;\n    license?: string;\n    repository?: string;\n    icon?: string;\n    verified: boolean;\n    protocol: string;\n    account?: HarnessAccountDescriptor;\n    modelConfiguration?: HarnessModelConfiguration;\n    authMethods?: HarnessAuthMethod[];\n    authenticationDiscovery?: HarnessAuthenticationDiscovery;\n    driverBundle?: HarnessDriverBundleRequirement;\n    distribution?: HarnessDistribution;\n    graph: HarnessGraph;\n    source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n}',
+  },
+  {
+    name: 'HarnessPreflightResult',
+    declaration: 'export interface HarnessPreflightResult {\n    message: string;\n    modelCount?: number;\n    configurationIds?: string[];\n}',
+  },
+  {
+    name: 'HarnessPublication',
+    declaration: 'export interface HarnessPublication {\n    status: \'local-draft\' | \'update-draft\' | \'submitted\' | \'published\' | \'revocation-requested\' | \'revoked\';\n    review: \'not-submitted\' | \'pending\' | \'changes-requested\' | \'closed\' | \'merged\' | \'revoked\';\n    publishedVersion?: string;\n    knownVersions: string[];\n    catalogUrl?: string;\n    detail: string;\n    revokedVersion?: string;\n    revokedReason?: string;\n    revokedAt?: string;\n    reviewUrl?: string;\n}',
+  },
+  {
+    name: 'HarnessResolveRequest',
+    declaration: 'export interface HarnessResolveRequest {\n    readonly id: string;\n    readonly version?: string;\n    readonly authMethod?: string;\n}',
+  },
+  {
+    name: 'HarnessResolveValue',
+    declaration: 'export interface HarnessResolveValue {\n    readonly item: HarnessCatalogValue;\n}',
+  },
+  {
+    name: 'HarnessRuntimeObservation',
+    declaration: 'export interface HarnessRuntimeObservation {\n    signal: HarnessRuntimeSignal;\n    status: \'active\' | \'waiting\' | \'completed\' | \'failed\';\n}',
+  },
+  {
+    name: 'HarnessRuntimeSignal',
+    declaration: 'export type HarnessRuntimeSignal = HarnessBuiltinRuntimeSignal | `driver.${string}`;',
+  },
+  {
+    name: 'HarnessSessionRequest',
+    declaration: 'export interface HarnessSessionRequest {\n    harnessId: HarnessId;\n    sessionId: SessionId;\n    cwd: string;\n    version?: string;\n    installationDirectory?: string;\n    runtimeDirectory?: string;\n    authMethod?: string;\n    workspaceMode?: \'project\' | \'no-project\' | \'custom-cwd\';\n    capabilities?: HarnessCapability[];\n}',
+  },
+  {
     name: 'ImageAttachmentLimits',
     declaration: 'export interface ImageAttachmentLimits {\n    maxImageBytes: number;\n    maxImagesPerMessage: number;\n    maxMessageImageBytes: number;\n    maxImagePixels: number;\n    maxImageDimension: number;\n    mediaTypes: readonly ImageMediaType[];\n}',
   },
@@ -4555,7 +5022,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelCatalogModel',
-    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n}',
+    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly providerId?: string;\n    readonly providerName?: string;\n    readonly reasoning?: ModelReasoning;\n}',
   },
   {
     name: 'ModelMessageSource',
@@ -4582,6 +5049,90 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModelReasoningEffort {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
   },
   {
+    name: 'NativeCapabilities',
+    declaration: 'export interface NativeCapabilities {\n    product: \'opencodex\';\n    protocolVersion: string;\n    host: \'dsh\';\n    surface: \'native\';\n    api: {\n        base: string;\n        remoteMux: string;\n        remoteEvents: \'$events\';\n        nativeFeed: \'xNative/follow\';\n        hostEvents?: string;\n        muxEvents?: string;\n    };\n    features: {\n        apiProxy: boolean;\n        gateway: boolean;\n        typert: boolean;\n        remotePlugin: boolean;\n        voicePlugin: boolean;\n        localVoice: boolean;\n        imageGenerationExtension: boolean;\n    };\n    contracts: {\n        sessions: boolean;\n        workspaces: boolean;\n        interactions: boolean;\n        settings: boolean;\n        providers: boolean;\n        migration: boolean;\n        sandbox: boolean;\n    };\n    voice?: NativeVoiceCapabilities;\n    pairing: {\n        supported: boolean;\n        kind: \'authenticated-tls-code\';\n        durable: boolean;\n    };\n    transports: {\n        lan: boolean;\n        tailscale: boolean;\n        relay: boolean;\n    };\n    surfaces: [\n        \'macos\',\n        \'iphone\',\n        \'cli\',\n        \'web\'\n    ];\n}',
+  },
+  {
+    name: 'NativeDeviceView',
+    declaration: 'export interface NativeDeviceView {\n    deviceId: string;\n    name: string;\n    surface: PairRequest[\'surface\'];\n    appVersion?: string;\n    createdAt: number;\n    expiresAt: number;\n    lastSeenAt: number;\n}',
+  },
+  {
+    name: 'NativeFollowFrame',
+    declaration: 'export type NativeFollowFrame = {\n    readonly channel: \'remote-events\';\n    readonly value: NativeRemoteEventFrame;\n} | {\n    readonly channel: \'workspace\';\n    readonly value: WorkspaceFollowFrame;\n} | {\n    readonly channel: \'control\';\n    readonly value: SessionControlFrame;\n} | {\n    readonly channel: \'session\';\n    readonly sessionId: string;\n    readonly value: NativeSessionFollowFrame;\n};',
+  },
+  {
+    name: 'NativeFollowRequest',
+    declaration: 'export interface NativeFollowRequest {\n    readonly sessionId?: string;\n    readonly parentSessionId?: string;\n    readonly mode?: \'one-shot\' | \'continuable\';\n    readonly maxMessages?: number;\n}',
+  },
+  {
+    name: 'NativeHandshake',
+    declaration: 'export interface NativeHandshake {\n    product: \'opencodex\';\n    protocolVersion: string;\n    minimumClientProtocol: string;\n    host: \'dsh\';\n    surface: \'native\';\n    plainHost?: \'127.0.0.1\' | \'0.0.0.0\';\n    secureRemotePort?: number;\n    embeddedRuntimeId?: string;\n    embeddedProcessId?: number;\n}',
+  },
+  {
+    name: 'NativeHistoryRequest',
+    declaration: 'export interface NativeHistoryRequest {\n    readonly sessionId: string;\n    readonly parentSessionId?: string;\n    readonly mode?: \'one-shot\' | \'continuable\';\n    readonly beforeSeq?: number;\n    readonly maxMessages?: number;\n}',
+  },
+  {
+    name: 'NativeHistoryValue',
+    declaration: 'export interface NativeHistoryValue {\n    readonly events: readonly {\n        readonly event: SessionWireEvent;\n    }[];\n    readonly hasMore: boolean;\n    readonly projections?: SessionProjectionBaseline;\n}',
+  },
+  {
+    name: 'NativeHostDescription',
+    declaration: 'export interface NativeHostDescription {\n    readonly version: string;\n    readonly cwd: \'\';\n    readonly provider?: string;\n    readonly model?: string;\n    readonly attachedSessions: number;\n    readonly canOpenPath: boolean;\n}',
+  },
+  {
+    name: 'NativeImportFile',
+    declaration: 'export interface NativeImportFile {\n    readonly name: string;\n    readonly data: string;\n}',
+  },
+  {
+    name: 'NativeImportFormat',
+    declaration: 'export type NativeImportFormat = \'auto\' | \'dsh-jsonl\' | \'dsh-zip\' | \'codex-jsonl\' | \'codex-zip\';',
+  },
+  {
+    name: 'NativeImportItem',
+    declaration: 'export interface NativeImportItem {\n    readonly sessionId: string;\n    readonly sourceSessionId?: string;\n    readonly source: \'codex\' | \'dsh\';\n    readonly root: boolean;\n}',
+  },
+  {
+    name: 'NativeImportRequest',
+    declaration: 'export interface NativeImportRequest {\n    readonly workspaceId?: string;\n    readonly format: NativeImportFormat;\n    readonly files: readonly NativeImportFile[];\n}',
+  },
+  {
+    name: 'NativeImportValue',
+    declaration: 'export interface NativeImportValue {\n    readonly items: readonly NativeImportItem[];\n}',
+  },
+  {
+    name: 'NativeMethod',
+    declaration: 'export interface NativeMethod {\n    endpoint: string;\n    service: string;\n    namespace: string;\n    method: string;\n    implementation?: string;\n    parameters: string[];\n    cancellation?: string;\n    scope?: {\n        context: string;\n        wire: string;\n    };\n    mode?: \'unary\' | \'stream\';\n}',
+  },
+  {
+    name: 'NativeRemoteEventFrame',
+    declaration: 'export type NativeRemoteEventFrame = {\n    readonly type: \'ready\';\n    readonly clientId: string;\n    readonly host: {\n        readonly home: string;\n    };\n} | {\n    readonly type: \'emit\';\n    readonly event: string;\n    readonly args: readonly JsonValue[];\n} | {\n    readonly type: \'waterfall\';\n    readonly event: string;\n    readonly eventId: string;\n    readonly agentId: string;\n    readonly request: Readonly<Record<string, JsonValue>>;\n} | {\n    readonly type: \'cancel\';\n    readonly eventId: string;\n};',
+  },
+  {
+    name: 'NativeSessionFollowFrame',
+    declaration: 'export type NativeSessionFollowFrame = {\n    readonly type: \'snapshot\';\n    readonly header: SessionFollowSnapshot[\'header\'];\n    readonly cursor: number;\n    readonly events: readonly SessionEventEntry[];\n    readonly hasMore: boolean;\n    readonly projections: SessionProjectionBaseline;\n} | SessionEventEntry;',
+  },
+  {
+    name: 'NativeVoiceCapabilities',
+    declaration: 'export interface NativeVoiceCapabilities {\n    readonly contract: \'dsh.voice.v1\';\n    readonly transcriptAuthority: \'session.prompt\';\n    readonly providers: readonly NativeVoiceProviderDescriptor[];\n}',
+  },
+  {
+    name: 'NativeVoiceOperation',
+    declaration: 'export type NativeVoiceOperation = \'speech-to-text\' | \'text-to-speech\';',
+  },
+  {
+    name: 'NativeVoicePlatform',
+    declaration: 'export type NativeVoicePlatform = \'macos\' | \'iphone\' | \'web\';',
+  },
+  {
+    name: 'NativeVoiceProviderDescriptor',
+    declaration: 'export interface NativeVoiceProviderDescriptor {\n    readonly id: string;\n    readonly name: string;\n    readonly platforms: readonly NativeVoicePlatform[];\n    readonly operations: readonly NativeVoiceOperation[];\n    readonly locality: \'device\';\n    readonly streaming: boolean;\n    readonly interruptible: boolean;\n    readonly quality: \'standard\' | \'enhanced\' | \'premium\';\n}',
+  },
+  {
+    name: 'NpxHarnessDistribution',
+    declaration: 'export interface NpxHarnessDistribution {\n    kind: \'npx\';\n    package: string;\n    args: string[];\n    env: Record<string, string>;\n}',
+  },
+  {
     name: 'ObjectJsonSchema',
     declaration: 'export type ObjectJsonSchema = JsonSchemaNode & {\n    type: \'object\';\n};',
   },
@@ -4603,7 +5154,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PairResponse',
-    declaration: 'export interface PairResponse {\n    deviceId: string;\n    token: string;\n    expiresAt: number;\n    createdAt: number;\n}',
+    declaration: 'export interface PairResponse {\n    deviceId: string;\n    token: string;\n    expiresAt: number;\n    createdAt: number;\n    hostURL?: string;\n}',
   },
   {
     name: 'PermissionSelect',
@@ -4911,11 +5462,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionCreateRequest',
-    declaration: 'export interface SessionCreateRequest {\n    readonly workspaceId?: WorkspaceId;\n    readonly cwd?: string;\n    readonly sessionId?: SessionId;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionCreateRequest {\n    readonly workspaceId?: WorkspaceId;\n    readonly cwd?: string;\n    readonly noProject?: boolean;\n    readonly sessionId?: SessionId;\n    readonly agentPreset?: string;\n    readonly harnessId?: string;\n}',
   },
   {
     name: 'SessionCreateValue',
-    declaration: 'export interface SessionCreateValue {\n    readonly sessionId: SessionId;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionCreateValue {\n    readonly sessionId: SessionId;\n    readonly harnessId?: string;\n    readonly agentPreset?: string;\n}',
+  },
+  {
+    name: 'SessionDiscardRequest',
+    declaration: 'export interface SessionDiscardRequest {\n    readonly sessionId: SessionId;\n}',
+  },
+  {
+    name: 'SessionDiscardValue',
+    declaration: 'export interface SessionDiscardValue {\n    readonly discarded: true;\n}',
   },
   {
     name: 'SessionError',
@@ -4923,7 +5482,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionErrorDetailsMap',
-    declaration: 'export interface SessionErrorDetailsMap {\n    \'bad-request\': Record<never, never>;\n    cancelled: Record<never, never>;\n    \'session-not-found\': {\n        readonly sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        readonly provider: string;\n        readonly model: string;\n    };\n    \'session-conflict\': {\n        readonly sessionId: SessionId;\n        readonly requestedCwd: string;\n        readonly existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        readonly value: string;\n    };\n    \'workspace-attach-failed\': {\n        readonly sessionId: SessionId;\n        readonly workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        readonly workspaceId: string;\n    };\n    \'agent-preset-conflict\': {\n        readonly sessionId: SessionId;\n        readonly requestedPreset: string;\n        readonly existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        readonly agentPreset: string;\n        readonly available: readonly string[];\n    };\n    \'agent-preset-invalid\': {\n        readonly agentPreset: string;\n        readonly reason: string;\n    };\n    \'agent-busy\': {\n        readonly reason: string;\n    };\n    \'attachment-error\': {\n        readonly reason: string;\n    };\n    \'queue-item-not-found\': {\n        readonly itemId: MessageId;\n    };\n    \'steer-unavailable\': {\n        readonly itemId: MessageId;\n    };\n    \'title-invalid\': {\n        readonly sessionId: SessionId;\n    };\n    \'fork-unavailable\': {\n        readonly sessionId: SessionId;\n    /* …truncated — full shape in source */',
+    declaration: 'export interface SessionErrorDetailsMap {\n    \'bad-request\': Record<never, never>;\n    cancelled: Record<never, never>;\n    \'session-not-found\': {\n        readonly sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        readonly provider: string;\n        readonly model: string;\n    };\n    \'harness-selection-required\': Record<never, never>;\n    \'harness-failed\': Record<never, never>;\n    \'session-conflict\': {\n        readonly sessionId: SessionId;\n        readonly requestedCwd: string;\n        readonly existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        readonly value: string;\n    };\n    \'workspace-attach-failed\': {\n        readonly sessionId: SessionId;\n        readonly workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        readonly workspaceId: string;\n    };\n    \'agent-preset-conflict\': {\n        readonly sessionId: SessionId;\n        readonly requestedPreset: string;\n        readonly existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        readonly agentPreset: string;\n        readonly available: readonly string[];\n    };\n    \'agent-preset-invalid\': {\n        readonly agentPreset: string;\n        readonly reason: string;\n    };\n    \'agent-busy\': {\n        readonly reason: string;\n    };\n    \'attachment-error\': {\n        readonly reason: string;\n    };\n    \'queue-item-not-found\': {\n        readonly itemId: MessageId;\n    };\n    \'steer-unavailable\': {\n        readonly itemId: MessageId;\n    };\n    \'title-invalid\': {\n        readon /* …truncated — full shape in source */',
   },
   {
     name: 'SessionEvent',
@@ -5056,6 +5615,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionLogSnapshot',
     declaration: 'export interface SessionLogSnapshot {\n    session: SessionHeader;\n    events: SessionEvent[];\n}',
+  },
+  {
+    name: 'SessionModels',
+    declaration: 'export interface SessionModels {\n    readonly current: ModelSelection;\n    readonly routable: boolean;\n    readonly groups: readonly ModelProviderGroup[];\n    readonly failures: readonly ModelCatalogFailure[];\n    readonly account?: {\n        readonly label: string;\n        readonly billing: \'subscription\' | \'usage\' | \'local\' | \'harness-managed\' | \'unknown\';\n        readonly detail: string;\n    };\n    readonly harnessOptions?: readonly HarnessConfigOption[];\n}',
+  },
+  {
+    name: 'SessionModelsRequest',
+    declaration: 'export interface SessionModelsRequest {\n    readonly sessionId: SessionId;\n}',
   },
   {
     name: 'SessionObservation',
@@ -5210,12 +5777,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionSelectModelValue {\n    readonly selected: ModelSelection;\n}',
   },
   {
+    name: 'SessionSetHarnessConfigRequest',
+    declaration: 'export interface SessionSetHarnessConfigRequest {\n    readonly sessionId: SessionId;\n    readonly configId: string;\n    readonly value: string | boolean;\n}',
+  },
+  {
+    name: 'SessionSetHarnessConfigValue',
+    declaration: 'export interface SessionSetHarnessConfigValue {\n    readonly options: readonly HarnessConfigOption[];\n}',
+  },
+  {
     name: 'SessionStartSource',
     declaration: 'export type SessionStartSource = \'startup\' | \'resume\' | \'clear\' | \'compact\';',
   },
   {
     name: 'SessionSummary',
-    declaration: 'export interface SessionSummary {\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n}',
+    declaration: 'export interface SessionSummary {\n    readonly sessionId: SessionId;\n    readonly harnessId?: string;\n    readonly harnessVersion?: string;\n    readonly harnessAuthMethod?: string;\n    readonly workspaceMode?: \'project\' | \'no-project\' | \'custom-cwd\';\n    readonly harnessCapabilities?: readonly string[];\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly agentPreset?: string;\n    readonly projections?: SessionProjectionHints;\n}',
   },
   {
     name: 'SessionSurface',
@@ -6018,20 +6593,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface UserMessage extends Message {\n    readonly role: \'user\';\n}',
   },
   {
-    name: 'VerifiedWebhookDelivery',
-    declaration: 'export interface VerifiedWebhookDelivery<K extends string = string> {\n    readonly kind: K;\n    readonly source: WebhookSourceId;\n    readonly deliveryId: WebhookDeliveryId;\n    readonly event: WebhookEventOf<K>;\n    readonly receivedAt: number;\n}',
-  },
-  {
-    name: 'WebBootBatch',
-    declaration: 'export interface WebBootBatch {\n    phase: WebBootBatchPhase;\n    url: string;\n    rev: string;\n    entries: string[];\n}',
-  },
-  {
-    name: 'WebBootBatchPhase',
-    declaration: 'export type WebBootBatchPhase = \'bootstrap\' | \'application\';',
-  },
-  {
     name: 'UvxHarnessDistribution',
     declaration: 'export interface UvxHarnessDistribution {\n    kind: \'uvx\';\n    package: string;\n    args: string[];\n    env: Record<string, string>;\n}',
+  },
+  {
+    name: 'VerifiedWebhookDelivery',
+    declaration: 'export interface VerifiedWebhookDelivery<K extends string = string> {\n    readonly kind: K;\n    readonly source: WebhookSourceId;\n    readonly deliveryId: WebhookDeliveryId;\n    readonly event: WebhookEventOf<K>;\n    readonly receivedAt: number;\n}',
   },
   {
     name: 'VoiceCapabilities',
@@ -6048,6 +6615,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'VoiceProviderDescriptor',
     declaration: 'export interface VoiceProviderDescriptor {\n    readonly id: string;\n    readonly name: string;\n    readonly platforms: readonly VoicePlatform[];\n    readonly operations: readonly VoiceOperation[];\n    readonly locality: \'device\';\n    readonly streaming: boolean;\n    readonly interruptible: boolean;\n    readonly quality: \'standard\' | \'enhanced\' | \'premium\';\n}',
+  },
+  {
+    name: 'WebBootBatch',
+    declaration: 'export interface WebBootBatch {\n    phase: WebBootBatchPhase;\n    url: string;\n    rev: string;\n    entries: string[];\n}',
+  },
+  {
+    name: 'WebBootBatchPhase',
+    declaration: 'export type WebBootBatchPhase = \'bootstrap\' | \'application\';',
   },
   {
     name: 'WebBootEntry',
@@ -6244,6 +6819,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceInsertSessionBeforeRequest',
     declaration: 'export interface WorkspaceInsertSessionBeforeRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly beforeSessionId?: SessionId;\n}',
+  },
+  {
+    name: 'WorkspaceListValue',
+    declaration: 'export type WorkspaceListValue = WorkspaceBaseline;',
   },
   {
     name: 'WorkspaceOrderValue',

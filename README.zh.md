@@ -50,9 +50,13 @@ OpenAI 目前已经公开 Codex Harness，并把 `exec`、SDK 与 app-server 作
 - **托管隔离，而非启动器菜单。** OpenFish 按 Harness 管理精确版本、认证配置、运行时状态、更新、回滚、取消与卸载；Registry 可发现性绝不会显示成安全背书。
 - **Mac 与 iPhone 共享一个权威状态。** 手机通过 LAN 或 Tailscale 配对到 Mac Host，共用会话日志、审批、队列与任务状态。
 - **任务固定 Harness 版本。** 已有任务继续使用创建时的 Pack；新任务可以选更新版本。
-- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，需要时再检查带证据的架构与实际观测到的 Runtime 活动；Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不发送模型提示词的实时预检，并交换不含凭证的 Manifest。预检仍可能创建 Provider 自己的会话状态或产生其定义的初始化成本；无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
+- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，再检查带证据的架构，并沿着 Pack 明确声明为可观测的节点与连接查看有界、有序、无内容的真实执行轨迹；点选组件即可只看实际经过它的步骤。Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不发送模型提示词的实时预检，并交换不含凭证的 Manifest。预检仍可能创建 Provider 自己的会话状态或产生其定义的初始化成本；无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
 
 ![使用合成 DSH、Oh My Pi 与 Codex 条目的 OpenFish 默认 Harness 选择器](docs/assets/openfish-harness-picker-demo.png)
+
+![OpenFish Harness Lens 展示 Codex Architecture Manifest 与有序、无内容的运行轨迹](docs/assets/openfish-harness-runtime-demo.png)
+
+Harness Lens 图片由生产 SwiftUI 界面在网络隔离的 Demo State 中渲染。Codex 架构来自已经准入的 Pack，17 条 Runtime Observation 则是确定性的合成信号；轨迹中不含 Prompt、Output、Command、Path、Account 或 Credential。
 
 ## 实际运行关系
 

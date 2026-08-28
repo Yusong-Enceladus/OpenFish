@@ -6,6 +6,27 @@ private struct MobileOpenFishDemoHarnessCatalog: Decodable {
     let items: [MobileHarness]
 }
 
+private struct MobileOpenFishDemoRuntimeStep {
+    let kind: String
+    let id: String
+    let from: String?
+    let to: String?
+    let status: String
+    let activity: String
+    let signal: String
+
+    static func node(_ id: String, _ status: String, _ activity: String, _ signal: String) -> Self {
+        Self(kind: "node", id: id, from: nil, to: nil, status: status, activity: activity, signal: signal)
+    }
+
+    static func edge(_ from: String, _ to: String, _ status: String, _ activity: String, _ signal: String) -> Self {
+        Self(
+            kind: "edge", id: from + "\u{0}\u{0}" + to + "\u{0}", from: from, to: to,
+            status: status, activity: activity, signal: signal
+        )
+    }
+}
+
 private func isOpenFishCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     if let apiError = error as? MobileApiError {
@@ -312,7 +333,10 @@ final class MobileOpenCodexStore: ObservableObject {
             ),
         ]
         store.projections = [
-            "session-sync": ["title": .string("Design the offline sync flow")],
+            "session-sync": [
+                "title": .string("Design the offline sync flow"),
+                "harnessRuntime": Self.visualHarnessRuntimeProjection(now: now),
+            ],
             "session-export": ["title": .string("Add export progress")],
             "session-accessibility": ["title": .string("Review accessibility labels")],
         ]
@@ -349,11 +373,83 @@ final class MobileOpenCodexStore: ObservableObject {
         store.harnesses = Self.generatedVisualHarnesses().filter { $0.id == "codex" }
         store.selectedHarnessId = "codex"
         store.selectedWorkspaceId = workspace.workspaceId
+        store.selectedSessionId = "session-sync"
         store.connectionState = .connected
         store.hasLiveBaseline = true
         store.booted = true
         store.isDemoMode = true
         return store
+    }
+
+    /// Content-free, deterministic evidence used only by the isolated demo
+    /// transport. It mirrors the order emitted by the real Codex Driver while
+    /// deliberately containing no prompt, output, path, command, or identity.
+    private static func visualHarnessRuntimeProjection(now: Double) -> MobileJSONValue {
+        let steps: [MobileOpenFishDemoRuntimeStep] = [
+            .node("app-server", "completed", "Protocol boundary ready", "protocol.ready"),
+            .node("thread", "waiting", "Session ready", "session.ready"),
+            .edge("app-server", "thread", "waiting", "Session ready", "session.ready"),
+            .node("thread", "active", "Turn started", "turn.started"),
+            .edge("thread", "context", "active", "Turn started", "turn.started"),
+            .edge("context", "model", "active", "Turn started", "turn.started"),
+            .node("tools", "active", "Tool activity observed", "tool.activity"),
+            .edge("model", "tools", "active", "Tool activity observed", "tool.activity"),
+            .edge("tools", "output", "active", "Tool activity observed", "tool.activity"),
+            .node("approvals", "active", "Approval requested", "approval.requested"),
+            .edge("tools", "approvals", "active", "Approval requested", "approval.requested"),
+            .node("approvals", "completed", "Approval resolved", "approval.resolved"),
+            .node("model", "completed", "Model response completed", "model.completed"),
+            .edge("model", "output", "completed", "Model response completed", "model.completed"),
+            .node("output", "active", "Output activity observed", "output.activity"),
+            .edge("model", "output", "active", "Output activity observed", "output.activity"),
+            .node("thread", "waiting", "Turn completed", "turn.completed"),
+        ]
+        var nodes: [String: MobileJSONValue] = [:]
+        var edges: [String: MobileJSONValue] = [:]
+        var observations: [MobileJSONValue] = []
+        for (offset, step) in steps.enumerated() {
+            let seq = 20 + offset
+            let time = now - Double(steps.count - offset) * 420
+            var value: [String: MobileJSONValue] = [
+                "kind": .string(step.kind),
+                "id": .string(step.id),
+                "status": .string(step.status),
+                "activity": .string(step.activity),
+                "signal": .string(step.signal),
+                "seq": .number(Double(seq)),
+                "time": .number(time),
+            ]
+            if let from = step.from { value["from"] = .string(from) }
+            if let to = step.to { value["to"] = .string(to) }
+            observations.append(.object(value))
+            let state: MobileJSONValue = .object([
+                "status": .string(step.status),
+                "activity": .string(step.activity),
+                "signal": .string(step.signal),
+                "seq": .number(Double(seq)),
+                "time": .number(time),
+            ])
+            if step.kind == "node" {
+                nodes[step.id] = state
+            } else if let from = step.from, let to = step.to {
+                edges[step.id] = .object([
+                    "from": .string(from),
+                    "to": .string(to),
+                    "status": .string(step.status),
+                    "activity": .string(step.activity),
+                    "signal": .string(step.signal),
+                    "seq": .number(Double(seq)),
+                    "time": .number(time),
+                ])
+            }
+        }
+        return .object([
+            "harnessId": .string("codex"),
+            "version": .string("0.150.1"),
+            "nodes": .object(nodes),
+            "edges": .object(edges),
+            "observations": .array(observations),
+        ])
     }
 
     static func visualLoadingFixture() -> MobileOpenCodexStore {

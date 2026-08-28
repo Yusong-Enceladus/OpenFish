@@ -8,7 +8,6 @@
  * before it can speak `/api`.
  */
 
-import type { VoiceCapabilities } from '@deepseek-ai/dsh-voice'
 import type { JsonValue } from '@deepseek-ai/dsh-session/types'
 import type {
   SessionControlFrame,
@@ -181,6 +180,42 @@ export interface NativeImportValue {
   readonly items: readonly NativeImportItem[]
 }
 
+/** Audio operation implemented by a device-local native voice Provider. */
+export type NativeVoiceOperation = 'speech-to-text' | 'text-to-speech'
+
+/** Presentation platform on which a native voice Provider can execute. */
+export type NativeVoicePlatform = 'macos' | 'iphone' | 'web'
+
+/** JSON-only device-local voice Provider facts sent during native bootstrap. */
+export interface NativeVoiceProviderDescriptor {
+  /** Stable implementation identity understood by the platform adapter. */
+  readonly id: string
+  /** User-facing provider name. */
+  readonly name: string
+  /** Presentation platforms that can execute this Provider. */
+  readonly platforms: readonly NativeVoicePlatform[]
+  /** Audio operations implemented by this Provider. */
+  readonly operations: readonly NativeVoiceOperation[]
+  /** Audio never leaves the presentation device. */
+  readonly locality: 'device'
+  /** Partial STT or progressive TTS is supported. */
+  readonly streaming: boolean
+  /** Playback or listening may be interrupted without restarting DSH. */
+  readonly interruptible: boolean
+  /** Provider quality tier used by the native selection UI. */
+  readonly quality: 'standard' | 'enhanced' | 'premium'
+}
+
+/** Portable voice contract projected into the self-contained native protocol. */
+export interface NativeVoiceCapabilities {
+  /** Versioned voice capability contract. */
+  readonly contract: 'dsh.voice.v1'
+  /** Completed transcripts enter the ordinary session prompt boundary. */
+  readonly transcriptAuthority: 'session.prompt'
+  /** Device-local Providers currently available to native clients. */
+  readonly providers: readonly NativeVoiceProviderDescriptor[]
+}
+
 /** Static surface facts reported by `/x-native/v2/capabilities`. */
 export interface NativeCapabilities {
   product: 'opencodex'
@@ -223,7 +258,7 @@ export interface NativeCapabilities {
     sandbox: boolean
   }
   /** DSH-owned provider vocabulary consumed by platform adapters. */
-  voice?: VoiceCapabilities
+  voice?: NativeVoiceCapabilities
   /** Native-device identity registration. */
   pairing: {
     supported: boolean
@@ -301,6 +336,11 @@ export interface RevokeDeviceRequest {
 /**
  * Extract the public method shape from a Typert invocation descriptor without
  * importing the typert packages (the x-native bundle stays dependency-light).
+ */
+/**
+ * Normalize one Typert method descriptor into the bounded native wire form.
+ * @param value - Untrusted descriptor projected by the live Typert catalog.
+ * @returns The admitted native method, or `undefined` for an invalid descriptor.
  */
 export function toNativeMethod(value: unknown): NativeMethod | undefined {
   if (typeof value !== 'object' || value === null) return undefined

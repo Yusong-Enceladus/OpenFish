@@ -615,11 +615,11 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<{ meta: SessionH
 
 /**
  * Read all visible Session rows without resuming an Agent.
- * @param _request - reserved empty list request.
+ * @param request - reserved list request carrying an optional future cursor.
  * @param signal - cancellation for persistence reads.
  * @returns visible Session summaries ordered by activity.
  */
-@Remote('list') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>
+@Remote('list') async list(request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>
 
 /**
  * Search visible Session content without resuming an Agent.
@@ -632,16 +632,41 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<{ meta: SessionH
 /**
  * Create or idempotently adopt one ordinary Session.
  * @param request - requested identity, location, and Agent preset.
+ * @param signal - cancellation for preparation and Harness startup.
  * @returns the Session identity and resolved preset when configured.
  */
-@Remote('create') create(request: SessionCreateRequest): Promise<SessionCreateValue>
+@Remote('create') create(request: SessionCreateRequest, signal: AbortSignal): Promise<SessionCreateValue>
+
+/**
+ * Remove a never-started draft, including its provider thread and managed No Project directory.
+ * @param request - Draft Session identity.
+ * @returns Confirmation that the draft was discarded.
+ */
+@Remote('discard') discard(request: SessionDiscardRequest): Promise<SessionDiscardValue>
+
+/**
+ * Read model, reasoning, account, and Harness configuration from the exact live task runtime.
+ * @param request - Exact Session identity.
+ * @param signal - Cancellation for runtime discovery.
+ * @returns The task-local model and Harness configuration directory.
+ */
+@Remote('models') models(request: SessionModelsRequest, signal: AbortSignal): Promise<SessionModels>
 
 /**
  * Select one Session-local model after explicitly resuming the Session.
  * @param request - Session identity and requested model selection.
+ * @param signal - cancellation for live Harness or provider selection.
  * @returns the normalized selection installed for the Session.
  */
-@Remote('selectModel') selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue>
+@Remote('selectModel') selectModel(request: SessionSelectModelRequest, signal: AbortSignal): Promise<SessionSelectModelValue>
+
+/**
+ * Apply one configuration option advertised by this task's live Harness.
+ * @param request - Session, option, and requested value.
+ * @param signal - Cancellation for the live Harness mutation.
+ * @returns The refreshed Harness configuration directory.
+ */
+@Remote('setHarnessConfig') setHarnessConfig( request: SessionSetHarnessConfigRequest, signal: AbortSignal, ): Promise<SessionSetHarnessConfigValue>
 
 /**
  * Describe every currently routable model for Host-generation selectors.

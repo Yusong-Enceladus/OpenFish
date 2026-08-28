@@ -1,9 +1,28 @@
-# OpenCodex native bootstrap bundle
+---
+description: "Native OpenFish bootstrap, authenticated device pairing, capability negotiation, and canonical task transport."
+kind: "package-bundle"
+---
+
+# OpenFish native bootstrap bundle
 
 English | [中文](README.zh.md)
 
-DSH plugin for the small protocol a native OpenCodex client needs before it joins the ordinary DSH API. It owns discovery, capability negotiation, the live method manifest, and native-device identity. Business RPC remains on the existing DSH `/api` gateway; this bundle does not duplicate session, workspace, agent, tool, approval, settings, or voice-domain operations.
+## Summary
 
+DSH plugin for the small protocol a native OpenFish client needs before it joins the ordinary DSH API. It owns discovery, capability negotiation, the live method manifest, and native-device identity. Business RPC remains on the existing DSH `/api` gateway; this bundle does not duplicate session, workspace, agent, tool, approval, settings, or voice-domain operations.
+
+## Table of Contents
+
+- [Routes](#routes)
+- [Protocol facts](#protocol-facts)
+- [Composition](#composition)
+- [Verification](#verification)
+- [Security boundary](#security-boundary)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+<a id="routes"></a>
 ## Routes
 
 | Method | Path | Purpose |
@@ -17,6 +36,7 @@ DSH plugin for the small protocol a native OpenCodex client needs before it join
 | POST | `/x-native/v2/revoke` | revoke a device token on the Host |
 | POST | `/x-native/v2/self/revoke` | revoke only the authenticated calling device |
 
+<a id="protocol-facts"></a>
 ## Protocol facts
 
 - `protocolVersion: v2` and `minimumClientProtocol: v2` come from the composed bootstrap contract. Current native clients reject an incompatible handshake before loading business state.
@@ -25,9 +45,10 @@ DSH plugin for the small protocol a native OpenCodex client needs before it join
 - Pairing records are stored under `$DSH_HOME/x-native/devices.json` (override with `config.dataDir`). Tokens are persisted as SHA-256 digests; the secret is returned exactly once at pairing time.
 - A local client may pair directly. A remote client must redeem a ten-minute, single-use code created on the Host through TLS code proof: the HMAC is keyed by the out-of-band code itself and bound to the Host certificate fingerprint, so the public code id sent on the bootstrap connection cannot manufacture a valid proof. The resulting bearer is accepted by the ordinary DSH HTTP and WebSocket trust boundary; device listing, code creation, and revocation of other devices remain Host-local, while a paired device may revoke only itself.
 - LAN and Tailscale use the same authenticated DSH carrier. Relay remains a replaceable transport plugin and is reported only when mounted.
-- The image-generation capability flag describes the mounted provider registry. OpenCodex intentionally ships no image model.
+- The image-generation capability flag describes the mounted provider registry. OpenFish intentionally ships no image model.
 - A native task created without a Workspace uses its own `$DSH_HOME/openfish/sessions/no-workspace/<session-id>` cwd; it never inherits the folder that launched the Host process or shares another No Project task's files.
 
+<a id="composition"></a>
 ## Composition
 
 The bundle must be mounted in a web/native host profile:
@@ -43,6 +64,7 @@ The bundle must be mounted in a web/native host profile:
 
 It does not belong in headless and does not modify the anchored agent preset.
 
+<a id="verification"></a>
 ## Verification
 
 ```sh
@@ -52,6 +74,7 @@ DSH_HOME=<profile home> dsh --profile x-native-dev --host 127.0.0.1 --port 3180
 curl http://127.0.0.1:3180/x-native/v2/capabilities
 ```
 
+<a id="security-boundary"></a>
 ## Security boundary
 
 - Pairing codes live only in Host memory, expire after ten minutes, and are consumed before device registration begins. The raw code never crosses the bootstrap request and never reaches disk.
@@ -60,6 +83,7 @@ curl http://127.0.0.1:3180/x-native/v2/capabilities
 - A bearer authorizes the ordinary non-privileged DSH API. Configuration and credential methods retain the Host connection layer's stricter loopback-only policy.
 - The registry currently has deployment-wide authorization rather than per-device ACLs. Relay behavior belongs to the selected relay plugin, not this bundle.
 
+<a id="model-experience"></a>
 ## Model Experience
 
 None, as this bootstrap-only bundle registers no model-facing prompts, tools, schemas, or results.
@@ -70,6 +94,18 @@ None; bootstrap metadata never enters the model request prefix.
 
 ## Known Limitations and Deferred Work
 
+<a id="known-limitations-and-deferred-work"></a>
+
 - Authorization is deployment-wide rather than scoped per device, workspace, or session.
 - Relay transport is intentionally deferred to a replaceable DSH transport plugin.
-- Migration/import capability is advertised only when the composed rc.8 Host exposes it; it is not a native bootstrap responsibility.
+- Migration/import capability is advertised only when the composed Host exposes it; it is not a native bootstrap responsibility.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>

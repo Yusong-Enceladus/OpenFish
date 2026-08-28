@@ -78,6 +78,8 @@ function toolProjection(update: JsonRecord, sessionUpdate: 'tool_call' | 'tool_c
  * Keep only ACP updates needed to reconstruct OpenFish-owned UI. Streamed
  * model text/thoughts and media are projected into canonical assistant events
  * elsewhere and must never be duplicated as opaque provider state.
+ * @param update - One live ACP Session notification update.
+ * @returns The bounded durable projection, or `undefined` for live-only data.
  */
 export function durableAcpSessionUpdate(update: SessionNotification['update']): unknown | undefined {
   switch (update.sessionUpdate) {
@@ -114,6 +116,9 @@ const DURABLE_CODEX_ITEM_FIELDS = [
  * Project the official Codex app-server notification stream into the minimum
  * durable facts used by OpenFish. Unknown notifications and model text deltas
  * remain live-only. Authentication/account payloads are never copied.
+ * @param method - Official app-server notification method.
+ * @param params - Untrusted notification parameters.
+ * @returns The bounded durable projection, or `undefined` for live-only data.
  */
 export function durableCodexNotification(method: string, params: Readonly<JsonRecord>): unknown | undefined {
   if (method === 'turn/completed') {

@@ -526,10 +526,25 @@ struct HarnessRuntimeProjection: Codable, Equatable, Sendable {
         let seq: Int
         let time: Double
     }
+    struct Observation: Codable, Equatable, Sendable, Identifiable {
+        let kind: String
+        let id: String
+        var from: String? = nil
+        var to: String? = nil
+        var fromPort: String? = nil
+        var toPort: String? = nil
+        let status: String
+        let activity: String
+        var signal: String? = nil
+        let seq: Int
+        let time: Double
+        var stableID: String { "\(seq):\(kind):\(id)" }
+    }
     var harnessId: String? = nil
     var version: String? = nil
     let nodes: [String: Node]
     var edges: [String: Edge]? = nil
+    var observations: [Observation]? = nil
 }
 
 struct SkillEntry: Decodable, Identifiable, Equatable, Sendable {

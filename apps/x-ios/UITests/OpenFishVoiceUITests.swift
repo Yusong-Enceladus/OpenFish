@@ -150,6 +150,34 @@ final class OpenFishVoiceUITests: XCTestCase {
     }
 
     @MainActor
+    func testCurrentHarnessShowsAContentFreeOrderedRuntimeTrace() throws {
+        let app = launchDemo()
+        let currentHarness = app.buttons["OpenFish.iOS.CurrentHarness"]
+        XCTAssertTrue(currentHarness.waitForExistence(timeout: 10))
+        currentHarness.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["OpenFish.iOS.HarnessDetail"].waitForExistence(timeout: 5)
+        )
+
+        let runtime = app.buttons["Live"]
+        XCTAssertTrue(runtime.waitForExistence(timeout: 5))
+        runtime.tap()
+
+        let retained = app.staticTexts["Content-free · newest last · 17 retained"]
+        XCTAssertTrue(retained.waitForExistence(timeout: 5))
+        for _ in 0..<5 where !retained.isHittable { app.swipeUp() }
+        if app.buttons["Show all"].exists {
+            app.buttons["Show all"].tap()
+        }
+
+        let first = app.descendants(matching: .any)["OpenFish.iOS.HarnessTrace.20"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        let last = app.descendants(matching: .any)["OpenFish.iOS.HarnessTrace.36"]
+        for _ in 0..<10 where !last.exists { app.swipeUp() }
+        XCTAssertTrue(last.exists)
+    }
+
+    @MainActor
     func testApprovalAndStructuredQuestionCompleteOnDevice() throws {
         let app = launchDemo(state: "interactions")
         let task = app.staticTexts["Design the offline sync flow"]

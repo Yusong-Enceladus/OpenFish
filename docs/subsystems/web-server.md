@@ -35,6 +35,14 @@ interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Optional TLS-only all-interfaces listener for native remote clients. */
+  remoteTlsHost?: '' | '0.0.0.0'
+  /** Remote TLS port; zero requests an OS-assigned port. */
+  remoteTlsPort?: number
+  /** PEM certificate path for the remote TLS listener. */
+  remoteTlsCertificatePath?: string
+  /** PEM private-key path for the remote TLS listener. */
+  remoteTlsPrivateKeyPath?: string
   /** Response compression for socket-backed HTTP requests. @default 'none' */
   compression?: 'none' | 'gzip'
   /** Gzip DEFLATE level from 0 through 9. @default 1 */
@@ -44,7 +52,7 @@ interface Config {
 }
 ```
 
-`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure). The carrier itself owns no TLS, authentication, or Origin policy, so a non-loopback bind exposes the server unless the composition supplies those controls. `compression` defaults to `none`; the shipped Web bundle selects gzip level 1 with a 1024-byte threshold. The shipped `dsh web` command selects loopback and rejects `--host 0.0.0.0`; its Connection plugin supplies Host/Origin checks plus browser-session authentication for every Host API route and stream. Other compositions own their bind and route-authentication policy. The dist location is an assembly fact of the frontend plugin that claims the seat.
+`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate plaintext network exposure). The optional `remoteTls*` fields add a separate TLS-only all-interfaces listener for native clients; route owners still supply authentication and Origin policy. `compression` defaults to `none`; the shipped Web bundle selects gzip level 1 with a 1024-byte threshold. The shipped `dsh web` command selects loopback and rejects `--host 0.0.0.0`; its Connection plugin supplies Host/Origin checks plus browser-session authentication for every Host API route and stream. Other compositions own their bind, certificates, and route-authentication policy. The dist location is an assembly fact of the frontend plugin that claims the seat.
 
 ## The service
 
@@ -128,6 +136,104 @@ renderIndex(html: string): string
 ```
 
 Source: [`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)
+
+<a id="ctxxnative--xnative"></a>
+
+### `ctx.xNative` — `XNative`
+
+DSH-owned bootstrap service used before a native client joins the ordinary API.
+
+```ts cordis-catalog
+/**
+ * Return the minimal liveness and protocol-negotiation handshake.
+ * @returns Stable OpenCodex product and DSH runtime facts.
+ */
+handshake(): NativeHandshake
+
+/**
+ * Read mounted package names for composition capability detection.
+ * @returns A fresh set of mounted Loader package names.
+ */
+mountedPackages(): Set<string>
+
+/**
+ * Describe the live DSH composition and the ordinary API a native client should join.
+ * @returns Current bootstrap capability facts.
+ */
+capabilities(): NativeCapabilities
+
+/**
+ * Read the live `/api` method manifest without taking ownership of those methods.
+ * @returns Methods sorted by endpoint, or an empty list when Typert is absent.
+ */
+methods(): NativeMethod[]
+
+/**
+ * Merge canonical Remote Event, Workspace, Session control, and selected-task streams.
+ * @param request - Optional selected Session and durable subagent parent proof.
+ * @param signal - Native reconnect-generation cancellation.
+ * @returns The canonical merged native event stream.
+ */
+@Remote({ mode: 'stream' }) follow(request: NativeFollowRequest, signal: AbortSignal): AsyncIterable<NativeFollowFrame>
+
+/**
+ * Read one native transcript page without restoring the removed ApiProxy transport.
+ * @param request - Session, optional parent proof, and pagination boundary.
+ * @param signal - Request cancellation.
+ * @returns One bounded native transcript page.
+ */
+@Remote('history') history(request: NativeHistoryRequest, signal: AbortSignal): Promise<NativeHistoryValue>
+
+/**
+ * Import bounded Codex or DSH archives as replayable DSH-owned tasks.
+ * @param request - Target Workspace, archive format, and in-memory files.
+ * @param signal - Import cancellation.
+ * @returns Every newly created replayable task.
+ */
+@Remote('import') import(request: NativeImportRequest, signal: AbortSignal): Promise<NativeImportValue>
+
+/**
+ * Return diagnostics without exposing the Host launch directory to paired devices.
+ * @param signal - Request cancellation for the Session/model reads.
+ * @returns Privacy-minimized Host diagnostics.
+ */
+@Remote('describe') async describe(signal: AbortSignal): Promise<NativeHostDescription>
+
+/**
+ * Register one native device through the DSH pairing store.
+ * @param request - Validated device identity supplied by the loopback route.
+ * @returns The durable device identity and its one-time bearer token.
+ */
+pair(request: PairRequest): Promise<PairResponse>
+
+/**
+ * Mint one short-lived Host-local code for an iPhone or remote Mac.
+ * @returns A single-use code and its expiry time.
+ */
+createPairingCode(): PairingCodeResponse
+
+/**
+ * Redeem a one-time code and create a durable device token.
+ * @param request - Device identity and the Host-minted single-use code.
+ * @returns The registered device identity and its one-time bearer token.
+ */
+redeem(request: PairRequest & { code: string }): Promise<PairResponse>
+
+/**
+ * List non-secret views of registered native devices.
+ * @returns Current, non-expired device registrations.
+ */
+devices(): Promise<NativeDeviceView[]>
+
+/**
+ * Revoke one durable device registration and its bearer token.
+ * @param deviceId - Stable identifier of the device to revoke.
+ * @returns Whether a current registration was removed.
+ */
+revoke(deviceId: string): Promise<boolean>
+```
+
+Source: [`packages/bundle/x-native/src/index.ts`](../../packages/bundle/x-native/src/index.ts)
 
 <a id="webserver-events"></a>
 

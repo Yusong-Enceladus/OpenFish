@@ -243,6 +243,7 @@ export class SessionController extends TypertRemoteService {
   /**
    * Create or idempotently adopt one ordinary Session.
    * @param request - requested identity, location, and Agent preset.
+   * @param signal - cancellation for preparation and Harness startup.
    * @returns the Session identity and resolved preset when configured.
    */
   @Remote('create')
@@ -250,13 +251,22 @@ export class SessionController extends TypertRemoteService {
     return this.commands.create(request, signal)
   }
 
-  /** Remove a never-started draft, including its provider thread and managed No Project directory. */
+  /**
+   * Remove a never-started draft, including its provider thread and managed No Project directory.
+   * @param request - Draft Session identity.
+   * @returns Confirmation that the draft was discarded.
+   */
   @Remote('discard')
   discard(request: SessionDiscardRequest): Promise<SessionDiscardValue> {
     return this.commands.discard(request)
   }
 
-  /** Read model, reasoning, account, and Harness configuration from the exact live task runtime. */
+  /**
+   * Read model, reasoning, account, and Harness configuration from the exact live task runtime.
+   * @param request - Exact Session identity.
+   * @param signal - Cancellation for runtime discovery.
+   * @returns The task-local model and Harness configuration directory.
+   */
   @Remote('models')
   models(request: SessionModelsRequest, signal: AbortSignal): Promise<SessionModels> {
     return this.commands.models(request, signal)
@@ -265,6 +275,7 @@ export class SessionController extends TypertRemoteService {
   /**
    * Select one Session-local model after explicitly resuming the Session.
    * @param request - Session identity and requested model selection.
+   * @param signal - cancellation for live Harness or provider selection.
    * @returns the normalized selection installed for the Session.
    */
   @Remote('selectModel')
@@ -272,7 +283,12 @@ export class SessionController extends TypertRemoteService {
     return this.commands.selectModel(request, signal)
   }
 
-  /** Apply one configuration option advertised by this task's live Harness. */
+  /**
+   * Apply one configuration option advertised by this task's live Harness.
+   * @param request - Session, option, and requested value.
+   * @param signal - Cancellation for the live Harness mutation.
+   * @returns The refreshed Harness configuration directory.
+   */
   @Remote('setHarnessConfig')
   setHarnessConfig(
     request: SessionSetHarnessConfigRequest,

@@ -83,6 +83,9 @@ function diagnosticText(error: unknown, fallback: string): string {
 /**
  * Bound and redact process/Driver-owned text before it reaches logs, durable
  * session events, Remote failures, or client UI.
+ * @param error - Untrusted thrown value or process diagnostic.
+ * @param fallback - Safe replacement when no useful message survives.
+ * @returns A bounded, single-line, secret-redacted diagnostic.
  */
 export function safeHarnessDiagnostic(error: unknown, fallback = 'Harness operation failed'): string {
   const bounded = boundedCodePoints(diagnosticText(error, fallback), MAX_INPUT_CODE_POINTS)
@@ -144,6 +147,8 @@ function safeEventValue(value: unknown, state: EventSanitizerState, depth: numbe
  * Convert an untrusted Harness/provider payload into bounded, JSON-compatible,
  * secret-redacted durable state. Callers must still whitelist the fields and
  * event kinds they actually need; this is the final persistence guard.
+ * @param value - Untrusted Harness or provider payload.
+ * @returns A bounded JSON-compatible projection.
  */
 export function safeHarnessEventValue(value: unknown): unknown {
   return safeEventValue(value, {

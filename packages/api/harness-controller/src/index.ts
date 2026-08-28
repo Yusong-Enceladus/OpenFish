@@ -37,7 +37,11 @@ export class HarnessController extends TypertRemoteService {
     super(ctx, 'harnessController', { namespace: 'harness' })
   }
 
-  /** List locally known built-ins, registry entries, community Packs, and user Packs. */
+  /**
+   * List locally known built-ins, registry entries, community Packs, and user Packs.
+   * @param request - Optional bounded catalog query.
+   * @returns Matching Harness catalog entries.
+   */
   @Remote('list')
   async list(request: HarnessListRequest): Promise<HarnessListValue> {
     try {
@@ -52,7 +56,11 @@ export class HarnessController extends TypertRemoteService {
     }
   }
 
-  /** Resolve the exact version and authentication identity recorded by a task. */
+  /**
+   * Resolve the exact version and authentication identity recorded by a task.
+   * @param request - Pinned Harness identity recorded by the task.
+   * @returns The exact resolved Harness catalog entry.
+   */
   @Remote('resolve')
   async resolve(request: HarnessResolveRequest): Promise<HarnessResolveValue> {
     try {
@@ -68,7 +76,11 @@ export class HarnessController extends TypertRemoteService {
     }
   }
 
-  /** Refresh public catalogs without hiding the deterministic bundled baseline. */
+  /**
+   * Refresh public catalogs without hiding the deterministic bundled baseline.
+   * @param signal - Cancellation for the catalog refresh.
+   * @returns The complete catalog after refresh.
+   */
   @Remote('refresh')
   async refresh(signal: AbortSignal): Promise<HarnessListValue> {
     try {
@@ -82,7 +94,12 @@ export class HarnessController extends TypertRemoteService {
     }
   }
 
-  /** Run lifecycle operations that never accept third-party-code consent remotely. */
+  /**
+   * Run lifecycle operations that never accept third-party-code consent remotely.
+   * @param request - Requested lifecycle or selection mutation.
+   * @param signal - Cancellation for process-owning lifecycle work.
+   * @returns The complete catalog after mutation.
+   */
   @Remote('mutate')
   async mutate(request: HarnessMutationRequest, signal: AbortSignal): Promise<HarnessListValue> {
     try {
@@ -131,6 +148,9 @@ export class HarnessController extends TypertRemoteService {
   /**
    * Run Mac-authorized executable-code and Pack-authoring operations.
    * The carrier enforces Host-local authority before dispatching this method.
+   * @param request - Host-authorized management or authoring operation.
+   * @param signal - Cancellation for installation, probing, or publication work.
+   * @returns The complete catalog after management.
    */
   @Remote('manage')
   async manage(request: HarnessManageRequest, signal: AbortSignal): Promise<HarnessListValue> {

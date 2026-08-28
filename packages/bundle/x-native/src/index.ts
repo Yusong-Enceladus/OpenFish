@@ -41,6 +41,7 @@ import {
   type NativeHostDescription,
   type NativeImportRequest,
   type NativeImportValue,
+  type NativeVoiceProviderDescriptor,
   type PairingCodeResponse,
   type PairRequest,
   type PairResponse,
@@ -516,7 +517,7 @@ export class XNative extends TypertRemoteService {
     const voiceCapabilities = voice?.describe()
     const endpoints = new Set(this.methods().map(method => method.endpoint))
     const hasEndpoints = (...required: string[]): boolean => required.every(endpoint => endpoints.has(endpoint))
-    const hasLocalVoice = voiceCapabilities?.providers.some(provider =>
+    const hasLocalVoice = voiceCapabilities?.providers.some((provider: NativeVoiceProviderDescriptor) =>
       provider.operations.includes('speech-to-text')
         && provider.operations.includes('text-to-speech')) === true
     return {
@@ -584,25 +585,44 @@ export class XNative extends TypertRemoteService {
       .sort((left, right) => left.endpoint.localeCompare(right.endpoint))
   }
 
-  /** Merge canonical Remote Event, Workspace, Session control, and selected-task streams. */
+  /**
+   * Merge canonical Remote Event, Workspace, Session control, and selected-task streams.
+   * @param request - Optional selected Session and durable subagent parent proof.
+   * @param signal - Native reconnect-generation cancellation.
+   * @returns The canonical merged native event stream.
+   */
   @Remote({ mode: 'stream' })
   follow(request: NativeFollowRequest, signal: AbortSignal): AsyncIterable<NativeFollowFrame> {
     return followNativeContracts(this.ctx, request, signal)
   }
 
-  /** Read one native transcript page without restoring the removed ApiProxy transport. */
+  /**
+   * Read one native transcript page without restoring the removed ApiProxy transport.
+   * @param request - Session, optional parent proof, and pagination boundary.
+   * @param signal - Request cancellation.
+   * @returns One bounded native transcript page.
+   */
   @Remote('history')
   history(request: NativeHistoryRequest, signal: AbortSignal): Promise<NativeHistoryValue> {
     return nativeHistory(this.ctx, request, signal)
   }
 
-  /** Import bounded Codex or DSH archives as replayable DSH-owned tasks. */
+  /**
+   * Import bounded Codex or DSH archives as replayable DSH-owned tasks.
+   * @param request - Target Workspace, archive format, and in-memory files.
+   * @param signal - Import cancellation.
+   * @returns Every newly created replayable task.
+   */
   @Remote('import')
   import(request: NativeImportRequest, signal: AbortSignal): Promise<NativeImportValue> {
     return importNativeSessions(this.ctx, request, signal)
   }
 
-  /** Return diagnostics without exposing the Host launch directory to paired devices. */
+  /**
+   * Return diagnostics without exposing the Host launch directory to paired devices.
+   * @param signal - Request cancellation for the Session/model reads.
+   * @returns Privacy-minimized Host diagnostics.
+   */
   @Remote('describe')
   async describe(signal: AbortSignal): Promise<NativeHostDescription> {
     const [sessions, catalog] = await Promise.all([

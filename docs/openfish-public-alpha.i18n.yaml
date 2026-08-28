@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/openfish-public-alpha.md
-openfish-public-alpha.md: 4a3032b2797ed181d9a56aef071f5e1afe579c14
-openfish-public-alpha.zh.md: 582c29721135369f579f22e9f135383846235402
+openfish-public-alpha.md: a8e765897cba1145b14a1d266b1dd9f0a7fce9c2
+openfish-public-alpha.zh.md: 60c87de41799ff960d3606af385c4e81f7cc4f63

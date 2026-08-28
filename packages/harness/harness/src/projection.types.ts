@@ -31,6 +31,26 @@ export interface HarnessRuntimeProjection {
     seq: number
     time: number
   }>
+  /**
+   * Bounded, content-free execution order for the current task. Unlike the
+   * node/edge maps above, this preserves repeated visits through loops and
+   * branches so a client can explain what actually happened instead of only
+   * showing the last light on each component.
+   */
+  observations: Array<{
+    kind: 'node' | 'edge'
+    /** Node id or the stable, content-free edge key. */
+    id: string
+    from?: string
+    to?: string
+    fromPort?: string
+    toPort?: string
+    status: 'active' | 'waiting' | 'completed' | 'failed'
+    activity: string
+    signal?: string
+    seq: number
+    time: number
+  }>
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {

@@ -335,6 +335,7 @@ export interface SessionDiscardRequest {
   readonly sessionId: SessionId
 }
 
+/** Confirmation that a never-started draft was permanently discarded. */
 export interface SessionDiscardValue {
   readonly discarded: true
 }
@@ -351,6 +352,7 @@ export interface SessionSetHarnessConfigRequest {
   readonly value: string | boolean
 }
 
+/** Refreshed task-local Harness configuration after one accepted mutation. */
 export interface SessionSetHarnessConfigValue {
   readonly options: readonly HarnessConfigOption[]
 }

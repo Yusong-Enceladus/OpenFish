@@ -50,9 +50,13 @@ See OpenAI's [open Harness platform description](https://learn.chatgpt.com/blog/
 - **Managed isolation, not a launcher menu.** Exact versions, authentication profiles, runtime state, updates, rollback, cancellation, and uninstall are owned per Harness; Registry discovery is never presented as a security endorsement.
 - **Mac and iPhone share one authority.** The phone pairs to the Mac Host over LAN or Tailscale and follows the same session log, approvals, queue, and task state.
 - **Version-pinned tasks.** A task remains attached to the Harness Pack version that created it, while new tasks can use an updated version.
-- **Progressive Harness Lens.** Start with a plain-language summary, inspect an evidence-backed architecture and observed runtime activity when needed, then use Manifest Editor on the Mac to create or edit declared composable nodes, run a prompt-free live preflight, and exchange credential-free manifests. A preflight may still create provider-owned session state or incur provider-specific setup cost; unknown private internals stay visibly opaque instead of becoming invented diagrams.
+- **Progressive Harness Lens.** Start with a plain-language summary, inspect an evidence-backed architecture, then follow a bounded, ordered, content-free execution trace through only the nodes and connections that the Pack declares observable. Selecting a component filters the trace to the steps that actually touched it. Manifest Editor on the Mac can create or edit declared composable nodes, run a prompt-free live preflight, and exchange credential-free manifests. A preflight may still create provider-owned session state or incur provider-specific setup cost; unknown private internals stay visibly opaque instead of becoming invented diagrams.
 
 ![OpenFish default Harness picker with synthetic DSH, Oh My Pi, and Codex entries](docs/assets/openfish-harness-picker-demo.png)
+
+![OpenFish Harness Lens showing the Codex Architecture Manifest and an ordered content-free runtime trace](docs/assets/openfish-harness-runtime-demo.png)
+
+The Harness Lens image is rendered by the production SwiftUI view in network-isolated Demo State. Its Codex architecture follows the admitted Pack, while the 17 runtime observations are deterministic synthetic signals; no prompt, output, command, path, account, or credential appears in the trace.
 
 ## What actually runs
 

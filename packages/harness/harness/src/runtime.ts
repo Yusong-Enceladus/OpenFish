@@ -63,7 +63,15 @@ export function harnessRuntimeEdgeKey(edge: Pick<HarnessPack['graph']['edges'][n
   return [edge.from, edge.fromPort ?? '', edge.to, edge.toPort ?? ''].join('\u0000')
 }
 
-function runtimeSignalActivity(signal: HarnessRuntimeSignal): string {
+/**
+ * Convert an admitted runtime signal to a fixed, content-free UI label.
+ *
+ * Projection replay calls this again instead of trusting the historical
+ * activity field, because pre-binding builds could persist caller text.
+ * @param signal - Pack-owned signal identifier, or no signal for a legacy event.
+ * @returns A bounded label that never includes caller-supplied activity text.
+ */
+export function runtimeSignalActivity(signal: HarnessRuntimeSignal | undefined): string {
   switch (signal) {
     case 'protocol.ready': return 'Protocol boundary ready'
     case 'session.ready': return 'Session ready'
@@ -75,6 +83,7 @@ function runtimeSignalActivity(signal: HarnessRuntimeSignal): string {
     case 'output.activity': return 'Output activity observed'
     case 'approval.requested': return 'Approval requested'
     case 'approval.resolved': return 'Approval resolved'
+    case undefined: return 'Legacy runtime activity observed'
     default: return `Driver signal: ${signal.slice(signal.lastIndexOf('.') + 1).replaceAll('-', ' ').replaceAll('_', ' ')}`
   }
 }

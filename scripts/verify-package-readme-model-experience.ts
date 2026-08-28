@@ -43,6 +43,7 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  * blocks. A package moves on or off this list with its context behavior.
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
+  'packages/api/harness-controller': { kind: 'none', reason: 'Harness catalog, lifecycle, authentication, and publication control-plane state never enters model context.' },
   'packages/bundle/x-native': { kind: 'none', reason: 'Bootstrap discovery, pairing, and authentication metadata never enters model context.' },
   'packages/voice/voice': { kind: 'none', reason: 'The Provider registry changes device presentation only; finalized text enters as an ordinary user prompt.' },
   'packages/voice/voice-apple': { kind: 'none', reason: 'The Apple Provider declaration changes device presentation only and registers no model context.' },

@@ -1,6 +1,28 @@
-# `@deepseek-ai/dsh-harness`
+---
+description: "版本化的 OpenFish Harness Pack 目录、生命周期、Driver 注册表、架构 Manifest 与安全运行投影契约。"
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-harness
 
 [English](README.md) | 中文
+
+## 概述
+
+`dsh-harness` 是产品控制面，让同一个 OpenFish 壳子可以发现、安装、配置、固定版本、解释并运行可互换的 coding agent Harness，而且不会把所有后端都当成具有相同私有内部结构。
+
+## 目录
+
+- [使用该包](#use-this-package)
+- [扩展 OpenFish](#extending-open-fish)
+- [模型体验](#model-experience)
+- [已知限制与待办事项](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## 使用该包
 
 Open Fish 使用此包作为可互换 Agent Harness 的控制平面。Harness Pack v0 声明稳定身份、协议、启动分发、发布者元数据和架构图。壳子不会猜测 Harness 的私有内部结构：图级别分为 `opaque`、`observable` 和 `composable`，只有显式标记为可编辑的节点才能变成控件。
 
@@ -12,8 +34,9 @@ Open Fish 使用此包作为可互换 Agent Harness 的控制平面。Harness Pa
 
 Pack v0 支持固定版本的 npm、Bun 和 Python／uvx 包、带校验和的平台二进制，以及由用户明确选择的现有可执行文件。二进制归档使用通用 ACP Driver 文档定义的进程内有界 ZIP／TAR 解包器；链接、设备、路径穿越、解压炸弹和写出全新受管快照的行为都会被拒绝。ACP 认证契约从已安装 Harness 动态发现：Agent／浏览器登录仍由 Harness 所有；环境凭证只进入 Open Fish 的只写凭证库，并只注入对应进程；终端登录只会在用户明确操作后启动。Registry 收录状态与 Open Fish 实际运行兼容性分开呈现。会话成功启动后记录兼容；失败则记录经过脱敏、可用于恢复的诊断。
 
-架构图是一份有证据支撑的 Architecture Manifest，而不是猜测私有内部后的装饰。`opaque` 必须只展示一个 Runtime 边界。`observable` 与 `composable` 必须写明 Harness 边界、连通自己声明的全部职责，并给每个可见组件附上 declared、source-derived 或 runtime-observed 证据。系统不设置装饰性的最少节点数：文档确实只有一个组件的 Runtime 就显示一个组件；内部结构更丰富的 Harness 则必须展示有证据的控制流，不能被压扁成一个没有解释力的厂商方框。图边标签说明跨边界传递的内容。除非实际位于该 Harness 进程内部，否则 Open Fish、操作系统与模型提供方都不是图节点。`composable` 只允许编辑 Pack 明确标为 `editable: true` 的节点。画布布局只存入展示用的 `position`，绝不会作为可执行配置交给 Driver。可编辑节点只能保存其类型化 `configSchema` 声明的有界文本、布尔值或选择值；`secret-reference` 保存 Host 凭据引用，绝不保存密钥本身。只有经所选 Driver 验证并消费的绑定才具有真实运行语义。通用 ACP Driver 会在新建会话时应用已声明的 Session Option 绑定，并拒绝目标 Harness 实时 ACP 目录中不存在的 id 或值。Manifest 准入会拒绝未知 schema 版本、非法身份、非法认证契约、未声明或无边界的节点配置、缺少非 DSH 分发信息的 Pack、缺少证据的组件、不连通或悬空的图边，以及不属于对应协议 Driver 的 Runtime Signal。原生客户端用同一套 Progressive Lens 展示 Manifest：Simple、Architecture、Runtime 与 Manifest Editor。
+架构图是一份有证据支撑的 Architecture Manifest，而不是猜测私有内部后的装饰。`opaque` 必须只展示一个 Runtime 边界。`observable` 与 `composable` 必须写明 Harness 边界、连通自己声明的全部职责，并给每个可见组件附上 declared、source-derived 或 runtime-observed 证据。系统不设置装饰性的最少节点数：文档确实只有一个组件的 Runtime 就显示一个组件；内部结构更丰富的 Harness 则必须展示有证据的控制流，不能被压扁成一个没有解释力的厂商方框。图边标签说明跨边界传递的内容。除非实际位于该 Harness 进程内部，否则 Open Fish、操作系统与模型提供方都不是图节点。Runtime Binding 只发送标准或 Driver 自有的无内容信号；持久 Projection 同时保留最新状态与有界有序轨迹，包括循环和分支的重复经过，但排除提示词、输出、路径、命令、账号数据与凭证。`composable` 只允许编辑 Pack 明确标为 `editable: true` 的节点。画布布局只存入展示用的 `position`，绝不会作为可执行配置交给 Driver。可编辑节点只能保存其类型化 `configSchema` 声明的有界文本、布尔值或选择值；`secret-reference` 保存 Host 凭据引用，绝不保存密钥本身。只有经所选 Driver 验证并消费的绑定才具有真实运行语义。通用 ACP Driver 会在新建会话时应用已声明的 Session Option 绑定，并拒绝目标 Harness 实时 ACP 目录中不存在的 id 或值。Manifest 准入会拒绝未知 schema 版本、非法身份、非法认证契约、未声明或无边界的节点配置、缺少非 DSH 分发信息的 Pack、缺少证据的组件、不连通或悬空的图边，以及不属于对应协议 Driver 的 Runtime Signal。原生客户端用同一套 Progressive Lens 展示 Manifest：Simple、Architecture、Runtime 与 Manifest Editor。
 
+<a id="extending-open-fish"></a>
 ## 扩展 Open Fish
 
 可从 [`examples/custom-acp.pack.json`](examples/custom-acp.pack.json) 开始，并使用 [`schema/harness-pack-v0.schema.json`](schema/harness-pack-v0.schema.json) 校验编辑器或工具输出。Runtime 还会进行节点／认证 ID 唯一、图边不悬空和包版本精确固定等语义检查。
@@ -46,3 +69,13 @@ Pack v0 支持固定版本的 npm、Bun 和 Python／uvx 包、带校验和的�
 - 兼容 ACP 的 Harness 共用通用 Driver。新的非 ACP 协议仍需真实的 `HarnessDriver`，但固定来源的 Pack 描述可以让 OpenFish 在不发新版 App 的情况下安装它；Schema 声明的节点配置默认不产生作用，只有对应 Driver 定义并校验绑定后才具有运行语义。
 - 社区目录收录只是发现能力，不代表安全审计或兼容保证。未验证条目需要用户明确确认、固定包版本，二进制还必须带校验和。
 - 只要仍有持久任务引用某个已安装或用户自建 Pack，系统就会阻止删除。经用户确认后，删除会清理全部 Host 所有的安装快照与该 Pack 的私有版本化 Runtime 状态，并且不会跟随被替换的符号链接；Host 凭据服务中的共享提供方凭据仍是需要单独管理的显式状态。
+
+<a id="dev-note"></a>
+### 开发备注
+
+<details>
+<summary>供维护者使用的工作上下文 — 点击展开</summary>
+
+无。
+
+</details>

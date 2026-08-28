@@ -191,6 +191,12 @@ Host service backing the generated `ctx.remote.workspace` namespace.
 
 ```ts cordis-catalog
 /**
+ * Read the complete current Workspace projection without opening a stream.
+ * @returns The current Workspace baseline and archive set.
+ */
+@Remote('list') list(): WorkspaceListValue
+
+/**
  * Create or idempotently resolve one Workspace over an existing directory.
  * @param request - directory path to register.
  * @returns the Workspace and whether this call created it.
@@ -231,6 +237,13 @@ Host service backing the generated `ctx.remote.workspace` namespace.
  * @returns the complete resulting archive set.
  */
 @Remote('archiveSession') archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue>
+
+/**
+ * Restore one known Session to ordinary Workspace grouping surfaces.
+ * @param request - Session identity to restore.
+ * @returns The complete resulting archive set.
+ */
+@Remote('unarchiveSession') unarchiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue>
 
 /**
  * Stream a complete Workspace baseline followed by ordered increments.

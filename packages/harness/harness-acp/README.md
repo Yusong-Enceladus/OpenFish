@@ -1,6 +1,27 @@
-# `@deepseek-ai/dsh-harness-acp`
+---
+description: "The generic ACP Driver and official Codex app-server Driver used by OpenFish Harness Packs."
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-harness-acp
 
 English | [中文](README.zh.md)
+
+## Summary
+
+`dsh-harness-acp` connects admitted Harness Packs to ordinary OpenFish tasks through protocol-specific Drivers, without presenting one Harness's private capabilities as portable ACP behavior.
+
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
 
 This package is the generic ACP driver behind Open Fish Harness Packs. Installation uses the bundled, pinned Node/npm or Bun runtime and places each Pack version under Open Fish managed state. Sessions launch the executable from that exact snapshot with shell-free argv, rather than resolving the network package again. The driver then projects the remote ACP session through the ordinary DSH `Agent`, `Session`, inbox, approval, cancellation, and status contracts.
 
@@ -28,3 +49,13 @@ Append-only within the remote Harness session when that Harness supports ACP loa
 - Generic ACP has no standard provider-side session-delete or fork primitive. OpenFish stops an abandoned ACP draft locally and disables fork instead of pretending those remote semantics exist.
 - Managed Harness processes launch inside the selected OpenFish workspace and process sandbox profile with private HOME/cache/config/temp roots. Publisher metadata and ACP Registry transport still do not replace package integrity, sandbox enforcement, or explicit user approval.
 - Checksummed platform archives are extracted in-process rather than delegated to host archive tools. OpenFish accepts ZIP, TAR, TAR.GZ, TGZ, TAR.BZ2, and TBZ2, rejects links and non-regular archive entries, caps the archive at 20,000 entries, 1,024-byte paths, 512 MiB compressed, and 2 GiB unpacked/decompressed, and never writes outside a fresh managed version directory. A directly downloaded executable remains supported when its declared SHA-256 matches.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>

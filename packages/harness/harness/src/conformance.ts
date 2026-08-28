@@ -579,7 +579,12 @@ export async function inspectHarnessDriver(driver: HarnessDriver, pack: HarnessP
   return { protocol, apiVersion, hostApiRange: api.hostApiRange, capabilities, authoring, issues, compatible: issues.length === 0 }
 }
 
-/** Reject an incompatible Driver/Pack pair while retaining its authoring vocabulary. */
+/**
+ * Reject an incompatible Driver/Pack pair while retaining its authoring vocabulary.
+ * @param driver - Loaded Driver implementation to inspect.
+ * @param pack - Admitted Harness Pack the Driver claims to implement.
+ * @returns The complete compatible inspection report.
+ */
 export async function assertHarnessDriverInspection(
   driver: HarnessDriver,
   pack: HarnessPack,

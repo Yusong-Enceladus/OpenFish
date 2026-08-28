@@ -3,6 +3,7 @@
 import type { Stream } from '@agentclientprotocol/sdk'
 import { safeHarnessDiagnostic } from '@deepseek-ai/dsh-harness'
 
+/** Maximum admitted size of one newline-delimited ACP JSON message. */
 export const MAXIMUM_ACP_MESSAGE_BYTES = 8 * 1024 * 1024
 
 function joinSegments(segments: readonly Uint8Array[], length: number): Uint8Array {
@@ -20,6 +21,10 @@ function joinSegments(segments: readonly Uint8Array[], length: number): Uint8Arr
  * Convert stdio bytes into ACP messages without retaining or logging an
  * unbounded/malformed process line. The official SDK stream intentionally
  * favors convenience; the OpenFish process boundary must fail closed.
+ * @param output - Writable Harness stdin byte stream.
+ * @param input - Readable Harness stdout byte stream.
+ * @param maximumMessageBytes - Positive upper bound for one NDJSON message.
+ * @returns An ACP SDK stream over the bounded transport.
  */
 export function boundedAcpNdJsonStream(
   output: WritableStream<Uint8Array>,

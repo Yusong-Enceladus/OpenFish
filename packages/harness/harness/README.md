@@ -1,6 +1,28 @@
-# `@deepseek-ai/dsh-harness`
+---
+description: "The versioned OpenFish Harness Pack catalog, lifecycle, Driver registry, architecture manifest, and safe runtime projection contract."
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-harness
 
 English | [中文](README.zh.md)
+
+## Summary
+
+`dsh-harness` is the product control plane that lets one OpenFish shell discover, install, configure, pin, explain, and run interchangeable coding-agent Harnesses without treating every backend as if it shared the same private internals.
+
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Extending OpenFish](#extending-open-fish)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
 
 Open Fish uses this package as the control plane for interchangeable agent Harnesses. A Harness Pack v0 declares a stable identity, protocol, launch distribution, publisher metadata, and an architecture graph. The shell never guesses a Harness's private internals: graph levels are `opaque`, `observable`, or `composable`, and only nodes explicitly marked editable may become controls.
 
@@ -12,8 +34,9 @@ The built-in `dsh` and official Codex app-server Packs are always available. On 
 
 Pack v0 supports pinned npm, Bun, and Python/uvx packages, checksummed platform binaries, and explicitly user-selected executables. Binary archives use the bounded in-process ZIP/TAR extractor documented by the generic ACP Driver; links, devices, traversal, decompression bombs, and writes outside the fresh managed snapshot are rejected. ACP authentication is discovered from the installed Harness: agent/browser login remains Harness-owned, environment credentials live only in Open Fish's write-only credential store and are injected into that process, and terminal login is launched only after a user action. Registry curation and Open Fish runtime compatibility are reported separately. A successful session start records Open Fish compatibility; a failed start records a redacted recovery diagnostic.
 
-The graph is an evidence-backed Architecture Manifest, not reverse-engineered decoration. `opaque` exposes exactly one runtime boundary. `observable` and `composable` must name their Harness boundary, connect every responsibility they declare, and attach declared, source-derived, or runtime-observed evidence to every visible component. There is no cosmetic minimum node count: a documented one-component runtime stays one component, while a richer Harness must expose its evidenced control flow instead of being collapsed into a meaningless vendor box. Edge labels explain what crosses each boundary. Open Fish, the operating system, and the model provider are not graph nodes unless they are actually inside that Harness process. `composable` permits editing only for nodes whose Pack sets `editable: true`. Canvas placement lives in the presentation-only `position` field and is never passed to a Driver as executable configuration. An editable node may store only bounded text, boolean, or select values declared by its typed `configSchema`; a `secret-reference` stores a Host credential reference, never the secret. A setting is operational only when its binding is validated and consumed by the selected Driver. The generic ACP Driver applies declared session-option bindings to a new session and rejects ids or values absent from that Harness's live ACP directory. Manifest admission rejects unknown schema versions, malformed identities, invalid authentication contracts, undeclared or unbounded node configuration, missing non-DSH distributions, unsupported components, disconnected or dangling graph edges, and runtime signals not owned by the Pack's protocol Driver. Native clients present the same Manifest through a Progressive Lens: Simple, Architecture, Runtime, and Manifest Editor.
+The graph is an evidence-backed Architecture Manifest, not reverse-engineered decoration. `opaque` exposes exactly one runtime boundary. `observable` and `composable` must name their Harness boundary, connect every responsibility they declare, and attach declared, source-derived, or runtime-observed evidence to every visible component. There is no cosmetic minimum node count: a documented one-component runtime stays one component, while a richer Harness must expose its evidenced control flow instead of being collapsed into a meaningless vendor box. Edge labels explain what crosses each boundary. Open Fish, the operating system, and the model provider are not graph nodes unless they are actually inside that Harness process. Runtime bindings emit only standardized or Driver-owned content-free signals; the durable projection retains the latest state and a bounded ordered trace, including repeated loop and branch visits, while excluding prompts, output, paths, commands, account data, and credentials. `composable` permits editing only for nodes whose Pack sets `editable: true`. Canvas placement lives in the presentation-only `position` field and is never passed to a Driver as executable configuration. An editable node may store only bounded text, boolean, or select values declared by its typed `configSchema`; a `secret-reference` stores a Host credential reference, never the secret. A setting is operational only when its binding is validated and consumed by the selected Driver. The generic ACP Driver applies declared session-option bindings to a new session and rejects ids or values absent from that Harness's live ACP directory. Manifest admission rejects unknown schema versions, malformed identities, invalid authentication contracts, undeclared or unbounded node configuration, missing non-DSH distributions, unsupported components, disconnected or dangling graph edges, and runtime signals not owned by the Pack's protocol Driver. Native clients present the same Manifest through a Progressive Lens: Simple, Architecture, Runtime, and Manifest Editor.
 
+<a id="extending-open-fish"></a>
 ## Extending Open Fish
 
 Start with [`examples/custom-acp.pack.json`](examples/custom-acp.pack.json) and validate editor/tooling output against [`schema/harness-pack-v0.schema.json`](schema/harness-pack-v0.schema.json). The runtime applies additional semantic checks for unique node/auth ids, dangling edges, and exact package version pins.
@@ -46,3 +69,13 @@ None. Harness identity records do not enter a DSH model request.
 - ACP-compatible Harnesses share the generic Driver. A new non-ACP protocol still requires a real `HarnessDriver`, but a pinned Pack descriptor lets OpenFish install it without an app release; schema-declared node configuration remains inert unless the owning Driver defines and validates its operational binding.
 - Community catalog inclusion is discovery, not a security audit or compatibility guarantee. Unverified entries require explicit confirmation, exact package versions, and checksummed binaries.
 - Removing an installed or user-authored Pack is blocked while any durable task references it. A confirmed removal deletes all Host-owned installation snapshots and the Pack's private versioned runtime state without following a replaced symlink; shared provider credentials in the Host credential service remain explicit, separately managed state.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>

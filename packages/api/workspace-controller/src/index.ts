@@ -50,7 +50,10 @@ export class WorkspaceController extends TypertRemoteService {
     ctx.plugin(DirectoryPickerController)
   }
 
-  /** Read the complete current Workspace projection without opening a stream. */
+  /**
+   * Read the complete current Workspace projection without opening a stream.
+   * @returns The current Workspace baseline and archive set.
+   */
   @Remote('list')
   list(): WorkspaceListValue {
     return this.feed.baseline()
@@ -116,7 +119,11 @@ export class WorkspaceController extends TypertRemoteService {
     return this.commands.archiveSession(request)
   }
 
-  /** Restore one known Session to ordinary Workspace grouping surfaces. */
+  /**
+   * Restore one known Session to ordinary Workspace grouping surfaces.
+   * @param request - Session identity to restore.
+   * @returns The complete resulting archive set.
+   */
   @Remote('unarchiveSession')
   unarchiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     return this.commands.unarchiveSession(request)

@@ -173,7 +173,11 @@ function validAcpText(value: unknown, maximum: number, allowEmpty = false): valu
   return (allowEmpty || value.trim().length > 0) && length <= maximum && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
 }
 
-/** Admit one bounded, unambiguous ACP configuration directory before UI projection or mutation. */
+/**
+ * Admit one bounded, unambiguous ACP configuration directory before UI projection or mutation.
+ * @param input - Untrusted live ACP configuration options.
+ * @returns A validated, bounded option directory.
+ */
 export function admitAcpSessionConfigOptions(input: readonly SessionConfigOption[]): SessionConfigOption[] {
   if (!Array.isArray(input) || input.length > MAX_ACP_CONFIG_OPTIONS) {
     throw new Error(`ACP configuration directory exceeds ${MAX_ACP_CONFIG_OPTIONS} options`)

@@ -12,7 +12,7 @@
 | 用户无需学习不同 CLI 即可切换 Harness | 新任务 Override 成功、出现正确账号／模型／思考控件，而且旧任务不被修改 | Harness／ACP Contract 与 Apple Silicon Packaged-runtime Gate 已通过；官方 Codex 既有登录路径与 OMP 未认证生命周期已有 Working-copy 实时证据，带认证 OMP 与最终 DSH／Codex／OMP Artifact Matrix 仍待完成 | 可以声明协议驱动选择与精确验证过的 Codex 路径，不能声明通用成功 |
 | App 与 Host 重启后任务可靠恢复 | 按 Harness／版本／Workspace 模式统计 Resume 成功，并保留 Remote Identity 与固定配置 | Resume、Fork、Pack Pinning Fixture 与 Packaged Clean-state Host Smoke 已通过；真实 Multi-Harness Retention Matrix 仍待完成 | 不能发布可靠性百分比 |
 | 安装配置失败可以恢复 | 从缺失认证、无可路由模型、下载损坏、更新中断、Harness 退出、Registry 故障与 Host 重连恢复，同时不丢已有任务 | Missing Auth／Model、Invalid Pack、ACP Exit／Cancel、Host Reconnect 与 Update／Rollback Contract 已通过；尚未记录完整 Chaos Run | 可以说明存在明确恢复状态，不能声称鲁棒性已证明 |
-| Architecture View 改善理解 | 用户能够从代表性 Pack 中正确识别 Host、Harness、Account／Provider、模型、Workspace Boundary、Evidence Level 与活跃 Runtime Component | 尚未进行理解度研究 | 只能称为 Evidence-backed Lens，不能声称已证明提升理解 |
+| Architecture View 改善理解 | 用户能够从代表性 Pack 中正确识别 Host、Harness、Account／Provider、模型、Workspace Boundary、Evidence Level，以及实际观测到的有序执行路径 | Mac 与 iPhone 已实现 Evidence-backed Manifest 和有界、无内容的执行轨迹；尚未进行理解度研究 | 只能称为 Evidence-backed Lens 与 Execution Trace，不能声称已证明提升理解 |
 | 技术用户可以高效创建 Pack | 从空 Manifest Editor 到通过接纳的准确版本 Pack、不发送模型提示词的实时 Preflight、无凭证 Export 与成功任务所需时间 | 已实现可执行 Workflow；尚未测量任务时间样本；不宣称 Provider 不创建状态或没有初始化成本 | 当前只能称 Manifest Editor，不能称通用可视化 Harness Builder |
 | Mac–iPhone 连续性减少中断 | 在真实手机上完成 Pair／Reconnect／Follow-up／Approval／Question／Revoke，并能从后台或断网恢复 | DEBUG 真机 Candidate 已通过全新 Pair、冷启动 Profile 恢复、精确 Host 替换／重连与五轮麦克风启停；Simulator 的 Approval／Question 与 Microphone-denied UI、以及认证 Host 的 Self-revoke Contract 已通过，最终真机端到端 Interaction、Background 与 Revoke 记录仍待完成 | 不能从 Simulator 或 Protocol Test 推导尚未记录的真机行为 |
 

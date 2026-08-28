@@ -5,6 +5,7 @@ enum OpenFishDemoMode {
     static let isEnabled = ProcessInfo.processInfo.arguments.contains { $0 == "--openfish-demo" || $0.hasPrefix("--openfish-demo-") }
     static let showsNewTask = ProcessInfo.processInfo.arguments.contains("--openfish-demo-new-task")
     static let showsHarnessCatalog = ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-catalog")
+    static let showsHarnessRuntime = ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-runtime")
     static let showsLoading = ProcessInfo.processInfo.arguments.contains("--openfish-demo-loading")
     static let showsOffline = ProcessInfo.processInfo.arguments.contains("--openfish-demo-offline")
     static let showsRecoverable = ProcessInfo.processInfo.arguments.contains("--openfish-demo-recoverable")
@@ -13,6 +14,7 @@ enum OpenFishDemoMode {
 
     @MainActor
     static func store() -> OpenCodexStore {
+        if showsHarnessRuntime { return .visualHarnessRuntimeFixture() }
         if showsHarnessCatalog { return .visualHarnessOnboardingFixture() }
         if showsLoading { return .visualLoadingFixture() }
         if showsOffline { return .visualOfflineFixture() }

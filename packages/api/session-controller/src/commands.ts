@@ -121,6 +121,7 @@ export class SessionCommandController {
   /**
    * Create or idempotently adopt one ordinary Session.
    * @param request - requested identity, location, and Agent preset.
+   * @param signal - optional cancellation for preparation and Harness startup.
    * @returns the Session identity and resolved preset when configured.
    */
   async create(request: SessionCreateRequest, signal?: AbortSignal): Promise<SessionCreateValue> {
@@ -232,7 +233,11 @@ export class SessionCommandController {
     }
   }
 
-  /** Permanently remove one never-started draft and its provider-side blank thread. */
+  /**
+   * Permanently remove one never-started draft and its provider-side blank thread.
+   * @param request - Draft Session identity.
+   * @returns Confirmation that the draft was discarded.
+   */
   async discard(request: SessionDiscardRequest): Promise<SessionDiscardValue> {
     let agent = this.ctx.agents.get(request.sessionId)
     if (agent === undefined) {
@@ -288,7 +293,12 @@ export class SessionCommandController {
     }
   }
 
-  /** Read the live model/reasoning/account/config directory for one exact task. */
+  /**
+   * Read the live model/reasoning/account/config directory for one exact task.
+   * @param request - Exact Session identity.
+   * @param signal - Optional cancellation for runtime discovery.
+   * @returns The task-local model and Harness configuration directory.
+   */
   async models(request: SessionModelsRequest, signal?: AbortSignal): Promise<SessionModels> {
     signal?.throwIfAborted()
     const agent = await this.resolveAgent(request.sessionId)
@@ -347,6 +357,7 @@ export class SessionCommandController {
   /**
    * Validate and install one Session-local model selection.
    * @param request - Session identity and requested model selection.
+   * @param signal - Optional cancellation for live Harness or provider selection.
    * @returns the normalized selection installed for the Session.
    */
   async selectModel(
@@ -446,7 +457,12 @@ export class SessionCommandController {
     })
   }
 
-  /** Mutate one configuration option owned by the live Harness session. */
+  /**
+   * Mutate one configuration option owned by the live Harness session.
+   * @param request - Session, option, and requested value.
+   * @param signal - Optional cancellation for the live Harness mutation.
+   * @returns The refreshed Harness configuration directory.
+   */
   async setHarnessConfig(
     request: SessionSetHarnessConfigRequest,
     signal?: AbortSignal,

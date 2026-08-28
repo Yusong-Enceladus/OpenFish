@@ -107,6 +107,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns Pack admission, ACP Registry discovery, runtime recipes, honest architecture graphs, and effect-scoped protocol drivers.',
   },
   {
+    key: 'harnessController',
+    pkg: 'api-harness-controller',
+    title: 'Harness remote control plane',
+    mode: 'core',
+    consumers: ['x-native'],
+    companions: ['harnesses'],
+    note: 'Exposes catalog, lifecycle, authentication, default-selection, and publication methods while keeping executable-code consent on the Host.',
+  },
+  {
     key: 'voice',
     pkg: 'voice',
     title: 'Device-local voice Provider registry',
@@ -118,7 +127,7 @@ const SERVICE_ROLES: ServiceRole[] = [
   {
     key: 'xNative',
     pkg: 'x-native',
-    title: 'OpenCodex native bootstrap',
+    title: 'OpenFish native bootstrap',
     mode: 'bundle',
     consumers: [],
     companions: ['connection', 'voice'],

@@ -1,9 +1,28 @@
-# OpenCodex 原生启动组合包
+---
+description: "OpenFish 原生启动、认证设备配对、能力协商与规范任务传输。"
+kind: "package-bundle"
+---
+
+# OpenFish 原生启动组合包
 
 [English](README.md) | 中文
 
-原生 OpenCodex 客户端加入普通 DSH API 前所需的小型协议 DSH 插件。它拥有发现、能力协商、实时方法清单和原生设备身份。业务 RPC 仍位于现有 DSH `/api` gateway；该组合包不复制会话、工作区、agent、工具、审批、设置或语音领域操作。
+## 概述
 
+原生 OpenFish 客户端加入普通 DSH API 前所需的小型协议 DSH 插件。它拥有发现、能力协商、实时方法清单和原生设备身份。业务 RPC 仍位于现有 DSH `/api` gateway；该组合包不复制会话、工作区、agent、工具、审批、设置或语音领域操作。
+
+## 目录
+
+- [路由](#routes)
+- [协议事实](#protocol-facts)
+- [组合](#composition)
+- [验证](#verification)
+- [安全边界](#security-boundary)
+- [模型体验](#model-experience)
+- [已知限制与待办事项](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+<a id="routes"></a>
 ## 路由
 
 | 方法 | 路径 | 用途 |
@@ -17,6 +36,7 @@
 | POST | `/x-native/v2/revoke` | 在 Host 上撤销设备 token |
 | POST | `/x-native/v2/self/revoke` | 只撤销已认证的调用设备自身 |
 
+<a id="protocol-facts"></a>
 ## 协议事实
 
 - `protocolVersion: v2` 与 `minimumClientProtocol: v2` 来自组合后的启动协议。当前原生客户端会在读取业务状态前拒绝不兼容的握手。
@@ -25,9 +45,10 @@
 - 配对记录存储在 `$DSH_HOME/x-native/devices.json`（可通过 `config.dataDir` 覆盖）。token 以 SHA-256 摘要持久化；secret 只在配对时返回一次。
 - 本地客户端可直接配对。远程客户端必须通过 TLS Code Proof 兑换 Host 上创建的十分钟、一次性配对码：HMAC 使用带外配对码本身作为密钥，并绑定 Host Certificate Fingerprint，因此 Bootstrap Connection 中公开传输的 Code Id 无法制造有效证明。所得 bearer 会被普通 DSH HTTP 与 WebSocket 信任边界接受；设备列表、配对码创建与撤销其他设备仍只允许 Host 本地操作，已配对设备只能撤销自身。
 - LAN 与 Tailscale 共用同一条经过认证的 DSH carrier。relay 仍是可替换的传输插件，只在已挂载时报告。
-- 图片生成能力标志表示已挂载 provider registry；OpenCodex 刻意不内置图片模型。
+- 图片生成能力标志表示已挂载 provider registry；OpenFish 刻意不内置图片模型。
 - 未指定 Workspace 的原生任务使用各自的 `$DSH_HOME/openfish/sessions/no-workspace/<session-id>` cwd，绝不继承 Host 进程的启动目录，也不会与其他 No Project 任务共享文件。
 
+<a id="composition"></a>
 ## 组合
 
 该组合包必须挂载到 Web／原生 Host profile 中：
@@ -43,6 +64,7 @@
 
 它不属于 headless，也不会修改 anchored agent preset。
 
+<a id="verification"></a>
 ## 验证
 
 ```sh
@@ -52,6 +74,7 @@ DSH_HOME=<profile home> dsh --profile x-native-dev --host 127.0.0.1 --port 3180
 curl http://127.0.0.1:3180/x-native/v2/capabilities
 ```
 
+<a id="security-boundary"></a>
 ## 安全边界
 
 - 配对码只存在于 Host 内存中，十分钟后过期，并在设备注册开始前即被消费。原始配对码永远不会进入 Bootstrap Request，也不会写入磁盘。
@@ -60,6 +83,7 @@ curl http://127.0.0.1:3180/x-native/v2/capabilities
 - bearer 可授权普通的非特权 DSH API。配置与凭据方法仍服从 Host connection 层更严格的 loopback-only 策略。
 - registry 目前采用部署级授权，尚无逐设备 ACL。relay 行为属于所选 relay 插件，而不属于本组合包。
 
+<a id="model-experience"></a>
 ## 模型体验
 
 无，因为这个仅限启动的组合包不注册任何面向模型的提示词、工具、schema 或结果。
@@ -70,6 +94,18 @@ curl http://127.0.0.1:3180/x-native/v2/capabilities
 
 ## 已知限制与待办事项
 
+<a id="known-limitations-and-deferred-work"></a>
+
 - 授权粒度目前是整个部署，而不是逐设备、工作区或会话。
 - relay 传输有意留给可替换的 DSH 传输插件。
-- 只有组合后的 rc.8 Host 暴露迁移／导入能力时才会报告该能力；它不属于原生启动职责。
+- 只有组合后的 Host 暴露迁移／导入能力时才会报告该能力；它不属于原生启动职责。
+
+<a id="dev-note"></a>
+### 开发备注
+
+<details>
+<summary>供维护者使用的工作上下文 — 点击展开</summary>
+
+无。
+
+</details>

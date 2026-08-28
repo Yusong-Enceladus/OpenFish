@@ -101,7 +101,10 @@ struct ContentView: View {
             get: { store.needsHarnessOnboarding },
             set: { _ in }
         )) {
-            HarnessOnboardingView(store: store)
+            HarnessOnboardingView(
+                store: store,
+                initialLens: OpenFishDemoMode.showsHarnessRuntime ? "Runtime" : "Simple"
+            )
                 .frame(minWidth: 720, minHeight: 540)
                 .interactiveDismissDisabled()
         }
@@ -6412,9 +6415,15 @@ private struct HarnessOnboardingView: View {
             Text(harnessExecutionConsentMessage(pendingConsentHarness))
         }
         .task {
-            async let settings: Void = store.loadSettings()
-            async let catalog: Void = store.loadHarnessCatalogForOnboarding()
-            _ = await (settings, catalog)
+            // Demo fixtures are intentionally network-isolated and already
+            // contain the exact catalog/state this sheet renders. Do not let
+            // the presentation path probe the synthetic URL scheme and paint
+            // a misleading Host failure behind an otherwise valid demo.
+            if !store.isDemoMode {
+                async let settings: Void = store.loadSettings()
+                async let catalog: Void = store.loadHarnessCatalogForOnboarding()
+                _ = await (settings, catalog)
+            }
             if selectedHarnessId == nil { selectedHarnessId = filtered.first?.id }
         }
     }
@@ -6653,6 +6662,7 @@ private struct HarnessProgressiveLensPanel: View {
 private struct HarnessRuntimePanel: View {
     @ObservedObject var store: OpenCodexStore
     let harness: HarnessCatalogEntry
+    @State private var selectedNodeID: String?
 
     private var runtime: HarnessRuntimeProjection? {
         guard store.currentHarness?.id == harness.id,
@@ -6663,40 +6673,149 @@ private struct HarnessRuntimePanel: View {
         return runtime
     }
 
+    private var observations: [HarnessRuntimeProjection.Observation] {
+        let values = runtime?.observations ?? []
+        guard let selectedNodeID else { return values }
+        return values.filter { observation in
+            observation.kind == "node" ? observation.id == selectedNodeID
+                : observation.from == selectedNodeID || observation.to == selectedNodeID
+        }
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            HarnessArchitectureFlow(graph: harness.graph, runtime: runtime)
-                .frame(maxWidth: .infinity, minHeight: 260)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Live task path", systemImage: "waveform.path.ecg")
+                        .font(.headline)
+                    Text("Only Pack-declared, content-free runtime signals appear here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(runtime?.observations?.count ?? 0) events")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(OpenCodexPalette.hover, in: Capsule())
+                if selectedNodeID != nil {
+                    Button("Show all") { selectedNodeID = nil }
+                        .buttonStyle(.link)
+                        .font(.caption.weight(.semibold))
+                }
+            }
+
+            HarnessArchitectureFlow(
+                graph: harness.graph,
+                runtime: runtime,
+                selectedNodeId: selectedNodeID,
+                onSelect: { selectedNodeID = selectedNodeID == $0 ? nil : $0 }
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 225)
+
             VStack(alignment: .leading, spacing: 8) {
-                Label("Observed in this task", systemImage: "waveform.path.ecg").font(.headline)
-                if let runtime, !runtime.nodes.isEmpty {
-                    ForEach(runtime.nodes.keys.sorted(), id: \.self) { nodeID in
-                        if let activity = runtime.nodes[nodeID] {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(harness.graph.nodes.first(where: { $0.id == nodeID })?.title ?? nodeID)
-                                    .font(.caption.weight(.semibold))
-                                Text("\(activity.status.capitalized) · \(activity.activity)")
-                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                HStack {
+                    Text(selectedNodeID == nil ? "Execution trace" : "Filtered execution trace")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("Oldest first · newest last")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if !observations.isEmpty {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(observations.enumerated()), id: \.element.stableID) { index, observation in
+                                    HarnessTraceRow(
+                                        observation: observation,
+                                        graph: harness.graph,
+                                        deltaMilliseconds: index == 0 ? nil : observation.time - observations[index - 1].time
+                                    )
+                                        .id(observation.stableID)
+                                    if index < observations.count - 1 { Divider() }
+                                }
                             }
                         }
-                    }
-                    if let edges = runtime.edges, !edges.isEmpty {
-                        Divider()
-                        Text("Observed flows").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        ForEach(edges.keys.sorted(), id: \.self) { edgeID in
-                            if let activity = edges[edgeID] {
-                                Text("\(activity.from) → \(activity.to) · \(activity.status.capitalized)")
-                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                            }
+                        .onChange(of: observations.last?.stableID) { _, latest in
+                            if let latest { proxy.scrollTo(latest, anchor: .bottom) }
                         }
                     }
+                    .frame(height: 175)
                 } else {
-                    Text("Start a task with this Harness. OpenFish will light up only the declared components it actually observes, without capturing prompt or credential content for the graph.")
+                    Text(selectedNodeID == nil
+                         ? "Start a task with this Harness. OpenFish will record the ordered path only through declared components it actually observes, without prompt, path, command, account, or credential content."
+                         : "No runtime observation has touched this component yet. Choose Show all to inspect the complete task trace.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(width: 250, alignment: .topLeading)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.softBorder))
         }
+    }
+}
+
+private struct HarnessTraceRow: View {
+    let observation: HarnessRuntimeProjection.Observation
+    let graph: HarnessGraph
+    let deltaMilliseconds: Double?
+
+    private var title: String {
+        if observation.kind == "node" {
+            return graph.nodes.first(where: { $0.id == observation.id })?.title ?? observation.id
+        }
+        let from = graph.nodes.first(where: { $0.id == observation.from })?.title ?? observation.from ?? "Unknown"
+        let to = graph.nodes.first(where: { $0.id == observation.to })?.title ?? observation.to ?? "Unknown"
+        return "\(from) → \(to)"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 7, height: 7)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title).font(.caption.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text("#\(observation.seq)").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                }
+                Text("\(observation.status.capitalized) · \(observation.activity)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: 6) {
+                    if let signal = observation.signal {
+                        Text(signal).font(.system(size: 9, design: .monospaced)).lineLimit(1)
+                    }
+                    Spacer(minLength: 2)
+                    if let deltaMilliseconds, deltaMilliseconds >= 0 {
+                        Text(deltaLabel(deltaMilliseconds))
+                    }
+                    Text(relativeTime(observation.time)).font(.caption2).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(observation.status), \(observation.activity)")
+    }
+
+    private var statusColor: Color {
+        switch observation.status {
+        case "active": return .blue
+        case "completed": return .green
+        case "failed": return .red
+        case "waiting": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func deltaLabel(_ milliseconds: Double) -> String {
+        milliseconds < 1_000 ? "+\(Int(milliseconds)) ms" : String(format: "+%.1f s", milliseconds / 1_000)
     }
 }
 

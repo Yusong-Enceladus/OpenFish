@@ -10,7 +10,7 @@
 - 安装级默认 Harness 选择，以及每个任务独立选择 Harness。
 - No Project 任务存储在 OpenFish 专用位置，而不是 Desktop。
 - 由协议驱动的 ACP 模型、思考强度、模式与配置控件。
-- Mac 与 iPhone 使用 Progressive Lens 展示 Harness：面向普通用户的 Simple 说明、有证据支撑的 Architecture Manifest、Runtime 观测视图，以及在 macOS Manifest Editor 中创建自定义 Pack、编辑图、进行不发送模型提示词的实时预检、导入和无凭证导出。预检仍可能创建 Provider 自己的状态或产生其定义的初始化成本。
+- Mac 与 iPhone 使用 Progressive Lens 展示 Harness：面向普通用户的 Simple 说明、有证据支撑的 Architecture Manifest，以及只由 Pack 声明的无内容信号投影而成的有界有序 Runtime 轨迹。点选组件可把轨迹过滤为实际经过它的步骤。macOS Manifest Editor 支持创建自定义 Pack、编辑图、进行不发送模型提示词的实时预检、导入和无凭证导出。预检仍可能创建 Provider 自己的状态或产生其定义的初始化成本。
 - 生成式社区 Pack 目录；通过 Pull Request 发布，无需等待 OpenFish App 发版。
 - 面向公开非 ACP Pack 的准确自安装 Driver Bundle 描述。用户明确同意本地执行代码后，Mac App 会使用随 App 打包的 Node／npm Runtime 暂存并结构化校验准确 Bundle，只重启自己验证过的内置 Host，协商 Driver API v1 后继续配置；iPhone 会把这项操作交给已配对 Mac。
 - 会话固定到创建任务时使用的 Harness Pack 版本。

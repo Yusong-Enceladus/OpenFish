@@ -9,6 +9,7 @@ let defaults = [
     "docs/assets/openfish-macos-demo.png",
     "docs/assets/openfish-iphone-demo.png",
     "docs/assets/openfish-harness-picker-demo.png",
+    "docs/assets/openfish-harness-runtime-demo.png",
     "apps/x-macos/Sources/XMac/Assets.xcassets/AppIcon.appiconset/OpenFish-1024.png",
 ]
 let paths = Array(CommandLine.arguments.dropFirst())
