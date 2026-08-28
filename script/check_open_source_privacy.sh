@@ -26,12 +26,22 @@ done < <(git ls-files --cached --others --exclude-standard -z)
 # report only filenames, never the private value itself.
 local_account="$(id -un)"
 local_host="$(hostname -s)"
+local_email="$(git config --get user.email 2>/dev/null || true)"
+identity_patterns=(
+  --regexp "/Users/$local_account/"
+  --regexp "file:///Users/$local_account/"
+  --regexp "$local_host.local"
+)
+# A bare "$local_account@" is not an identity: on GitHub Actions the account
+# is `runner`, which also appears in ordinary package coordinates such as
+# `@vitest/runner@4.1.8`. Match the configured workstation mailbox only when
+# it is private-looking; GitHub no-reply addresses are intentionally public.
+if [[ -n "$local_email" && "$local_email" != *@users.noreply.github.com ]]; then
+  identity_patterns+=(--regexp "$local_email")
+fi
 set +e
 rg --fixed-strings --files-with-matches \
-  --regexp "/Users/$local_account/" \
-  --regexp "file:///Users/$local_account/" \
-  --regexp "$local_account@" \
-  --regexp "$local_host.local" \
+  "${identity_patterns[@]}" \
   -- "${identity_files[@]}" >"$privacy_report"
 identity_status=$?
 set -e
