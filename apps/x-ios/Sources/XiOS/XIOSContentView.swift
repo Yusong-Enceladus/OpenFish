@@ -1006,6 +1006,7 @@ private struct MobileHarnessDetailView: View {
     @State private var selectedNodeId: String?
     @State private var architecturePresentation = "Flow"
     @State private var handoffCopied = false
+    @State private var showsRuntimeComponents = false
 
     init(
         store: MobileOpenCodexStore,
@@ -1135,11 +1136,6 @@ private struct MobileHarnessDetailView: View {
                         .frame(minHeight: 250)
                     } else if lens == "Runtime" {
                         VStack(alignment: .leading, spacing: 12) {
-                            MobileHarnessArchitectureFlow(
-                                graph: harness.graph, runtime: matchingRuntime,
-                                selectedNodeId: selectedNodeId,
-                                onSelect: { selectedNodeId = selectedNodeId == $0 ? nil : $0 }
-                            )
                             if !runtimeObservations.isEmpty {
                                 HStack {
                                     Label(selectedNodeId == nil ? "Live execution trace" : "Filtered trace", systemImage: "waveform.path.ecg")
@@ -1203,6 +1199,38 @@ private struct MobileHarnessDetailView: View {
                                         .frame(maxWidth: .infinity)
                                 }
                             }
+
+                            DisclosureGroup(isExpanded: $showsRuntimeComponents) {
+                                MobileHarnessArchitectureFlow(
+                                    graph: harness.graph, runtime: matchingRuntime,
+                                    selectedNodeId: selectedNodeId,
+                                    onSelect: { selectedNodeId = selectedNodeId == $0 ? nil : $0 }
+                                )
+                                .padding(.top, 10)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                                        .foregroundStyle(Color.accentColor)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Observed components")
+                                            .font(.subheadline.weight(.semibold))
+                                        Text(selectedNodeId == nil
+                                             ? "Open the Pack-declared structure to filter this trace."
+                                             : "Filtering by \(selectedNode?.title ?? selectedNodeId ?? "component").")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Text("\(harness.graph.nodes.count)")
+                                        .font(.caption.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .tint(.primary)
+                            .padding(12)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                            .accessibilityIdentifier("OpenFish.iOS.HarnessRuntimeComponents")
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
@@ -4024,6 +4052,14 @@ private struct MobileConnectionView: View {
                 Section("Default Harness") {
                     if store.harnessOperationId != nil {
                         MobileHarnessOperationStatus(store: store)
+                    }
+                    if store.harnesses.isEmpty {
+                        ContentUnavailableView(
+                            "Harness catalog unavailable",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text("Reconnect to the Mac Host and retry. Existing tasks remain pinned to their original Harness.")
+                        )
+                        Button("Retry from Mac Host") { Task { await store.loadHostInventory() } }
                     }
                     ForEach(store.harnesses) { harness in
                         HStack {

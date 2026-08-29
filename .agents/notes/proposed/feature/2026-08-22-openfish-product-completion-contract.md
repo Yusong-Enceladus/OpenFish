@@ -124,7 +124,7 @@ The README states supported platforms, exact release-baseline Harnesses, compati
 
 P0 is complete only when the primary public-alpha journey works end to end and the release makes no false core claim.
 
-1. A clean supported Mac with none of the external runtimes or Harness CLIs installs a signed and notarized OpenFish build, chooses a default Harness, completes explicit authentication and model setup, starts a Project and No Project task, resumes it, changes the default, and creates another task with a different Harness.
+1. A clean supported Mac with none of the external runtimes or Harness CLIs installs one self-contained OpenFish build, chooses a default Harness, completes explicit authentication and model setup, starts a Project and No Project task, resumes it, changes the default, and creates another task with a different Harness. Developer ID signing and notarization belong to the later binary-distribution gate and cannot displace unfinished core behavior.
 2. DSH, Codex, and OMP each pass install, authentication, live model discovery, model selection, supported reasoning controls, send, tool and approval flow, cancel, resume, archive, update, rollback, and actionable failure recovery. Codex separately proves ChatGPT subscription and API billing paths when supported, without automating or exposing user secrets.
 3. Any compatible ACP Registry Pack can appear without native UI changes; a synthetic new ACP Pack passes discovery through resume; incompatible or malformed Packs fail before launch with a precise reason.
 4. The composer and Settings keep Host, Harness, account, provider/model, reasoning, workspace, and permissions distinct and visible. No Project uses dedicated storage and the full session lifecycle on Mac and iPhone.
@@ -133,7 +133,7 @@ P0 is complete only when the primary public-alpha journey works end to end and t
 7. Physical Mac and iPhone verification covers pairing, disconnect and reconnect, approvals, questions, task continuity, voice allow and deny, repeated voice use, background and foreground, and remote revocation. Only one correctly branded OpenFish installation remains discoverable on each tested Mac.
 8. Automated contract, integration, packaged-runtime, migration, native UI, and regression checks cover the reported failures: missing injected tools, persona mount failure, ACP connection closure, missing provider/model, missing model selector, missing reasoning selector, incorrect caret inset, No Project creation failure, duplicate app identity, phone connection loss, and voice crash.
 9. The release tree and git history pass secret scanning, reviewed false-positive handling, screenshot OCR and metadata review, binary and archive inspection, dependency license review, third-party notices, and credential/log redaction checks. A threat model covers Harness supply chain, process authority, local network exposure, credentials, diagnostics, and community publication.
-10. The source tree is clean, the public GitHub remote and history contain only approved material, release artifacts are signed and notarized, checksums and provenance are published, installation and uninstall instructions are verified, and public screenshots and claims match the tested build.
+10. The source tree is clean, the public GitHub remote and history contain only approved material, checksums and provenance identify every tested artifact, installation and uninstall instructions are verified, and public screenshots and claims match the tested build. A source release does not wait on Developer ID work; a promoted end-user binary does.
 
 ## P1 acceptance contract: complete product promise
 
@@ -146,6 +146,7 @@ P1 contains every explicit product requirement beyond the minimum public-alpha p
 5. The complete Mac and iPhone screen and state inventory uses the selected design system and passes the supported OS, architecture, window-size, appearance, localization, accessibility, network, account, and device matrix. Mac-only operations use clear iPhone handoffs rather than missing or misleading controls.
 6. Clean-machine and chaos coverage includes Apple silicon and Intel where supported, fresh and upgraded state, no dependencies, corrupt downloads, registry outage, authentication expiry, provider quota failure, Harness crash, Host restart, ACP protocol violations, network partition, low disk space, permission changes, interrupted updates, and concurrent device actions.
 7. Public value evidence reports time to first successful task, Harness setup and switching success, resume reliability, setup-failure recovery, graph comprehension, custom Pack creation time, and task-level quality comparisons without conflating Harness performance with OpenFish compatibility.
+8. A promoted macOS binary distribution uses the intended Developer ID, notarization, stapling, update provenance, and installed-app migration checks after the core product and source-release contract has passed.
 
 ## Execution order and evidence
 

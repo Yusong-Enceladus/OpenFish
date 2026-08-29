@@ -1931,7 +1931,7 @@ function fixtureHarnessCatalog(): FixtureHarnessEntry[] {
       driver: { apiVersion: 1, protocol: 'codex-app-server', loaded: true, authorization: 'not-required' },
     },
     {
-      schemaVersion: 0, id: 'oh-my-pi', name: 'Oh My Pi', version: '18.0.9',
+      schemaVersion: 0, id: 'oh-my-pi', name: 'Oh My Pi', version: '18.0.10',
       description: 'Extensible ACP Harness based on Pi.', publisher: 'can1357', verified: true,
       protocol: 'acp', source: 'builtin', isDefault: false,
       account: { label: 'Harness-managed account', billing: 'harness-managed', detail: 'The live Harness reports the selected route.' },
@@ -1943,7 +1943,7 @@ function fixtureHarnessCatalog(): FixtureHarnessEntry[] {
         ['execution', 'Execution & permissions', 'Runs approved filesystem, shell, and tool effects.'],
       ]),
       available: true,
-      installation: { status: 'not-installed', availableVersion: '18.0.9', previousVersions: [], integrity },
+      installation: { status: 'not-installed', availableVersion: '18.0.10', previousVersions: [], integrity },
       auth: { methods: [], status: 'needs-selection', missingFields: [], detail: 'Choose a sign-in method.' },
       compatibility: { status: 'ready', classification: 'experimental' },
       capabilities: lifecycle,

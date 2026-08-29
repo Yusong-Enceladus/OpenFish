@@ -223,6 +223,7 @@ final class MobileOpenCodexStore: ObservableObject {
     private var projections: [String: [String: MobileJSONValue]] = [:]
     private var harnessesBySession: [String: MobileHarness] = [:]
     private var booted = false
+    private var wasSuspendedForBackground = false
     private var remoteEventClientId: String?
     private var voiceConversationSessionId: String?
     private var lastVoiceTurnEndSeq = -1
@@ -968,6 +969,7 @@ final class MobileOpenCodexStore: ObservableObject {
 
     func enteredBackground() async {
         recordConnectionDiagnostic("lifecycle:background")
+        wasSuspendedForBackground = true
         stopVoiceConversation()
         cacheTask?.cancel()
         draftPreparationTask?.cancel()
@@ -978,6 +980,12 @@ final class MobileOpenCodexStore: ObservableObject {
     func becameActive() async {
         recordConnectionDiagnostic("lifecycle:active")
         guard booted else { return }
+        // SwiftUI also reports `.active` during the initial foreground boot.
+        // Treat only a real background -> active transition as a reconnect;
+        // otherwise clearing the freshly loaded baseline can strand the UI
+        // while the already-running socket correctly ignores a duplicate start.
+        guard wasSuspendedForBackground else { return }
+        wasSuspendedForBackground = false
         connectionState = .connecting
         hasLiveBaseline = false
         await startConnection()

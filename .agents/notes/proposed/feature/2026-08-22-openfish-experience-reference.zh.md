@@ -10,14 +10,14 @@ OpenFish 需要完整重做 Mac 和 iPhone 体验，但此前的视觉改动没�
 
 本文记录 2026-08-22 的当前一手资料对比和产品基线审计。它从属于完整的[产品完成合同](2026-08-22-openfish-product-completion-contract.zh.md)，不会缩小该合同。
 
-## 2026-08-28 生态更新
+## 2026-08-29 生态更新
 
-- Codex 官方稳定版为 `0.150.1`，其文档仍将 `app-server` 定义为丰富 Codex 客户端使用的接口。因此 OpenFish 的官方 app-server 通道继续固定到稳定版 `0.150.1`，不追随 `0.151.0-alpha.*` 预发布版。
+- Codex 官方稳定版现已更新为 `0.151.0`，其文档仍将 `app-server` 定义为丰富 Codex 客户端使用的接口。OpenFish 的发布基线会继续保留已经完成实时验证的 `0.150.1`，直到 `0.151.0` 通过仓库最短发布时间窗口，并重新通过相同的安装、模型／思考、提示词、恢复和沙箱检查。OpenFish 同时为任务恢复和回滚保留旧安装快照，绝不跟随浮动预发布版本。
 - 官方 ACP Registry 已收录大量独立版本的 Agent，并按小时刷新 Release 元数据。它是通用发现层，不是 OpenFish 手工维护的短名单，也不是安全背书。
 - `pi-acp` 已在 Registry 中发布到 `0.0.33`，用于包装独立的 Pi Coding Agent。Pi 本体目前由 `earendil-works/pi` 发布，稳定版为 `0.84.3`，已包含 Session 级模型与思考控制。OpenFish 应通过通用 ACP 通道提供 Pi，而不是增加原生 Pi 分支。
-- Oh My Pi 稳定版 `18.0.9` 继续提供直接 ACP 模式和更广的 Provider／模型／认证能力。它仍作为 Pi 系列的 Curated 发布基线，因为这种直接而更丰富的集成与 Registry Adapter 有实际区别；这只是支持决策，不等于宣称 OMP 的编码效果更好。
+- Oh My Pi 稳定版 `18.0.10` 继续提供直接 ACP 模式和更广的 Provider／模型／认证能力。其当前 Provider 文档仍把模型凭据保存在 Harness 自己的存储中，并提供按 Provider 区分的登录，而不是交给 OpenFish 维护一个全局模型清单。它仍作为 Pi 系列的 Curated 发布基线，因为这种直接而更丰富的集成与 Registry Adapter 有实际区别；这只是支持决策，不等于宣称 OMP 的编码效果更好。
 - OpenCode `1.18.25` 已通过 ACP Registry 提供带校验和、按平台区分的原生二进制。这证明 Registry 接入必须原样保留平台 Artifact 与完整性事实，而不需要产品专属 UI。
-- 同一份实时 Registry 现已提供 `codex-acp` `1.7.0`、Gemini CLI `0.57.0` 与 Harn `0.10.119`。`codex-acp` 证明 ACP Adapter 也能公开丰富的 Codex 模型、思考、审批和认证控制；Harn 则证明图原生 Agent Pipeline 已经成为真实 Harness 形态。它们都应通过通用 Registry 通道和一致性门禁进入 OpenFish，而不是再增加原生选择器分支。
+- 同一份实时 Registry 现已提供 `codex-acp` `1.7.0`、Gemini CLI `0.57.0` 与 Harn `0.10.120`。`codex-acp` 证明 ACP Adapter 也能公开丰富的 Codex 模型、思考、审批和认证控制；Harn 则证明图原生 Agent Pipeline 已经成为真实 Harness 形态。它们都应通过通用 Registry 通道和一致性门禁进入 OpenFish，而不是再增加原生选择器分支。
 
 这些更新进一步确认当前架构：只 Curate OpenFish 能逐项验证、会阻断 Release 的 Harness；所有兼容 Registry 条目统一经过同一个有边界的 ACP Driver。没有统一任务 Benchmark 之前，仍不能宣称 Codex、OMP、Pi、OpenCode 或 DSH 谁“最好”。
 
@@ -62,6 +62,8 @@ OpenFish 使用克制的原生效率工具外壳，配合明确的运行时控�
 任务输入区保持 Prompt 为视觉主体。项目和权限属于任务范围组；Harness、账户、Provider/模型、思考强度和 Harness 特定选项属于运行时组；低频选项渐进展开，但所有当前值始终可读。空态、加载态、需设置、离线、可恢复错误和致命错误使用稳定区域，不随意替换整个页面。
 
 Mac 保留两层任务侧栏、快捷键、可调整 Inspector、指针能力和独立设置窗口。iPhone 使用 Navigation Stack、大触控目标和紧凑菜单，以审批和连续使用为主要任务；需要凭据的安装或发布明确 Handoff 到 Mac。
+
+当前实现的 Lens 层级采用了 Agent 调试器常见的 Trace-first 方式：Runtime 首先显示按时间排序且不含内容的执行记录，再用声明的组件结构做筛选。Architecture 以 Pack 连接推导出的有序阶段为主视图，以所选组件的职责、数据流、可执行控制和证据为详情。它不再把所有阶段塞进会裁切的横向长条；iPhone 也把组件筛选放在 Trace 之后渐进展开。
 
 ## Alternatives considered
 

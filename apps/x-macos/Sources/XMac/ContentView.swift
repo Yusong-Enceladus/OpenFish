@@ -103,9 +103,10 @@ struct ContentView: View {
         )) {
             HarnessOnboardingView(
                 store: store,
-                initialLens: OpenFishDemoMode.showsHarnessRuntime ? "Runtime" : "Simple"
+                initialLens: ProcessInfo.processInfo.arguments.contains("--openfish-demo-harness-runtime")
+                    ? "Runtime" : "Simple"
             )
-                .frame(minWidth: 720, minHeight: 540)
+                .frame(minWidth: 840, idealWidth: 1_040, minHeight: 620, idealHeight: 760)
                 .interactiveDismissDisabled()
         }
     }
@@ -2618,7 +2619,12 @@ private struct HarnessPicker: View {
     }
 
     private var inspectedHarness: HarnessCatalogEntry? {
-        store.harnesses.first { $0.id == inspectedHarnessId } ?? store.currentHarness ?? filtered.first
+        if let inspectedHarnessId, let inspected = filtered.first(where: { $0.id == inspectedHarnessId }) {
+            return inspected
+        }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if needle.isEmpty, let current = store.currentHarness { return current }
+        return filtered.first
     }
 
     private var pendingConsentHarness: HarnessCatalogEntry? {
@@ -2678,10 +2684,45 @@ private struct HarnessPicker: View {
                         .frame(height: 32)
                         .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 7))
 
-                        ScrollView {
-                            LazyVStack(spacing: 3) {
-                                ForEach(filtered) { harness in
-                                    HStack(alignment: .center, spacing: 6) {
+                        Group {
+                            if store.isLoadingHarnessCatalog && store.harnesses.isEmpty {
+                                VStack(spacing: 9) {
+                                    ProgressView()
+                                    Text("Loading Harnesses…")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else if filtered.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: store.harnesses.isEmpty ? "exclamationmark.triangle" : "magnifyingglass")
+                                        .font(.system(size: 24))
+                                        .foregroundStyle(store.harnesses.isEmpty ? Color.orange : Color.secondary)
+                                    Text(store.harnesses.isEmpty ? "Harness catalog unavailable" : "No matching Harness")
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(store.harnessCatalogError ?? (store.harnesses.isEmpty
+                                         ? "Retry the Host catalog, import a Pack, or create one locally."
+                                         : "Try another name or clear the search."))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if store.harnesses.isEmpty {
+                                        Button("Retry catalog") {
+                                            Task { await store.loadHarnessCatalogForOnboarding(forceRefresh: true) }
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                    } else {
+                                        Button("Clear search") { query = "" }
+                                    }
+                                }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                ScrollView {
+                                    LazyVStack(spacing: 3) {
+                                        ForEach(filtered) { harness in
+                                            HStack(alignment: .center, spacing: 6) {
                                         Button {
                                             inspectedHarnessId = harness.id
                                             lens = "Simple"
@@ -2753,10 +2794,12 @@ private struct HarnessPicker: View {
                                             .menuStyle(.borderlessButton)
                                             .frame(width: 22)
                                         }
-                                    }
+                                            }
                                 }
                             }
                         }
+                        }
+                    }
                     }
                     .padding(12)
                     .frame(width: 294)
@@ -2828,7 +2871,12 @@ private struct HarnessPicker: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .frame(minWidth: 840, minHeight: 580)
+            .frame(minWidth: 940, idealWidth: 1_080, minHeight: 620, idealHeight: 760)
+            .task {
+                if store.harnesses.isEmpty {
+                    await store.loadHarnessCatalogForOnboarding()
+                }
+            }
             // The catalog is already a sheet. Present its editor and
             // credential flow from inside that sheet; sibling sheet
             // modifiers on HarnessPicker are ignored by SwiftUI while the
@@ -4967,11 +5015,20 @@ private struct HarnessDetailPanel: View {
                         Spacer()
                     }
                     if architecturePresentation == "Flow" {
-                        HarnessArchitectureFlow(
-                            graph: harness.graph, runtime: runtime,
-                            selectedNodeId: selectedNodeId, onSelect: { selectedNodeId = $0 }
-                        )
-                        .frame(height: min(390, max(220, CGFloat(harness.graph.nodes.count) * 36)))
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: 12) {
+                                operationalStages
+                                    .frame(minWidth: 330, maxWidth: .infinity, alignment: .topLeading)
+                                componentDetails
+                                    .frame(minWidth: 300, maxWidth: .infinity, alignment: .topLeading)
+                            }
+                            .frame(minWidth: 680)
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                operationalStages
+                                componentDetails
+                            }
+                        }
                     } else {
                         HarnessGraphPreview(
                             graph: harness.graph,
@@ -4981,9 +5038,12 @@ private struct HarnessDetailPanel: View {
                             onSelect: { selectedNodeId = $0 }
                         )
                         .frame(height: 330)
+                        if let node = selectedNode {
+                            HarnessNodeEvidencePanel(node: node)
+                        }
                     }
                     HStack(spacing: 12) {
-                        Label(architecturePresentation == "Flow" ? "Grouped by operational responsibility" : "Every declared relationship", systemImage: architecturePresentation == "Flow" ? "rectangle.3.group" : "point.3.connected.trianglepath.dotted")
+                        Label(architecturePresentation == "Flow" ? "Ordered from Pack connections" : "Every declared relationship", systemImage: architecturePresentation == "Flow" ? "list.number" : "point.3.connected.trianglepath.dotted")
                         Label("Observed state", systemImage: "circle.fill")
                             .foregroundStyle(.green)
                         Spacer()
@@ -4991,9 +5051,6 @@ private struct HarnessDetailPanel: View {
                     }
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(.tertiary)
-                    if let node = selectedNode {
-                        HarnessNodeEvidencePanel(node: node)
-                    }
                 }
             }
             Text(truthExplanation).font(.caption2).foregroundStyle(.secondary)
@@ -5079,6 +5136,49 @@ private struct HarnessDetailPanel: View {
         harness.graph.nodes.first(where: { $0.id == selectedNodeId }) ?? harness.graph.nodes.first
     }
 
+    private var operationalStages: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Declared execution stages", systemImage: "list.number")
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text("Derived from the Pack's exact connections. A cycle stays a cycle; OpenFish does not invent hidden steps.")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HarnessArchitectureFlow(
+                graph: harness.graph, runtime: runtime,
+                selectedNodeId: selectedNodeId, onSelect: { selectedNodeId = $0 }, compact: true
+            )
+        }
+        .padding(11)
+        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(OpenCodexPalette.softBorder))
+    }
+
+    private var componentDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Why this component exists", systemImage: "info.square")
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text("Responsibility, data flow, executable controls, and evidence come from the selected Pack component.")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let node = selectedNode {
+                HarnessNodeEvidencePanel(node: node)
+            } else {
+                Text("Select a declared component to inspect it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(11)
+        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(OpenCodexPalette.softBorder))
+    }
+
     private var driverAuthorizationLabel: String {
         switch harness.driver.authorization {
         case "authorized": return "exact Driver authorized"
@@ -5124,98 +5224,109 @@ private struct HarnessArchitectureFlow: View {
                 .padding(.horizontal, 3)
             }
 
-            // A small Harness usually moves only horizontally, but one real
-            // operational stage may contain many parallel responsibilities.
-            // Keep every declared node reachable instead of cropping a large
-            // Pack to the inspector's fixed-height card.
-            ScrollView([.horizontal, .vertical], showsIndicators: !compact) {
-                HStack(alignment: .top, spacing: compact ? 8 : 10) {
-                    ForEach(Array(phases.enumerated()), id: \.element.id) { index, phase in
-                        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
-                            HStack(spacing: 7) {
-                                Image(systemName: phase.icon)
-                                    .font(.system(size: compact ? 11 : 12, weight: .semibold))
-                                    .foregroundStyle(Color.accentColor)
-                                    .frame(width: 18)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(phase.title)
-                                        .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
-                                    if !compact {
-                                        Text(phase.summary)
-                                            .font(.system(size: 9.5))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
+            VStack(alignment: .leading, spacing: compact ? 7 : 10) {
+                ForEach(Array(phases.enumerated()), id: \.element.id) { index, phase in
+                    VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: phase.icon)
+                                .font(.system(size: compact ? 10.5 : 12, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 19, height: 19)
+                                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                            Text(phase.title)
+                                .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
+                            if !compact {
+                                Text(phase.summary)
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.secondary)
                             }
-
-                            ForEach(phase.nodes) { node in
-                                Button { onSelect?(node.id) } label: {
-                                    VStack(alignment: .leading, spacing: compact ? 3 : 5) {
-                                        HStack(spacing: 6) {
-                                            Circle()
-                                                .fill(runtimeColor(node.id))
-                                                .frame(width: 7, height: 7)
-                                            Text(node.title)
-                                                .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
-                                                .lineLimit(1)
-                                            Spacer(minLength: 0)
-                                            if node.editable {
-                                                Image(systemName: "slider.horizontal.3")
-                                                    .font(.system(size: 9, weight: .medium))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        Text(node.responsibility ?? "Responsibility not declared by this Pack.")
-                                            .font(.system(size: compact ? 9 : 10))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(compact ? 2 : 3)
-                                            .multilineTextAlignment(.leading)
-                                        if !compact {
-                                            Text(relationshipSummary(node.id))
-                                                .font(.system(size: 9))
-                                                .foregroundStyle(.tertiary)
-                                                .lineLimit(2)
-                                        }
-                                        if !compact, let observed = runtime?.nodes[node.id] {
-                                            Text(observed.activity)
-                                                .font(.system(size: 9.5, weight: .medium))
-                                                .foregroundStyle(runtimeColor(node.id))
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                    .padding(compact ? 7 : 9)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        selectedNodeId == node.id ? Color.accentColor.opacity(0.11) : OpenCodexPalette.elevated,
-                                        in: RoundedRectangle(cornerRadius: 8)
-                                    )
-                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(
-                                        selectedNodeId == node.id ? Color.accentColor.opacity(0.65) : OpenCodexPalette.softBorder
-                                    ))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("\(node.title), \(phase.title), \(node.responsibility ?? node.kind)")
-                            }
-                        }
-                        .padding(compact ? 8 : 10)
-                        .frame(width: compact ? 176 : 212, alignment: .topLeading)
-                        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.softBorder))
-
-                        if index < phases.count - 1 {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
+                            Spacer(minLength: 0)
+                            Text("\(phase.nodes.count)")
+                                .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
                                 .foregroundStyle(.tertiary)
-                                .padding(.top, compact ? 18 : 24)
+                        }
+
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: compact ? 132 : 178), spacing: 7, alignment: .top)],
+                            alignment: .leading,
+                            spacing: 7
+                        ) {
+                            ForEach(phase.nodes) { node in
+                                architectureNode(node, phase: phase)
+                            }
                         }
                     }
+                    .padding(compact ? 8 : 10)
+                    .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.softBorder))
+
+                    if index < phases.count - 1 {
+                        HStack(spacing: 6) {
+                            Rectangle()
+                                .fill(OpenCodexPalette.border)
+                                .frame(width: 1, height: 10)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
+                    }
                 }
-                .padding(8)
             }
+            .padding(8)
             .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(OpenCodexPalette.softBorder))
         }
+    }
+
+    private func architectureNode(_ node: HarnessGraphNode, phase: HarnessArchitecturePhase) -> some View {
+        Button { onSelect?(node.id) } label: {
+            VStack(alignment: .leading, spacing: compact ? 3 : 5) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(runtimeColor(node.id))
+                        .frame(width: 7, height: 7)
+                    Text(node.title)
+                        .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if node.editable {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(node.responsibility ?? "Responsibility not declared by this Pack.")
+                    .font(.system(size: compact ? 9 : 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(compact ? 2 : 3)
+                    .multilineTextAlignment(.leading)
+                if !compact {
+                    Text(relationshipSummary(node.id))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+                if let observed = runtime?.nodes[node.id] {
+                    Text(observed.activity)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(runtimeColor(node.id))
+                        .lineLimit(1)
+                }
+            }
+            .padding(compact ? 7 : 9)
+            .frame(maxWidth: .infinity, minHeight: compact ? 56 : 78, alignment: .topLeading)
+            .background(
+                selectedNodeId == node.id ? Color.accentColor.opacity(0.11) : OpenCodexPalette.elevated,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+                selectedNodeId == node.id ? Color.accentColor.opacity(0.65) : OpenCodexPalette.softBorder
+            ))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(node.title), \(phase.title), \(node.responsibility ?? node.kind)")
     }
 
     private var phases: [HarnessArchitecturePhase] {
@@ -6281,7 +6392,7 @@ private struct HarnessOnboardingView: View {
     }
 
     private var selectedHarness: HarnessCatalogEntry? {
-        if let selectedHarnessId, let selected = store.harnesses.first(where: { $0.id == selectedHarnessId }) {
+        if let selectedHarnessId, let selected = filtered.first(where: { $0.id == selectedHarnessId }) {
             return selected
         }
         return filtered.first
@@ -6705,16 +6816,47 @@ private struct HarnessRuntimePanel: View {
                 }
             }
 
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    observedComponents
+                    runtimeTrace
+                }
+                .frame(minWidth: 710)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    runtimeTrace
+                    observedComponents
+                }
+            }
+        }
+    }
+
+    private var observedComponents: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Observed components")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("Select to filter")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             HarnessArchitectureFlow(
                 graph: harness.graph,
                 runtime: runtime,
                 selectedNodeId: selectedNodeID,
-                onSelect: { selectedNodeID = selectedNodeID == $0 ? nil : $0 }
+                onSelect: { selectedNodeID = selectedNodeID == $0 ? nil : $0 },
+                compact: true
             )
-            .frame(maxWidth: .infinity)
-            .frame(height: 225)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.softBorder))
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
+    private var runtimeTrace: some View {
+        VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(selectedNodeID == nil ? "Execution trace" : "Filtered execution trace")
                         .font(.subheadline.weight(.semibold))
@@ -6742,19 +6884,18 @@ private struct HarnessRuntimePanel: View {
                             if let latest { proxy.scrollTo(latest, anchor: .bottom) }
                         }
                     }
-                    .frame(height: 175)
+                    .frame(minHeight: 270, maxHeight: 390)
                 } else {
                     Text(selectedNodeID == nil
                          ? "Start a task with this Harness. OpenFish will record the ordered path only through declared components it actually observes, without prompt, path, command, account, or credential content."
                          : "No runtime observation has touched this component yet. Choose Show all to inspect the complete task trace.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.softBorder))
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 350, alignment: .topLeading)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.softBorder))
     }
 }
 
@@ -6924,6 +7065,30 @@ private struct HarnessSettingsView: View {
             if store.harnessOperationId != nil {
                 HarnessOperationStatus(store: store)
             }
+            if filtered.isEmpty {
+                VStack(spacing: 10) {
+                    if store.isLoadingHarnessCatalog && store.harnesses.isEmpty {
+                        ProgressView("Loading Harnesses…")
+                    } else {
+                        ContentUnavailableView(
+                            store.harnesses.isEmpty ? "Harness catalog unavailable" : "No matching Harness",
+                            systemImage: store.harnesses.isEmpty ? "exclamationmark.triangle" : "magnifyingglass",
+                            description: Text(store.harnessCatalogError ?? (store.harnesses.isEmpty
+                                ? "Retry the Host catalog, import a Pack, or create one locally."
+                                : "Try another name or clear the search."))
+                        )
+                        Button(store.harnesses.isEmpty ? "Retry catalog" : "Clear search") {
+                            if store.harnesses.isEmpty {
+                                Task { await store.loadHarnessCatalogForOnboarding(forceRefresh: true) }
+                            } else {
+                                query = ""
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+            }
             VStack(spacing: 10) {
                 ForEach(filtered) { harness in
                     HStack(spacing: 12) {
@@ -7079,6 +7244,11 @@ private struct HarnessSettingsView: View {
                     lens: $lens,
                     showingCreateEditor: $showingCreateEditor
                 )
+            }
+        }
+        .task {
+            if store.harnesses.isEmpty {
+                await store.loadHarnessCatalogForOnboarding()
             }
         }
         .sheet(item: $authSelection) { selection in HarnessCredentialsSheet(store: store, selection: selection) }

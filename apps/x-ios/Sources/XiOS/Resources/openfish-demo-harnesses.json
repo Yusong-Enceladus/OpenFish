@@ -1034,7 +1034,7 @@
       "schemaVersion": 0,
       "id": "oh-my-pi",
       "name": "Oh My Pi",
-      "version": "18.0.9",
+      "version": "18.0.10",
       "description": "Community Harness with native ACP mode and advanced coding tools.",
       "publisher": "Oh My Pi contributors",
       "repository": "https://github.com/can1357/oh-my-pi",
@@ -1072,7 +1072,7 @@
       ],
       "distribution": {
         "kind": "bunx",
-        "package": "@oh-my-pi/pi-coding-agent@18.0.9",
+        "package": "@oh-my-pi/pi-coding-agent@18.0.10",
         "args": [
           "acp"
         ],
@@ -1086,7 +1086,7 @@
           {
             "kind": "source-derived",
             "source": "https://github.com/can1357/oh-my-pi",
-            "version": "18.0.9"
+            "version": "18.0.10"
           }
         ],
         "nodes": [
@@ -1107,7 +1107,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/tree/main/packages/coding-agent/src",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ]
           },
@@ -1129,7 +1129,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/agent-session.ts",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ],
             "observes": [
@@ -1157,7 +1157,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/config/model-registry.ts",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ],
             "observes": [
@@ -1181,7 +1181,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ],
             "observes": [
@@ -1205,7 +1205,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ],
             "observes": [
@@ -1230,7 +1230,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ]
           },
@@ -1250,7 +1250,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ]
           },
@@ -1270,7 +1270,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/session-manager.ts",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ]
           },
@@ -1291,7 +1291,7 @@
               {
                 "kind": "source-derived",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
-                "version": "18.0.9"
+                "version": "18.0.10"
               }
             ],
             "observes": [
@@ -1390,11 +1390,11 @@
       "available": true,
       "installation": {
         "status": "not-installed",
-        "availableVersion": "18.0.9",
+        "availableVersion": "18.0.10",
         "previousVersions": [],
         "integrity": {
           "status": "version-pinned",
-          "source": "@oh-my-pi/pi-coding-agent@18.0.9",
+          "source": "@oh-my-pi/pi-coding-agent@18.0.10",
           "detail": "Demo package identity is pinned to the exact live Pack version; this is not a checksum claim."
         }
       },

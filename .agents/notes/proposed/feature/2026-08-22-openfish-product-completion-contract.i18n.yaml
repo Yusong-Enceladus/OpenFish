@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-22-openfish-product-completion-contract.md
-2026-08-22-openfish-product-completion-contract.md: 21c0e3994b19196fff6d80d45fd09e41339fdb65
-2026-08-22-openfish-product-completion-contract.zh.md: bcde6c57262cfc9135342047e44f1553ac7e2200
+2026-08-22-openfish-product-completion-contract.md: d30ff80c5cf4ae23bb5cab13c0162beeeb8e2cc8
+2026-08-22-openfish-product-completion-contract.zh.md: 5fb9f10892cf0904b2e705a3b691f3b67046fa49

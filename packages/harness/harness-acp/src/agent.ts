@@ -521,11 +521,17 @@ export async function installHarnessPack(
     }
     return
   }
-  const argv = distribution.kind === 'npx'
-    ? [process.execPath, npmCliPath(), 'install', '--prefix', directory, '--no-save', '--package-lock=false', distribution.package]
-    : [bunCliPath(), 'add', '--cwd', directory, distribution.package]
+  const npmCli = distribution.kind === 'npx' ? npmCliPath() : undefined
+  const argv = npmCli === undefined
+    ? [bunCliPath(), 'add', '--cwd', directory, distribution.package]
+    : [process.execPath, npmCli, 'install', '--prefix', directory, '--no-save', '--package-lock=false', distribution.package]
   const launch = await prepareHarnessProcess(ctx, {
     argv, cwd: directory, installationDirectory: directory, runtimeDirectory, purpose: 'install',
+    // In a packaged Host this already sits under OPENFISH_EMBEDDED_RUNTIME_ROOT.
+    // Source builds may resolve npm from an external pnpm virtual store, which
+    // still needs the same narrow, built-in read grant under resident-process
+    // isolation. The package root contains npm's self-contained dependencies.
+    ...(npmCli === undefined ? {} : { trustedReadRoots: [dirname(dirname(npmCli))] }),
   })
   const child = ctx.subprocess.spawn({
     argv: launch.argv,

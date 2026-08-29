@@ -29,6 +29,12 @@ export interface HarnessProcessAuthorityRequest {
   sandboxMode?: SandboxMode
   /** Explicit external state owned by the selected authentication method. */
   authenticationRoots?: readonly string[]
+  /**
+   * Open Fish-owned runtime code needed to launch the process. This is only
+   * populated by built-in installers (for example the pinned npm CLI); Pack
+   * manifests cannot add read grants here.
+   */
+  trustedReadRoots?: readonly string[]
 }
 
 /** Prepared process facts safe to hand directly to `ctx.subprocess.spawn`. */
@@ -111,6 +117,7 @@ export async function prepareHarnessProcess(
     request.installationDirectory,
     request.runtimeDirectory,
     ...trustedRuntimeRoots(request.argv),
+    ...(request.trustedReadRoots ?? []),
     ...authenticationRoots,
   ])
   const policy: SandboxPolicy = {

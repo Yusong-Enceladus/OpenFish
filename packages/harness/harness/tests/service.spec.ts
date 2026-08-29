@@ -1057,8 +1057,8 @@ describe('Harness lifecycle and Driver SDK', () => {
         distribution: { kind: 'npx', package: '@openai/codex@0.150.1' },
       })
       expect((await service.list()).find(item => item.id === 'oh-my-pi')).toMatchObject({
-        version: '18.0.9', installation: { availableVersion: '18.0.9' },
-        distribution: { kind: 'bunx', package: '@oh-my-pi/pi-coding-agent@18.0.9' },
+        version: '18.0.10', installation: { availableVersion: '18.0.10' },
+        distribution: { kind: 'bunx', package: '@oh-my-pi/pi-coding-agent@18.0.10' },
       })
     } finally {
       await rm(stateDir, { recursive: true, force: true })

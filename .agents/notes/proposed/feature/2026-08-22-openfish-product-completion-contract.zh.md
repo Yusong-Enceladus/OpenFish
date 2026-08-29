@@ -124,7 +124,7 @@ README 说明支持平台、准确的 Release 基线 Harness、兼容等级、�
 
 只有主要 Public Alpha 路径端到端工作，且 Release 没有虚假核心声明时，P0 才算完成。
 
-1. 一台没有任何外部 Runtime 或 Harness CLI 的全新受支持 Mac 可以安装签名并公证的 OpenFish Build，选择默认 Harness，完成明确认证和模型设置，启动 Project 与 No Project 任务，恢复任务，修改默认值，并使用另一个 Harness 新建任务。
+1. 一台没有任何外部 Runtime 或 Harness CLI 的全新受支持 Mac 可以安装一个自包含的 OpenFish Build，选择默认 Harness，完成明确认证和模型设置，启动 Project 与 No Project 任务，恢复任务，修改默认值，并使用另一个 Harness 新建任务。Developer ID 签名和公证属于后续二进制分发门禁，不能挤占尚未完成的核心行为。
 2. DSH、Codex 和 OMP 分别通过安装、认证、实时模型发现、模型选择、受支持思考强度、发送、工具与审批流、取消、恢复、归档、更新、回滚和可操作失败恢复。Codex 在受支持时分别证明 ChatGPT Subscription 和 API Billing 路径，且不自动处理或暴露用户 Secret。
 3. 任意兼容 ACP Registry Pack 都可在不修改原生 UI 的情况下出现；一个全新的合成 ACP Pack 从发现到恢复全程通过；不兼容或错误 Pack 在启动前给出准确拒绝原因。
 4. Composer 和 Settings 始终区分并显示 Host、Harness、Account、Provider／Model、Reasoning、Workspace 与 Permission。No Project 使用专属存储，并在 Mac 和 iPhone 上支持完整 Session 生命周期。
@@ -133,7 +133,7 @@ README 说明支持平台、准确的 Release 基线 Harness、兼容等级、�
 7. 真实 Mac 与 iPhone 验证覆盖 Pair、Disconnect／Reconnect、Approval、Question、任务连续性、语音 Allow／Deny、反复使用语音、前后台和 Remote Revoke。每台测试 Mac 只保留一个可被发现且品牌正确的 OpenFish 安装。
 8. 自动化 Contract、Integration、Packaged-runtime、Migration、Native UI 与 Regression Check 覆盖已报告失败：缺少 Injected Tools、Persona Mount 失败、ACP Connection Closed、缺少 Provider／Model、模型 Selector 消失、Reasoning Selector 消失、Caret Inset 错误、No Project 创建失败、App Identity 重复、手机连接丢失和语音崩溃。
 9. Release Tree 与 Git History 通过 Secret Scan、人工审核误报、截图 OCR 与 Metadata 检查、Binary 与 Archive 检查、Dependency License Review、Third-party Notice 和 Credential／Log 脱敏检查。Threat Model 覆盖 Harness Supply Chain、Process Authority、本地网络暴露、Credential、Diagnostics 和社区发布。
-10. Source Tree 干净，Public GitHub Remote 与 History 只包含批准内容，Release Artifact 已签名并公证，Checksum 与 Provenance 已发布，Install／Uninstall 指南通过验证，公开截图与声明和测试 Build 一致。
+10. Source Tree 干净，Public GitHub Remote 与 History 只包含批准内容；每个被测 Artifact 都由 Checksum 与 Provenance 精确标识；Install／Uninstall 指南通过验证；公开截图与声明和测试 Build 一致。源码发布不等待 Developer ID 工作，面向终端用户推广的二进制发布才需要。
 
 ## P1 验收契约：完整产品承诺
 
@@ -146,6 +146,7 @@ P1 包含超出 Public Alpha 最小路径的所有明确产品需求。P0 Releas
 5. 完整 Mac 与 iPhone Screen／State Inventory 使用选定 Design System，并通过支持的 OS、Architecture、Window Size、Appearance、Localization、Accessibility、Network、Account 与 Device Matrix。Mac-only 操作在 iPhone 上使用清楚 Handoff，而不是缺失或误导的控件。
 6. Clean-machine 与 Chaos Coverage 包含受支持时的 Apple Silicon 与 Intel、Fresh 与 Upgraded State、No Dependencies、Corrupt Download、Registry Outage、Authentication Expiry、Provider Quota Failure、Harness Crash、Host Restart、ACP Protocol Violation、Network Partition、Low Disk Space、Permission Change、Interrupted Update 和 Concurrent Device Action。
 7. 公开价值证据报告 Time to First Successful Task、Harness Setup／Switch Success、Resume Reliability、Setup-failure Recovery、Graph Comprehension、Custom Pack Creation Time 与任务层质量对比，而且不把 Harness 性能和 OpenFish Compatibility 混为一谈。
+8. 面向终端用户推广的 macOS 二进制分发在核心产品与源码发布合同通过后，再完成预期 Developer ID、Notarization、Stapling、Update Provenance 与已安装应用迁移检查。
 
 ## 执行顺序与证据
 

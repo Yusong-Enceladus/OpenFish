@@ -828,7 +828,7 @@ function ompSource(kind: 'blob' | 'tree', ...segments: string[]): string {
   return `https://github.com/can1357/oh-my-pi/${kind}/main/${segments.join('/')}`
 }
 
-function curatedOmp(version = '18.0.9'): HarnessPack {
+function curatedOmp(version = '18.0.10'): HarnessPack {
   return parseHarnessPack({
     schemaVersion: 0,
     id: 'oh-my-pi',
