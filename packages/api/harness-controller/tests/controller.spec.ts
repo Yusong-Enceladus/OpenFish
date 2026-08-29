@@ -31,6 +31,16 @@ function catalogRow(overrides: Partial<HarnessCatalogEntry> = {}): HarnessCatalo
     },
     auth: { methods: [], status: 'not-required', missingFields: [], detail: 'No Harness-level sign-in is required.' },
     compatibility: { status: 'untested', classification: 'experimental' },
+    proof: {
+      conclusion: 'pending',
+      facts: [
+        { kind: 'declared', status: 'verified', title: 'Manifest admitted', detail: 'Fixture Pack admitted.' },
+        { kind: 'resolved', status: 'pending', title: 'Executable identity', detail: 'Not installed.' },
+        { kind: 'observed', status: 'not-applicable', title: 'Runtime observation', detail: 'Not exposed.' },
+        { kind: 'evaluated', status: 'pending', title: 'Compatibility evaluation', detail: 'Not run.' },
+        { kind: 'opaque', status: 'verified', title: 'Private internals remain opaque', detail: 'One runtime boundary.' },
+      ],
+    },
     capabilities: [],
     authoring: { nodeKinds: [], bindingKinds: [] },
     driver: { apiVersion: 1, protocol: 'acp', loaded: true, authorization: 'not-required' },
@@ -52,6 +62,7 @@ function fakeHarnesses(row = catalogRow()): HarnessService {
     selectAuth: vi.fn(async () => undefined),
     authorizeDriverBundle: vi.fn(async () => undefined),
     upsert: vi.fn(async () => row),
+    validateDraft: vi.fn(async () => row),
     validatePublication: vi.fn(async () => row),
     require: vi.fn(() => row),
     recordCommunitySubmission: vi.fn(async () => undefined),
@@ -142,6 +153,18 @@ describe('Harness Remote control plane', () => {
       expect(harnesses.authorizeDriverBundle).toHaveBeenCalledWith(
         'fixture.acp', '1.0.0', '@fixture/openfish-driver', '@fixture/openfish-driver@1.0.0',
       )
+    } finally {
+      await context.fiber.dispose()
+    }
+  })
+
+  it('validates a Studio draft on the local plane without upserting it', async () => {
+    const { context, controller, harnesses } = await boot()
+    try {
+      const pack = { schemaVersion: 0, id: 'fixture.draft' }
+      await controller.manage({ action: 'validate-draft', pack }, signal())
+      expect(harnesses.validateDraft).toHaveBeenCalledWith(pack)
+      expect(harnesses.upsert).not.toHaveBeenCalled()
     } finally {
       await context.fiber.dispose()
     }

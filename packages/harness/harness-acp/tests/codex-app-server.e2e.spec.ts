@@ -28,7 +28,7 @@ import { CodexHarnessAgent, codexAuthenticationEnvironment } from '../src/codex-
 import * as AcpHarnessDriver from '../src/index.ts'
 
 const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.ts', import.meta.url))
-const evidence = [{ kind: 'source-derived' as const, source: 'Synthetic official app-server fixture', version: '1' }]
+const evidence = [{ kind: 'resolved' as const, source: 'Synthetic official app-server fixture', version: '1' }]
 const pack = parseHarnessPack({
   schemaVersion: 0,
   id: 'codex', name: 'Codex', version: 'test', publisher: 'OpenAI', verified: true,

@@ -862,6 +862,16 @@ async defaultId(): Promise<HarnessId | undefined>
 async upsert(input: unknown): Promise<HarnessPack>
 
 /**
+ * Admit a user-authored Pack without changing the catalog or starting code.
+ * This is the Studio dry-run boundary: schema parsing and OpenFish's custom
+ * Pack policy are exercised, while installation and live preflight remain
+ * separate, explicit operations.
+ * @param input - Untrusted Pack-shaped Studio draft.
+ * @returns The normalized Pack that passed schema and custom-Pack admission.
+ */
+async validateDraft(input: unknown): Promise<HarnessPack>
+
+/**
  * Validate one public community submission without mutating the local catalog.
  * @param input - Untrusted Pack-shaped publication payload.
  * @returns Exact installed, preflighted, and admitted Pack safe to submit for review.

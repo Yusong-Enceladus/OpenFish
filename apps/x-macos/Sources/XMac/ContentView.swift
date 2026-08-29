@@ -2098,18 +2098,24 @@ private struct Composer: View {
                         }
                     }
 
-                    // Model identity is part of the task contract, so the
-                    // compact toolbar must never hide it in a scroll view.
-                    // Secondary controls remain available from the overflow
-                    // and settings surfaces when the window is narrow.
-                    HStack(spacing: 8) {
-                        if store.canChooseHarness {
-                            HarnessPicker(store: store)
+                    // Every field that changes task identity remains visible
+                    // when the window narrows. Wrap into two deliberate rows
+                    // instead of silently eating workspace or permission.
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            if store.canChooseHarness {
+                                HarnessPicker(store: store)
+                            }
+                            ModelPicker(store: store)
+                            ReasoningPicker(store: store)
+                            HarnessAccountBadge(store: store, compact: true)
                         }
-                        ModelPicker(store: store)
-                        ReasoningPicker(store: store)
-                        HarnessAccountBadge(store: store, compact: true)
-                        ComposerOverflowMenu(store: store)
+                        HStack(spacing: 8) {
+                            WorkspacePicker(store: store)
+                            PermissionPicker(store: store)
+                            ComposerCapabilityMenu(store: store)
+                            ComposerOverflowMenu(store: store)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -3246,6 +3252,8 @@ private struct HarnessPackEditor: View {
     @State private var graphUndo: [GraphSnapshot] = []
     @State private var graphRedo: [GraphSnapshot] = []
     @State private var suppressGraphHistory = false
+    @State private var draftAdmissionSummary: String?
+    @State private var admittedDraftRevision: String?
     @State private var preflightSummary: String?
 
     private var graphSnapshot: GraphSnapshot {
@@ -3253,6 +3261,20 @@ private struct HarnessPackEditor: View {
             level: graphLevel, boundary: graphBoundary, evidenceSource: graphEvidenceSource,
             nodes: nodes, edges: edges, positions: positions
         )
+    }
+
+    private var draftRevision: String {
+        [
+            id, name, version, description, publisher, license, repository, protocolName,
+            driverPackage, driverSpec, String(driverRequiresInstallScripts), distributionKind,
+            packageOrCommand, binaryCommand, sha256, arguments, distributionEnvironment,
+            graphLevel, graphBoundary, graphEvidenceSource, authMethodId, authMethodName,
+            authKind, authFieldRef, authFieldName, authFieldEnv, authAccountLabel, authBilling,
+            authAccountDetail, String(discoverAuthenticationAtRuntime), agentAuthMetaKey,
+            agentAuthFieldProperty, modelOwner, String(modelConfigurationRequired),
+            modelConfigurationDetail, terminalAuthArguments, terminalAuthEnvironment,
+            String(describing: graphSnapshot),
+        ].joined(separator: "\u{0}")
     }
 
     private var loadedDriverProtocols: [String] {
@@ -3651,10 +3673,11 @@ private struct HarnessPackEditor: View {
                     Text("Setup").tag("Setup")
                     Text("Architecture").tag("Architecture")
                     Text("Account & models").tag("Access")
+                    Text("Review").tag("Review")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 360)
+                .frame(width: 450)
                 if existing != nil {
                     Menu {
                         if changeSummary.isEmpty { Text("No material changes") }
@@ -3665,6 +3688,7 @@ private struct HarnessPackEditor: View {
                     .menuStyle(.borderlessButton)
                 }
             }
+            if editorPage != "Review" {
             Form {
                 if editorPage == "Setup" {
                 TextField("Identifier", text: $id)
@@ -3806,6 +3830,98 @@ private struct HarnessPackEditor: View {
                     Text("This declaration drives onboarding and model controls for every Pack; OpenFish does not infer it from a Harness name.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                }
+            }
+            }
+            if editorPage == "Review" {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        GroupBox("What will change") {
+                            VStack(alignment: .leading, spacing: 7) {
+                                if changeSummary.isEmpty {
+                                    Label("No material change from the selected Pack version.", systemImage: "checkmark.circle")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(changeSummary, id: \.self) { change in
+                                        Label(change, systemImage: change.contains("presentation only") ? "paintbrush" : "arrow.right.circle")
+                                            .font(.caption)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                        }
+                        GroupBox("Immutable version line") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    studioVersionChip("Draft", value: version, emphasized: true)
+                                    if let installed = existing?.installation.installedVersion {
+                                        Image(systemName: "arrow.left").foregroundStyle(.tertiary)
+                                        studioVersionChip("Installed", value: installed)
+                                    }
+                                }
+                                let retained = Array(Set(
+                                    (existing?.installation.previousVersions ?? [])
+                                        + (existing?.publication?.knownVersions ?? [])
+                                )).sorted()
+                                Text(retained.isEmpty
+                                     ? "No older Pack versions are retained yet. Once installed, an update keeps the prior exact snapshot for task resume and rollback."
+                                     : "Retained exact versions: \(retained.joined(separator: ", ")). Existing tasks stay pinned to their original Harness version.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let existing, existing.installation.status == "installed", version == existing.version, !changeSummary.isEmpty {
+                                    Label("Increment the version before saving behavioral changes.", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                        }
+                        GroupBox("Proof ladder") {
+                            VStack(alignment: .leading, spacing: 9) {
+                                studioProofRow(
+                                    title: "Draft admission",
+                                    detail: admittedDraftRevision == draftRevision
+                                        ? (draftAdmissionSummary ?? "The current draft passed admission.")
+                                        : (draftAdmissionSummary == nil
+                                            ? "Not run for this editing session. Validate checks schema and OpenFish Pack policy without saving or starting code."
+                                            : "The draft changed after admission. Validate the current fields again; the earlier result is not carried forward."),
+                                    complete: admittedDraftRevision == draftRevision
+                                )
+                                studioProofRow(
+                                    title: "Exact installation",
+                                    detail: existing?.installation.installedVersion == version
+                                        ? "This exact Pack version is installed with its recorded integrity result."
+                                        : "Not proven for this draft version. Installation is a separate explicit operation.",
+                                    complete: existing?.installation.installedVersion == version
+                                )
+                                let preflightReady = existing?.version == version
+                                    && existing?.compatibility.basis == "preflight"
+                                    && ["ready", "compatible"].contains(existing?.compatibility.status ?? "")
+                                studioProofRow(
+                                    title: "Prompt-free live preflight",
+                                    detail: preflightSummary
+                                        ?? (preflightReady
+                                            ? "The Host previously initialized the exact Driver and Harness version without sending a model prompt."
+                                            : "Not proven for this draft version. Install & Live Preflight starts and tears down the exact runtime without a task prompt."),
+                                    complete: preflightSummary != nil || preflightReady
+                                )
+                                let observed = existing?.version == version
+                                    && existing?.proof?.facts.contains(where: { $0.kind == "observed" && $0.status == "verified" }) == true
+                                studioProofRow(
+                                    title: "Task runtime observation",
+                                    detail: observed
+                                        ? "A real task has emitted lifecycle evidence for this exact Harness version."
+                                        : "No completed task observation is claimed. Run a task and inspect Trace to establish this layer.",
+                                    complete: observed
+                                )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                        }
+                        Text("Saving re-runs admission on the current fields. Live preflight proves startup and discovery, not answer quality; Harness Lab measures task mechanics and leaves quality judgment explicit.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
                 }
             }
             if editorPage == "Architecture" {
@@ -4022,6 +4138,10 @@ private struct HarnessPackEditor: View {
             HStack {
                 Spacer()
                 Button("Cancel") { isPresented = false }
+                if editorPage == "Review" {
+                    Button("Validate Draft") { save(runPreflight: false, validateOnly: true) }
+                        .disabled(saving || !validationIssues.isEmpty)
+                }
                 Button("Save Manifest") { save(runPreflight: false) }
                     .disabled(saving || !validationIssues.isEmpty)
                 Button("Install & Live Preflight") { save(runPreflight: true) }
@@ -4031,7 +4151,10 @@ private struct HarnessPackEditor: View {
             }
         }
         .padding(22)
-        .frame(width: 820, height: 780)
+        // The macOS Form reserves a label column. Give long, safety-critical
+        // labels enough room so they never push the editor title or field
+        // labels outside a nested sheet at common desktop widths.
+        .frame(width: 980, height: 780)
         .onChange(of: graphLevel) { _, level in
             if level == "opaque" {
                 let existingRuntime = nodes.first ?? HarnessGraphNode(
@@ -4161,9 +4284,32 @@ private struct HarnessPackEditor: View {
         selectedEditorNodeId = edgeFrom
     }
 
-    private func save(runPreflight: Bool) {
+    @ViewBuilder
+    private func studioVersionChip(_ title: String, value: String, emphasized: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.caption.weight(.semibold)).monospaced()
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(emphasized ? Color.accentColor.opacity(0.14) : OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func studioProofRow(title: String, detail: String, complete: Bool) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: complete ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(complete ? Color.green : Color.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold))
+                Text(detail).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func save(runPreflight: Bool, validateOnly: Bool = false) {
         saving = true
-        preflightSummary = nil
+        if !validateOnly { preflightSummary = nil }
         Task {
             let args = arguments.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
             let saved = await store.saveCustomHarness(
@@ -4183,9 +4329,16 @@ private struct HarnessPackEditor: View {
                 modelOwner: modelOwner, modelConfigurationRequired: modelConfigurationRequired,
                 modelConfigurationDetail: modelConfigurationDetail,
                 terminalAuthArguments: terminalAuthArguments, terminalAuthEnvironment: terminalAuthEnvironment,
-                nodes: nodes, edges: edges, positions: positions, existingPack: existing
+                nodes: nodes, edges: edges, positions: positions, existingPack: existing,
+                validateOnly: validateOnly
             )
             guard saved else { saving = false; return }
+            if validateOnly {
+                draftAdmissionSummary = "Schema and OpenFish admission policy accepted this draft. Nothing was saved, installed, or started."
+                admittedDraftRevision = draftRevision
+                saving = false
+                return
+            }
             guard runPreflight, let savedHarness = store.harnesses.first(where: { $0.id == id }) else {
                 preflightSummary = "Manifest admitted and saved. No executable was installed or started."
                 saving = false
@@ -4610,6 +4763,7 @@ private struct HarnessGraphPreview: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let nodeWidth = nodeWidth(in: proxy.size)
             let points = layout(in: proxy.size)
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
@@ -4619,36 +4773,31 @@ private struct HarnessGraphPreview: View {
 
                 ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
                     if let from = points[edge.from], let to = points[edge.to] {
-                        let endpoints = edgeEndpoints(from: from, to: to)
+                        let endpoints = edgeEndpoints(from: from, to: to, nodeWidth: nodeWidth)
+                        let controls = edgeControls(start: endpoints.start, end: endpoints.end)
                         let liveEdge = runtimeEdge(edge)
+                        let connected = selectedNodeId == nil || edge.from == selectedNodeId || edge.to == selectedNodeId
                         Path { path in
                             path.move(to: endpoints.start)
-                            path.addLine(to: endpoints.end)
+                            path.addCurve(to: endpoints.end, control1: controls.first, control2: controls.second)
                         }
-                        .stroke(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.5 : 0.95), style: StrokeStyle(
-                            lineWidth: liveEdge == nil ? 1.35 : 2.4, lineCap: .round
+                        .stroke(edgeColor(liveEdge?.status).opacity(
+                            liveEdge == nil ? (connected ? 0.62 : 0.22) : (connected ? 0.98 : 0.48)
+                        ), style: StrokeStyle(
+                            lineWidth: liveEdge == nil ? (connected ? 1.45 : 1.05) : (connected ? 2.5 : 1.6),
+                            lineCap: .round
                         ))
+                        .help(edgeHelp(edge))
                         Image(systemName: "arrowtriangle.right.fill")
                             .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.65 : 0.95))
+                            .foregroundStyle(edgeColor(liveEdge?.status).opacity(
+                                liveEdge == nil ? (connected ? 0.72 : 0.28) : (connected ? 0.98 : 0.5)
+                            ))
                             .rotationEffect(.radians(atan2(
-                                endpoints.end.y - endpoints.start.y,
-                                endpoints.end.x - endpoints.start.x
+                                endpoints.end.y - controls.second.y,
+                                endpoints.end.x - controls.second.x
                             )))
                             .position(endpoints.end)
-                        if let label = edge.label {
-                            Text(label)
-                                .font(.system(size: 8.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 5)
-                                .frame(height: 17)
-                                .background(OpenCodexPalette.elevated.opacity(0.94), in: Capsule())
-                                .position(
-                                    x: (endpoints.start.x + endpoints.end.x) / 2,
-                                    y: (endpoints.start.y + endpoints.end.y) / 2 - 10
-                                )
-                        }
                     }
                 }
                 ForEach(graph.nodes) { node in
@@ -4671,7 +4820,7 @@ private struct HarnessGraphPreview: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 9)
-                        .frame(width: 144, height: 54)
+                        .frame(width: nodeWidth, height: 54)
                         .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(
                             selectedNodeId == node.id || matches(node) ? Color.accentColor : nodeColor(node).opacity(0.65),
@@ -4739,82 +4888,128 @@ private struct HarnessGraphPreview: View {
 
     private func layout(in size: CGSize) -> [String: CGPoint] {
         guard !graph.nodes.isEmpty else { return [:] }
-        let authored = graph.nodes.compactMap { node -> (String, HarnessGraphPosition)? in
-            node.position.map { (node.id, $0) }
-        }
-        if authored.count == graph.nodes.count {
-            let xs = authored.map { $0.1.x }
-            let ys = authored.map { $0.1.y }
-            let minX = xs.min() ?? 0
-            let maxX = xs.max() ?? minX
-            let minY = ys.min() ?? 0
-            let maxY = ys.max() ?? minY
-            let horizontalInset: CGFloat = min(86, max(46, size.width * 0.12))
-            let verticalInset: CGFloat = min(48, max(34, size.height * 0.12))
-            let usableWidth = max(1, size.width - horizontalInset * 2)
-            let usableHeight = max(1, size.height - verticalInset * 2)
-            return Dictionary(uniqueKeysWithValues: authored.map { id, position in
-                let x = maxX == minX ? size.width / 2
-                    : horizontalInset + CGFloat((position.x - minX) / (maxX - minX)) * usableWidth
-                let y = maxY == minY ? size.height / 2
-                    : verticalInset + CGFloat((position.y - minY) / (maxY - minY)) * usableHeight
-                return (id, CGPoint(x: x, y: y))
-            })
-        }
-        var level = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, 0) })
-        let nodeIDs = Set(graph.nodes.map(\.id))
-        let sourceOrder = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
-        for _ in 0..<max(1, graph.nodes.count - 1) {
-            var changed = false
-            for edge in graph.edges where nodeIDs.contains(edge.from)
-                && nodeIDs.contains(edge.to)
-                && (sourceOrder[edge.from] ?? 0) < (sourceOrder[edge.to] ?? 0) {
-                let candidate = min(graph.nodes.count - 1, (level[edge.from] ?? 0) + 1)
-                if candidate > (level[edge.to] ?? 0) {
-                    level[edge.to] = candidate
-                    changed = true
-                }
-            }
-            if !changed { break }
-        }
-
-        let usedLevels = Array(Set(level.values)).sorted()
-        let normalized = Dictionary(uniqueKeysWithValues: usedLevels.enumerated().map { ($0.element, $0.offset) })
-        let rows = Dictionary(grouping: graph.nodes) { normalized[level[$0.id] ?? 0] ?? 0 }
-        let maxRow = max(0, (rows.keys.max() ?? 0))
-        let horizontalInset: CGFloat = 76
-        let verticalInset: CGFloat = 48
-        let verticalStep = maxRow == 0 ? 0 : max(66, (size.height - verticalInset * 2) / CGFloat(maxRow))
-
+        let rows = readableRows(for: size)
+        let rowCount = max(1, rows.count)
+        let horizontalInset: CGFloat = 16
+        let verticalInset: CGFloat = 58
+        let width = nodeWidth(in: size)
+        let verticalStep = rowCount <= 1 ? 0 : min(104, max(70, (size.height - verticalInset * 2) / CGFloat(rowCount - 1)))
+        let contentHeight = verticalStep * CGFloat(max(0, rowCount - 1))
+        let startY = rowCount <= 1 ? size.height / 2 : max(verticalInset, (size.height - contentHeight) / 2)
         var points: [String: CGPoint] = [:]
-        for row in 0...maxRow {
-            let nodes = rows[row] ?? []
-            let usableWidth = max(136, size.width - horizontalInset * 2)
-            let horizontalStep = nodes.count <= 1 ? 0 : usableWidth / CGFloat(nodes.count - 1)
-            let contentWidth = horizontalStep * CGFloat(max(0, nodes.count - 1))
-            let startX = nodes.count <= 1 ? size.width / 2 : max(horizontalInset, (size.width - contentWidth) / 2)
+        for (row, nodes) in rows.enumerated() {
+            let gap: CGFloat = 12
+            let contentWidth = CGFloat(nodes.count) * width + CGFloat(max(0, nodes.count - 1)) * gap
+            let startX = max(horizontalInset + width / 2, (size.width - contentWidth) / 2 + width / 2)
             for (column, node) in nodes.enumerated() {
                 points[node.id] = CGPoint(
-                    x: min(size.width - horizontalInset, startX + CGFloat(column) * horizontalStep),
-                    y: min(size.height - verticalInset, verticalInset + CGFloat(row) * verticalStep)
+                    x: min(size.width - horizontalInset - width / 2, startX + CGFloat(column) * (width + gap)),
+                    y: min(size.height - verticalInset, startY + CGFloat(row) * verticalStep)
                 )
             }
         }
         return points
     }
 
-    private func edgeEndpoints(from: CGPoint, to: CGPoint) -> (start: CGPoint, end: CGPoint) {
+    /// Preserve authored vertical bands and left-to-right order, but split a
+    /// dense band when the inspector narrows. This keeps the architecture
+    /// truthful while preventing the overlapping cards produced by globally
+    /// squeezing desktop coordinates into a 500–700 pt settings pane.
+    private func readableRows(for size: CGSize) -> [[HarnessGraphNode]] {
+        let sourceOrder = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
+        let authored = graph.nodes.compactMap { node -> (HarnessGraphNode, HarnessGraphPosition)? in
+            node.position.map { (node, $0) }
+        }
+        let bands: [[HarnessGraphNode]]
+        if authored.count == graph.nodes.count {
+            let sorted = authored.sorted {
+                if abs($0.1.y - $1.1.y) > 44 { return $0.1.y < $1.1.y }
+                return $0.1.x < $1.1.x
+            }
+            var grouped: [[(HarnessGraphNode, HarnessGraphPosition)]] = []
+            for item in sorted {
+                if let last = grouped.indices.last,
+                   let anchor = grouped[last].first?.1.y,
+                   abs(item.1.y - anchor) <= 44 {
+                    grouped[last].append(item)
+                } else {
+                    grouped.append([item])
+                }
+            }
+            bands = grouped.map { $0.sorted { $0.1.x < $1.1.x }.map(\.0) }
+        } else {
+            var level = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, 0) })
+            let nodeIDs = Set(graph.nodes.map(\.id))
+            for _ in 0..<max(1, graph.nodes.count - 1) {
+                var changed = false
+                for edge in graph.edges where nodeIDs.contains(edge.from)
+                    && nodeIDs.contains(edge.to)
+                    && (sourceOrder[edge.from] ?? 0) < (sourceOrder[edge.to] ?? 0) {
+                    let candidate = min(graph.nodes.count - 1, (level[edge.from] ?? 0) + 1)
+                    if candidate > (level[edge.to] ?? 0) {
+                        level[edge.to] = candidate
+                        changed = true
+                    }
+                }
+                if !changed { break }
+            }
+            let grouped = Dictionary(grouping: graph.nodes) { level[$0.id] ?? 0 }
+            bands = grouped.keys.sorted().map { key in
+                (grouped[key] ?? []).sorted { (sourceOrder[$0.id] ?? 0) < (sourceOrder[$1.id] ?? 0) }
+            }
+        }
+        let maximumPerRow = size.width >= 820 ? 5 : size.width >= 600 ? 4 : 3
+        return bands.flatMap { band in
+            stride(from: 0, to: band.count, by: maximumPerRow).map { start in
+                Array(band[start..<min(start + maximumPerRow, band.count)])
+            }
+        }
+    }
+
+    private func nodeWidth(in size: CGSize) -> CGFloat {
+        let maximum = max(1, readableRows(for: size).map(\.count).max() ?? 1)
+        return min(144, max(108, (size.width - 32 - CGFloat(maximum - 1) * 12) / CGFloat(maximum)))
+    }
+
+    private func edgeEndpoints(from: CGPoint, to: CGPoint, nodeWidth: CGFloat) -> (start: CGPoint, end: CGPoint) {
         let dx = to.x - from.x
         let dy = to.y - from.y
         let distance = max(1, hypot(dx, dy))
         let ux = dx / distance
         let uy = dy / distance
-        let horizontal = abs(dx) >= abs(dy)
-        let inset: CGFloat = horizontal ? 76 : 34
+        let horizontalDistance = abs(ux) < 0.001 ? CGFloat.greatestFiniteMagnitude : (nodeWidth / 2 + 4) / abs(ux)
+        let verticalDistance = abs(uy) < 0.001 ? CGFloat.greatestFiniteMagnitude : 31 / abs(uy)
+        let inset = min(horizontalDistance, verticalDistance)
         return (
             CGPoint(x: from.x + ux * inset, y: from.y + uy * inset),
             CGPoint(x: to.x - ux * inset, y: to.y - uy * inset)
         )
+    }
+
+    /// Keep the topology legible without placing prose on top of nodes or
+    /// other connections. Exact relationship labels remain available in the
+    /// selected component inspector and as edge help text.
+    private func edgeControls(start: CGPoint, end: CGPoint) -> (first: CGPoint, second: CGPoint) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        if abs(dy) < 24 {
+            return (
+                CGPoint(x: start.x + dx * 0.34, y: start.y),
+                CGPoint(x: start.x + dx * 0.66, y: end.y)
+            )
+        }
+        let bend = max(28, min(62, abs(dy) * 0.46))
+        let direction: CGFloat = dy >= 0 ? 1 : -1
+        return (
+            CGPoint(x: start.x, y: start.y + bend * direction),
+            CGPoint(x: end.x, y: end.y - bend * direction)
+        )
+    }
+
+    private func edgeHelp(_ edge: HarnessGraphEdge) -> String {
+        let names = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0.title) })
+        let route = "\(names[edge.from] ?? edge.from) → \(names[edge.to] ?? edge.to)"
+        return edge.label.map { "\(route) · \($0)" } ?? route
     }
 
     private func matches(_ node: HarnessGraphNode) -> Bool {
@@ -4952,7 +5147,7 @@ private struct HarnessDetailPanel: View {
     var compact = false
     var runtime: HarnessRuntimeProjection? = nil
     @State private var selectedNodeId: String?
-    @State private var architecturePresentation = "Flow"
+    @State private var architecturePresentation = "Map"
     @State private var showsCapabilities = false
 
     private var truthExplanation: String {
@@ -5005,8 +5200,8 @@ private struct HarnessDetailPanel: View {
                             .foregroundStyle(.secondary)
                             .fixedSize()
                         Picker("", selection: $architecturePresentation) {
-                            Text("Operational lens").tag("Flow")
-                            Text("Full relationship map").tag("Map")
+                            Text("Relationship map").tag("Map")
+                            Text("Stage summary").tag("Flow")
                         }
                         .labelsHidden()
                         .pickerStyle(.segmented)
@@ -5014,7 +5209,35 @@ private struct HarnessDetailPanel: View {
                         .accessibilityLabel("Architecture view")
                         Spacer()
                     }
-                    if architecturePresentation == "Flow" {
+                    if architecturePresentation == "Map" {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: 12) {
+                                HarnessGraphPreview(
+                                    graph: harness.graph,
+                                    runtime: runtime,
+                                    interactive: true,
+                                    selectedNodeId: selectedNodeId,
+                                    onSelect: { selectedNodeId = $0 }
+                                )
+                                .frame(minWidth: 500, maxWidth: .infinity, minHeight: 390)
+                                componentDetails
+                                    .frame(minWidth: 270, maxWidth: 330, alignment: .topLeading)
+                            }
+                            .frame(minWidth: 790)
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                HarnessGraphPreview(
+                                    graph: harness.graph,
+                                    runtime: runtime,
+                                    interactive: true,
+                                    selectedNodeId: selectedNodeId,
+                                    onSelect: { selectedNodeId = $0 }
+                                )
+                                .frame(height: 390)
+                                componentDetails
+                            }
+                        }
+                    } else {
                         ViewThatFits(in: .horizontal) {
                             HStack(alignment: .top, spacing: 12) {
                                 operationalStages
@@ -5029,21 +5252,9 @@ private struct HarnessDetailPanel: View {
                                 componentDetails
                             }
                         }
-                    } else {
-                        HarnessGraphPreview(
-                            graph: harness.graph,
-                            runtime: runtime,
-                            interactive: true,
-                            selectedNodeId: selectedNodeId,
-                            onSelect: { selectedNodeId = $0 }
-                        )
-                        .frame(height: 330)
-                        if let node = selectedNode {
-                            HarnessNodeEvidencePanel(node: node)
-                        }
                     }
                     HStack(spacing: 12) {
-                        Label(architecturePresentation == "Flow" ? "Ordered from Pack connections" : "Every declared relationship", systemImage: architecturePresentation == "Flow" ? "list.number" : "point.3.connected.trianglepath.dotted")
+                        Label(architecturePresentation == "Map" ? "Every declared relationship" : "Summary derived from the same connections", systemImage: architecturePresentation == "Map" ? "point.3.connected.trianglepath.dotted" : "list.number")
                         Label("Observed state", systemImage: "circle.fill")
                             .foregroundStyle(.green)
                         Spacer()
@@ -5168,6 +5379,7 @@ private struct HarnessDetailPanel: View {
             }
             if let node = selectedNode {
                 HarnessNodeEvidencePanel(node: node)
+                declaredConnections(for: node)
             } else {
                 Text("Select a declared component to inspect it.")
                     .font(.caption)
@@ -5177,6 +5389,48 @@ private struct HarnessDetailPanel: View {
         .padding(11)
         .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(OpenCodexPalette.softBorder))
+    }
+
+    @ViewBuilder
+    private func declaredConnections(for node: HarnessGraphNode) -> some View {
+        let incoming = harness.graph.edges.filter { $0.to == node.id }
+        let outgoing = harness.graph.edges.filter { $0.from == node.id }
+        if !incoming.isEmpty || !outgoing.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Declared connections")
+                    .font(.caption2.weight(.semibold))
+                ForEach(Array(incoming.enumerated()), id: \.offset) { _, edge in
+                    connectionRow(edge, incoming: true)
+                }
+                ForEach(Array(outgoing.enumerated()), id: \.offset) { _, edge in
+                    connectionRow(edge, incoming: false)
+                }
+            }
+            .padding(10)
+            .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(OpenCodexPalette.softBorder))
+        }
+    }
+
+    private func connectionRow(_ edge: HarnessGraphEdge, incoming: Bool) -> some View {
+        let otherID = incoming ? edge.from : edge.to
+        let other = harness.graph.nodes.first(where: { $0.id == otherID })?.title ?? otherID
+        return HStack(alignment: .top, spacing: 7) {
+            Image(systemName: incoming ? "arrow.right" : "arrow.right")
+                .foregroundStyle(incoming ? Color.secondary : Color.accentColor)
+                .rotationEffect(incoming ? .degrees(0) : .degrees(0))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(incoming ? "From \(other)" : "To \(other)")
+                    .font(.caption2.weight(.semibold))
+                if let label = edge.label, !label.isEmpty {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var driverAuthorizationLabel: String {
@@ -5189,8 +5443,9 @@ private struct HarnessDetailPanel: View {
 
     private func evidenceColor(_ kind: String) -> Color {
         switch kind {
-        case "runtime-observed": return .green
-        case "source-derived": return .blue
+        case "observed", "runtime-observed": return .green
+        case "resolved", "source-derived": return .blue
+        case "evaluated": return .purple
         default: return .secondary
         }
     }
@@ -6333,6 +6588,7 @@ private struct OpenCodexSettingsView: View {
             List(selection: $selection) {
                 Label("General", systemImage: "gearshape").tag("general")
                 Label("Harnesses", systemImage: "shippingbox").tag("harnesses")
+                Label("Harness Lab", systemImage: "flask").tag("harness-lab")
                 Label("Models", systemImage: "cpu").tag("models")
                 Label("Voice", systemImage: "waveform").tag("voice")
                 Label("Plugins", systemImage: "puzzlepiece.extension").tag("plugins")
@@ -6344,6 +6600,7 @@ private struct OpenCodexSettingsView: View {
             Group {
                 switch selection {
                 case "harnesses": HarnessSettingsView(store: store)
+                case "harness-lab": HarnessLabView(store: store)
                 case "models": ModelsSettingsView(store: store)
                 case "voice": VoiceSettingsView(store: store)
                 case "plugins": PluginsSettingsView(store: store)
@@ -6642,7 +6899,7 @@ private struct HarnessChoiceCard: View {
                 )
                 Spacer()
                 Text(harness.auth.status == "configured" || harness.auth.status == "not-required"
-                    ? harness.compatibility.classification.replacingOccurrences(of: "-", with: " ").capitalized
+                    ? "\(harness.compatibility.classification.replacingOccurrences(of: "-", with: " ").capitalized) · proof \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "unavailable")"
                     : harness.auth.status == "unknown" ? "Setup discovered after install" : "Sign-in needed")
             }
             .font(.caption2).foregroundStyle(.secondary)
@@ -6665,10 +6922,10 @@ private struct HarnessProgressiveLensPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             Picker("Harness lens", selection: $lens) {
-                Text("Simple").tag("Simple")
-                Text("How it works").tag("Architecture")
-                Text("Live task").tag("Runtime")
-                Text("Manifest").tag("Manifest")
+                Text("Overview").tag("Simple")
+                Text("Map").tag("Architecture")
+                Text("Trace").tag("Runtime")
+                Text("Studio").tag("Manifest")
             }
             .pickerStyle(.segmented)
             switch lens {
@@ -6683,23 +6940,25 @@ private struct HarnessProgressiveLensPanel: View {
     }
 
     private var simple: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 184), spacing: 10)], alignment: .leading, spacing: 10) {
-            LensFact(title: "Recommended for", value: recommendedUse, icon: "target")
-            LensFact(
-                title: "What changes",
-                value: "\(harness.description ?? "This Pack does not declare a usage summary.") New tasks can use it; existing tasks remain pinned to their original Harness and version.",
-                icon: "arrow.triangle.branch"
+        VStack(alignment: .leading, spacing: 10) {
+            HarnessProofPanel(
+                harness: harness,
+                runtime: store.currentHarness?.id == harness.id
+                    && store.controlHarnessVersionLabel == harness.version
+                    ? store.currentHarnessRuntime
+                    : nil
             )
-            LensFact(title: "Models & sign-in", value: modelAndSignInSummary, icon: "cpu")
-            LensFact(title: "Install & updates", value: lifecycleSummary, icon: "shippingbox")
-            LensFact(
-                title: "Trust & compatibility",
-                value: harness.compatibility.classification == "incompatible"
-                    ? "Incompatible on this Mac"
-                    : "\(harness.compatibility.classification.replacingOccurrences(of: "-", with: " ").capitalized) · \(harness.installation.integrity.status.replacingOccurrences(of: "-", with: " "))",
-                icon: "checkmark.shield"
-            )
-            LensFact(title: "Permission boundary", value: permissionSummary, icon: "hand.raised")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 184), spacing: 10)], alignment: .leading, spacing: 10) {
+                LensFact(title: "Recommended for", value: recommendedUse, icon: "target")
+                LensFact(
+                    title: "What changes",
+                    value: "\(harness.description ?? "This Pack does not declare a usage summary.") New tasks can use it; existing tasks remain pinned to their original Harness and version.",
+                    icon: "arrow.triangle.branch"
+                )
+                LensFact(title: "Models & sign-in", value: modelAndSignInSummary, icon: "cpu")
+                LensFact(title: "Install & updates", value: lifecycleSummary, icon: "shippingbox")
+                LensFact(title: "Permission boundary", value: permissionSummary, icon: "hand.raised")
+            }
         }
     }
 
@@ -6841,13 +7100,14 @@ private struct HarnessRuntimePanel: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            HarnessArchitectureFlow(
+            HarnessGraphPreview(
                 graph: harness.graph,
                 runtime: runtime,
+                interactive: true,
                 selectedNodeId: selectedNodeID,
-                onSelect: { selectedNodeID = selectedNodeID == $0 ? nil : $0 },
-                compact: true
+                onSelect: { selectedNodeID = selectedNodeID == $0 ? nil : $0 }
             )
+            .frame(minHeight: 330)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -6957,6 +7217,130 @@ private struct HarnessTraceRow: View {
 
     private func deltaLabel(_ milliseconds: Double) -> String {
         milliseconds < 1_000 ? "+\(Int(milliseconds)) ms" : String(format: "+%.1f s", milliseconds / 1_000)
+    }
+}
+
+private struct HarnessProofPanel: View {
+    let harness: HarnessCatalogEntry
+    var runtime: HarnessRuntimeProjection? = nil
+
+    private var hasLiveObservation: Bool {
+        guard runtime?.harnessId == nil || runtime?.harnessId == harness.id else { return false }
+        return !(runtime?.observations ?? []).isEmpty || !(runtime?.nodes ?? [:]).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label("Why this Harness is usable", systemImage: "checkmark.shield")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let conclusion = harness.proof?.conclusion {
+                    Text(conclusion.replacingOccurrences(of: "-", with: " ").capitalized)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(conclusionColor(conclusion))
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(conclusionColor(conclusion).opacity(0.12), in: Capsule())
+                }
+            }
+            Text("Five separate truth layers prevent a Pack claim from being mistaken for installed, observed, or evaluated behavior.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let facts = harness.proof?.facts, !facts.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 7) {
+                        ForEach(facts) { fact in
+                            HarnessProofFactCard(fact: fact, hasLiveObservation: hasLiveObservation)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 7)], alignment: .leading, spacing: 7) {
+                        ForEach(facts) { fact in
+                            HarnessProofFactCard(fact: fact, hasLiveObservation: hasLiveObservation)
+                        }
+                    }
+                }
+            } else {
+                Label("This Host predates the proof ledger. Update the OpenFish Host before treating compatibility labels as evidence.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(12)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(OpenCodexPalette.softBorder))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Harness proof ledger")
+    }
+
+    private func conclusionColor(_ conclusion: String) -> Color {
+        switch conclusion {
+        case "verified": return .green
+        case "failed": return .red
+        case "partially-verified": return .blue
+        default: return .orange
+        }
+    }
+}
+
+private struct HarnessProofFactCard: View {
+    let fact: HarnessCatalogEntry.Proof.Fact
+    let hasLiveObservation: Bool
+
+    private var status: String {
+        fact.kind == "observed" && hasLiveObservation ? "verified" : fact.status
+    }
+
+    private var detail: String {
+        fact.kind == "observed" && hasLiveObservation
+            ? "The current task contains Pack-bound, content-free runtime evidence. Open Trace for the ordered path."
+            : fact.detail
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                Text(fact.kind.capitalized)
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 2)
+                Text(status.replacingOccurrences(of: "-", with: " ").capitalized)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(fact.title).font(.caption.weight(.semibold)).lineLimit(2)
+            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(4)
+            if let source = fact.source, !source.isEmpty {
+                Text(source).font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary).lineLimit(1)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .background(OpenCodexPalette.hover, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(color.opacity(0.25)))
+        .help(detail)
+    }
+
+    private var icon: String {
+        switch fact.kind {
+        case "declared": return "doc.text"
+        case "resolved": return "shippingbox"
+        case "observed": return "waveform.path.ecg"
+        case "evaluated": return "checkmark.seal"
+        default: return "eye.slash"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case "verified": return .green
+        case "available": return .blue
+        case "failed", "blocked": return .red
+        case "pending": return .orange
+        default: return .secondary
+        }
     }
 }
 
@@ -7099,6 +7483,9 @@ private struct HarnessSettingsView: View {
                             Text(harness.description ?? "No description provided.").font(.system(size: 11.5)).foregroundStyle(.secondary)
                             Text("Registry: \(harness.verified ? "verified" : "community") · OpenFish: \(harness.compatibility.classification.replacingOccurrences(of: "-", with: " "))")
                                 .font(.system(size: 10.5)).foregroundStyle(harness.compatibility.classification == "incompatible" ? Color.red : Color.secondary)
+                            Text("Proof: \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "Host update required")\(harness.compatibility.basis.map { " · latest \($0.replacingOccurrences(of: "-", with: " "))" } ?? "")")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(harness.proof?.conclusion == "failed" ? Color.red : Color.secondary)
                             Text("Install trust: \(harness.installation.integrity.status.replacingOccurrences(of: "-", with: " "))")
                                 .font(.system(size: 10.5)).foregroundStyle(.secondary)
                                 .help(harness.installation.integrity.detail)
@@ -7415,6 +7802,11 @@ private struct HarnessSettingsView: View {
             "installation=\(harness.installation.status)", "auth=\(harness.auth.status)",
             "compatibility=\(harness.compatibility.classification)",
             "lastTest=\(harness.compatibility.status)",
+            harness.compatibility.basis.map { "test_basis=\($0)" },
+            harness.proof.map { "proof_conclusion=\($0.conclusion)" },
+            harness.proof.map { proof in
+                "proof_facts=" + proof.facts.map { "\($0.kind):\($0.status)" }.joined(separator: ",")
+            },
             "capabilities=\(harness.capabilities.sorted { $0.id < $1.id }.map { "\($0.id):\($0.status):\($0.source)" }.joined(separator: ","))",
             harness.unavailableReason.map { "unavailable=\(redacted($0))" },
             harness.installation.error.map { "install_error=\(redacted($0))" },
@@ -7614,6 +8006,652 @@ private struct HarnessRevocationSheet: View {
         }
         .padding(22)
         .frame(width: 580)
+    }
+}
+
+private struct HarnessLabView: View {
+    @ObservedObject var store: OpenCodexStore
+    @State private var task = ""
+    @State private var selectedHarnessIds = Set<String>()
+    @State private var preparations: [String: HarnessExperimentPreparation] = [:]
+    @State private var consumedSessionIds = Set<String>()
+    @State private var outcomes: [HarnessExperimentOutcome] = []
+    @State private var ratings: [String: Int] = [:]
+    @State private var notes: [String: String] = [:]
+    @State private var rounds = 1
+    @State private var timeoutSeconds = 600
+    @State private var isPreparing = false
+    @State private var activeSessionId: String?
+    @State private var notice: String?
+    @State private var includeTaskInExport = false
+    @State private var includePrivateNotesInExport = false
+    @State private var runTask: Task<Void, Never>?
+
+    private var eligibleHarnesses: [HarnessCatalogEntry] {
+        store.harnesses.filter {
+            $0.available
+                && ($0.installation.status == "builtin" || $0.installation.status == "installed")
+                && ($0.auth.status == "not-required" || $0.auth.status == "configured")
+                && $0.compatibility.classification != "incompatible"
+                && $0.proof?.conclusion != "failed"
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var selectedHarnesses: [HarnessCatalogEntry] {
+        eligibleHarnesses.filter { selectedHarnessIds.contains($0.id) }
+    }
+
+    private var canPrepare: Bool {
+        selectedHarnessIds.count >= 2 && !isPreparing && runTask == nil
+    }
+
+    private var canRun: Bool {
+        selectedHarnessIds.count >= 2
+            && selectedHarnessIds.allSatisfy { preparations[$0] != nil }
+            && !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !store.isDemoMode && !isPreparing && runTask == nil
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Label("Harness Lab", systemImage: "flask")
+                            .font(.system(size: 22, weight: .semibold))
+                        Spacer()
+                        Text(store.isDemoMode ? "Demo preview · synthetic · offline" : "Live · No Project · inspectable tasks")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Run one identical task through exact Harness, version, account, model, reasoning, workspace, and permission routes. Compatibility and task quality remain separate: OpenFish records mechanics; you judge whether the answer is actually good.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                GroupBox("1 · Task contract") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextEditor(text: $task)
+                            .font(.system(size: 12.5))
+                            .frame(minHeight: 110)
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(OpenCodexPalette.border))
+                            .accessibilityLabel("Comparison task")
+                        HStack {
+                            Stepper("Rounds: \(rounds)", value: $rounds, in: 1...5)
+                            Divider().frame(height: 18)
+                            Stepper("Timeout: \(timeoutSeconds / 60) min", value: $timeoutSeconds, in: 60...1_800, step: 60)
+                            Spacer()
+                        }
+                        .font(.caption)
+                        Label(store.isDemoMode
+                              ? "This isolated preview creates no task, uses no credential or quota, and contains no synthetic quality score. A live comparison still requires your explicit run."
+                              : "Preparing creates prompt-free provider drafts. Running sends the task and may use paid provider or subscription quota. OpenFish never answers an approval request for you; a selected permission mode may still allow an operation without asking.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(8)
+                }
+
+                GroupBox("2 · Harnesses") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if eligibleHarnesses.count < 2 {
+                            Label("Install and authenticate at least two compatible Harnesses in Settings → Harnesses.", systemImage: "shippingbox")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        ForEach(eligibleHarnesses) { harness in
+                            Button { toggle(harness) } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: selectedHarnessIds.contains(harness.id) ? "checkmark.square.fill" : "square")
+                                        .foregroundStyle(selectedHarnessIds.contains(harness.id) ? Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(harness.name).font(.system(size: 12.5, weight: .semibold))
+                                            Text(harness.version).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                        }
+                                        Text("\(harness.protocolName.uppercased()) · \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "proof unavailable") · \(harness.auth.status.replacingOccurrences(of: "-", with: " "))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if preparations[harness.id] != nil {
+                                        Label(store.isDemoMode ? "Demo route" : "Live config", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(runTask != nil || isPreparing)
+                            if harness.id != eligibleHarnesses.last?.id { Divider() }
+                        }
+                        HStack {
+                            Button(store.isDemoMode ? "Refresh demo routes" : (isPreparing ? "Discovering…" : "Discover live configurations")) { prepareSelected() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!canPrepare)
+                            if !preparations.isEmpty {
+                                Button(store.isDemoMode ? "Reset preview" : "Discard drafts") {
+                                    if store.isDemoMode { loadDemoPreview() }
+                                    else { discardPreparedDrafts() }
+                                }
+                                    .disabled(runTask != nil)
+                            }
+                            Spacer()
+                            if isPreparing { ProgressView().controlSize(.small) }
+                        }
+                    }
+                    .padding(8)
+                }
+
+                if !preparations.isEmpty {
+                    GroupBox(store.isDemoMode ? "3 · Demo routes" : "3 · Exact live routes") {
+                        VStack(spacing: 10) {
+                            ForEach(selectedHarnesses) { harness in
+                                if let preparation = preparations[harness.id] {
+                                    experimentRoute(preparation)
+                                    if harness.id != selectedHarnesses.last?.id { Divider() }
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+                }
+
+                HStack {
+                    if runTask == nil {
+                        Button(store.isDemoMode ? "Demo preview only" : "Run live comparison") { runComparison() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(!canRun)
+                    } else {
+                        Button("Cancel comparison", role: .destructive) { runTask?.cancel() }
+                            .controlSize(.large)
+                        ProgressView()
+                        Text(activeSessionId.flatMap { id in
+                            preparations.values.first(where: { $0.sessionId == id })?.harnessName
+                                ?? outcomes.first(where: { $0.sessionId == id })?.harnessName
+                        }.map { "Running \($0)…" } ?? "Preparing next run…")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !outcomes.isEmpty {
+                        Toggle("Include task text in export", isOn: $includeTaskInExport)
+                            .toggleStyle(.checkbox).font(.caption)
+                        Toggle("Include private notes", isOn: $includePrivateNotesInExport)
+                            .toggleStyle(.checkbox).font(.caption)
+                        Button("Export redacted report…") { exportReport() }
+                    }
+                }
+
+                if let notice {
+                    Label(notice, systemImage: notice.localizedCaseInsensitiveContains("failed") ? "exclamationmark.triangle" : "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(notice.localizedCaseInsensitiveContains("failed") ? Color.red : Color.secondary)
+                }
+
+                if !outcomes.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Results").font(.headline)
+                        Text("Completion, latency, tools, approvals, and provider-reported tokens are mechanical facts—not a quality score. Rate the actual answer only after opening its task.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(outcomes) { outcome in
+                            experimentOutcome(outcome)
+                        }
+                    }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 940, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .onAppear {
+            if selectedHarnessIds.isEmpty {
+                selectedHarnessIds = Set(eligibleHarnesses.prefix(2).map(\.id))
+            }
+            if store.isDemoMode {
+                loadDemoPreview()
+            }
+        }
+        .onDisappear {
+            runTask?.cancel()
+            discardPreparedDrafts()
+        }
+    }
+
+    @ViewBuilder
+    private func experimentRoute(_ preparation: HarnessExperimentPreparation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(preparation.harnessName).font(.subheadline.weight(.semibold))
+                    Text("\(preparation.harnessVersion) · \(preparation.accountLabel)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(store.isDemoMode ? "Demo · No Project" : "No Project").font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).frame(height: 21).background(OpenCodexPalette.hover, in: Capsule())
+            }
+            HStack(spacing: 12) {
+                Picker("Model", selection: modelBinding(for: preparation.harnessId)) {
+                    ForEach(preparation.models.groups) { group in
+                        Section(group.name) {
+                            ForEach(group.models) { model in
+                                Text(model.name).tag(modelKey(provider: group.id, model: model.id))
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                let reasoning = selectedModel(in: preparations[preparation.harnessId] ?? preparation)?.reasoning
+                if let efforts = reasoning?.efforts, !efforts.isEmpty {
+                    Picker("Reasoning", selection: reasoningBinding(for: preparation.harnessId)) {
+                        ForEach(efforts) { effort in Text(effort.name).tag(effort.id) }
+                    }
+                    .frame(maxWidth: 240)
+                } else {
+                    Text("Reasoning fixed by Harness")
+                        .font(.caption).foregroundStyle(.secondary).frame(maxWidth: 240, alignment: .trailing)
+                }
+            }
+            HStack {
+                if preparation.permissions.options.count > 1 {
+                    Picker("Permission", selection: permissionBinding(for: preparation.harnessId)) {
+                        ForEach(preparation.permissions.options.filter { $0.value != "custom" }) { option in
+                            Text(option.name).tag(option.value)
+                        }
+                    }
+                    .frame(maxWidth: 320)
+                } else {
+                    Text("Permission · \(preparation.permissions.options.first?.name ?? preparation.permissionValue)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("No approval auto-answer")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func experimentOutcome(_ outcome: HarnessExperimentOutcome) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(outcome.harnessName).font(.subheadline.weight(.semibold))
+                Text("round \(outcome.round) · order \(outcome.order)").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text(outcome.terminalReason.replacingOccurrences(of: "-", with: " ").capitalized)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(outcome.error == nil ? Color.green : Color.red)
+            }
+            Text("\(outcome.harnessVersion) · \(outcome.model.provider)/\(outcome.model.model)\(outcome.model.reasoningEffort.map { " · \($0)" } ?? "") · \(outcome.permission)")
+                .font(.caption2.monospaced()).foregroundStyle(.secondary)
+            HStack(spacing: 15) {
+                metric("Elapsed", milliseconds(outcome.elapsedMilliseconds))
+                metric("First output", outcome.firstOutputMilliseconds.map(milliseconds) ?? "n/a")
+                metric("Tools", String(outcome.toolCalls))
+                metric("Approvals", String(outcome.approvalRequests))
+                metric("Tokens", tokenSummary(outcome))
+                metric("Answer", "\(outcome.finalAnswerCharacters) chars")
+            }
+            if let error = outcome.error {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
+            }
+            HStack {
+                Text("Your quality rating").font(.caption.weight(.semibold))
+                ForEach(1...5, id: \.self) { value in
+                    Button {
+                        ratings[outcome.id] = value
+                    } label: {
+                        Image(systemName: value <= ratings[outcome.id, default: 0] ? "star.fill" : "star")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.yellow)
+                    .accessibilityLabel("Rate \(value) of 5")
+                }
+                TextField("Private note", text: Binding(
+                    get: { notes[outcome.id] ?? "" }, set: { notes[outcome.id] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                Button("Open task") {
+                    Task {
+                        await store.selectSession(outcome.sessionId)
+                        store.isSettingsPresented = false
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(OpenCodexPalette.elevated, in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(OpenCodexPalette.softBorder))
+    }
+
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+            Text(value).font(.caption.weight(.semibold)).monospacedDigit()
+        }
+    }
+
+    private func toggle(_ harness: HarnessCatalogEntry) {
+        if selectedHarnessIds.remove(harness.id) != nil {
+            if let preparation = preparations.removeValue(forKey: harness.id),
+               !store.isDemoMode,
+               !consumedSessionIds.contains(preparation.sessionId) {
+                Task { await store.discardHarnessExperimentDraft(preparation.sessionId) }
+            }
+        } else {
+            selectedHarnessIds.insert(harness.id)
+        }
+        if store.isDemoMode { loadDemoPreview() }
+    }
+
+    private func prepareSelected() {
+        if store.isDemoMode {
+            loadDemoPreview()
+            return
+        }
+        isPreparing = true
+        notice = nil
+        Task { @MainActor in
+            var failures: [String] = []
+            for harness in selectedHarnesses where preparations[harness.id] == nil {
+                do {
+                    preparations[harness.id] = try await store.prepareHarnessExperiment(harness)
+                } catch {
+                    failures.append("\(harness.name): \(error)")
+                }
+            }
+            isPreparing = false
+            notice = failures.isEmpty
+                ? "Live model, reasoning, account, and permission routes discovered for every selected Harness."
+                : "Live configuration failed for \(failures.joined(separator: "; "))"
+        }
+    }
+
+    private func discardPreparedDrafts() {
+        if store.isDemoMode {
+            preparations.removeAll()
+            return
+        }
+        let unused = preparations.values.filter { !consumedSessionIds.contains($0.sessionId) }.map(\.sessionId)
+        preparations.removeAll()
+        Task { for sessionId in unused { await store.discardHarnessExperimentDraft(sessionId) } }
+    }
+
+    private func runComparison() {
+        guard !store.isDemoMode else { return }
+        let prompt = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = selectedHarnesses.map(\.id)
+        notice = nil
+        outcomes = []
+        ratings = [:]
+        notes = [:]
+        runTask = Task { @MainActor in
+            defer { activeSessionId = nil; runTask = nil }
+            var order = 0
+            for round in 1...rounds {
+                let offset = (round - 1) % max(1, ids.count)
+                let ordered = Array(ids[offset...]) + Array(ids[..<offset])
+                for harnessId in ordered {
+                    guard !Task.isCancelled else {
+                        notice = "Comparison cancelled. Completed runs remain inspectable."
+                        return
+                    }
+                    guard let harness = eligibleHarnesses.first(where: { $0.id == harnessId }),
+                          let template = preparations[harnessId] else {
+                        notice = "Comparison stopped because a selected Harness or its live route is no longer available."
+                        return
+                    }
+                    let preparation: HarnessExperimentPreparation
+                    if !consumedSessionIds.contains(template.sessionId) {
+                        preparation = template
+                    } else {
+                        do {
+                            var fresh = try await store.prepareHarnessExperiment(harness)
+                            fresh.selection = template.selection
+                            fresh.permissionValue = template.permissionValue
+                            preparation = fresh
+                        } catch {
+                            notice = "Comparison failed while preparing \(harness.name): \(error)"
+                            return
+                        }
+                    }
+                    order += 1
+                    activeSessionId = preparation.sessionId
+                    consumedSessionIds.insert(preparation.sessionId)
+                    let result = await store.runHarnessExperiment(
+                        preparation,
+                        prompt: prompt,
+                        round: round,
+                        order: order,
+                        timeoutSeconds: TimeInterval(timeoutSeconds)
+                    )
+                    outcomes.append(result)
+                }
+            }
+            notice = Task.isCancelled
+                ? "Comparison cancelled. Completed runs remain inspectable."
+                : "Comparison completed. Open each task and rate answer quality before drawing a conclusion."
+        }
+    }
+
+    /// Populate only public, synthetic route metadata for product captures.
+    /// This path creates no task, reads no credentials, and never contacts a
+    /// Harness or provider. It deliberately contains no fake quality result.
+    private func loadDemoPreview() {
+        if task.isEmpty {
+            task = "Inspect a small repository, explain the root cause, and propose the smallest tested fix."
+        }
+        var preview: [String: HarnessExperimentPreparation] = [:]
+        for harness in selectedHarnesses {
+            let models = demoModels(for: harness)
+            let permissions = PermissionSelect(
+                options: [
+                    PermissionOption(value: "read-only", name: "Read Only", description: "Inspect without changing files."),
+                    PermissionOption(value: "workspace-write", name: "Workspace Write", description: "Edit only inside the selected workspace."),
+                ],
+                currentValue: "workspace-write"
+            )
+            preview[harness.id] = HarnessExperimentPreparation(
+                sessionId: "demo-\(harness.id)",
+                harnessId: harness.id,
+                harnessName: harness.name,
+                harnessVersion: harness.version,
+                accountLabel: models.account?.label ?? harness.account?.label ?? "Demo account boundary",
+                models: models,
+                permissions: permissions,
+                selection: models.current,
+                permissionValue: permissions.currentValue
+            )
+        }
+        preparations = preview
+        outcomes = []
+        notice = "Synthetic route preview only. OpenFish created no task, used no credential or quota, and makes no Harness quality claim. Connect a live Host to run the comparison."
+    }
+
+    private func demoModels(for harness: HarnessCatalogEntry) -> SessionModels {
+        if harness.id == "codex", let models = store.sessionModels {
+            return models
+        }
+        let provider = "demo-host"
+        let model = "configured-route"
+        return SessionModels(
+            current: ModelSelection(provider: provider, model: model, reasoningEffort: "medium"),
+            routable: true,
+            groups: [
+                ModelProviderGroup(
+                    id: provider,
+                    name: "Host-configured provider · Demo",
+                    models: [
+                        CatalogModel(
+                            id: model,
+                            name: "Configured coding model · Demo",
+                            description: "Synthetic placeholder; a live DSH Host reports the actual provider and model.",
+                            providerId: provider,
+                            providerName: "Host-configured provider · Demo",
+                            reasoning: ModelReasoning(
+                                efforts: [
+                                    ModelReasoningEffort(id: "low", name: "Low", description: nil),
+                                    ModelReasoningEffort(id: "medium", name: "Medium", description: nil),
+                                    ModelReasoningEffort(id: "high", name: "High", description: nil),
+                                ],
+                                defaultEffort: "medium"
+                            )
+                        ),
+                    ]
+                ),
+            ],
+            failures: [],
+            account: HarnessCatalogEntry.AccountDescriptor(
+                label: "User-configured provider · Demo",
+                billing: "unknown",
+                detail: "Synthetic placeholder; the live Host reports the actual provider account and billing boundary."
+            )
+        )
+    }
+
+    private func modelBinding(for harnessId: String) -> Binding<String> {
+        Binding(
+            get: {
+                guard let selection = preparations[harnessId]?.selection else { return "" }
+                return modelKey(provider: selection.provider, model: selection.model)
+            },
+            set: { key in
+                guard var preparation = preparations[harnessId],
+                      let (provider, model) = splitModelKey(key),
+                      let catalogModel = preparation.models.groups.first(where: { $0.id == provider })?
+                        .models.first(where: { $0.id == model }) else { return }
+                preparation.selection = ModelSelection(
+                    provider: provider,
+                    model: model,
+                    reasoningEffort: catalogModel.reasoning?.defaultEffort
+                )
+                preparations[harnessId] = preparation
+            }
+        )
+    }
+
+    private func reasoningBinding(for harnessId: String) -> Binding<String> {
+        Binding(
+            get: { preparations[harnessId]?.selection.reasoningEffort ?? "" },
+            set: { effort in
+                guard var preparation = preparations[harnessId] else { return }
+                preparation.selection = ModelSelection(
+                    provider: preparation.selection.provider,
+                    model: preparation.selection.model,
+                    reasoningEffort: effort.isEmpty ? nil : effort
+                )
+                preparations[harnessId] = preparation
+            }
+        )
+    }
+
+    private func permissionBinding(for harnessId: String) -> Binding<String> {
+        Binding(
+            get: { preparations[harnessId]?.permissionValue ?? "" },
+            set: { value in
+                guard var preparation = preparations[harnessId] else { return }
+                preparation.permissionValue = value
+                preparations[harnessId] = preparation
+            }
+        )
+    }
+
+    private func selectedModel(in preparation: HarnessExperimentPreparation) -> CatalogModel? {
+        preparation.models.groups.first(where: { $0.id == preparation.selection.provider })?
+            .models.first(where: { $0.id == preparation.selection.model })
+    }
+
+    private func modelKey(provider: String, model: String) -> String { "\(provider)\u{0}\(model)" }
+
+    private func splitModelKey(_ key: String) -> (String, String)? {
+        let parts = key.split(separator: "\u{0}", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        return (String(parts[0]), String(parts[1]))
+    }
+
+    private func milliseconds(_ value: Int) -> String {
+        value < 1_000 ? "\(value) ms" : String(format: "%.1f s", Double(value) / 1_000)
+    }
+
+    private func tokenSummary(_ outcome: HarnessExperimentOutcome) -> String {
+        guard outcome.inputTokens != nil || outcome.outputTokens != nil else { return "n/a" }
+        return "\(outcome.inputTokens ?? 0) in · \(outcome.outputTokens ?? 0) out"
+    }
+
+    private func exportReport() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "openfish-harness-comparison.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let redactedRuns: [[String: Any]] = outcomes.map { outcome in
+            var value: [String: Any] = [
+                "harnessId": outcome.harnessId,
+                "harnessName": outcome.harnessName,
+                "harnessVersion": outcome.harnessVersion,
+                "provider": outcome.model.provider,
+                "model": outcome.model.model,
+                "permission": outcome.permission,
+                "workspaceMode": "no-project",
+                "round": outcome.round,
+                "order": outcome.order,
+                "terminalReason": outcome.terminalReason,
+                "elapsedMilliseconds": outcome.elapsedMilliseconds,
+                "toolCalls": outcome.toolCalls,
+                "approvalRequests": outcome.approvalRequests,
+                "finalAnswerCharacters": outcome.finalAnswerCharacters,
+            ]
+            if let rating = ratings[outcome.id] { value["userRating"] = rating }
+            if includePrivateNotesInExport, let note = notes[outcome.id], !note.isEmpty {
+                value["userNote"] = redactedDiagnostic(note)
+            }
+            if let reasoning = outcome.model.reasoningEffort { value["reasoningEffort"] = reasoning }
+            if let first = outcome.firstOutputMilliseconds { value["firstOutputMilliseconds"] = first }
+            if let input = outcome.inputTokens { value["inputTokens"] = input }
+            if let output = outcome.outputTokens { value["outputTokens"] = output }
+            if let error = outcome.error { value["error"] = redactedDiagnostic(error) }
+            return value
+        }
+        var report: [String: Any] = [
+            "schemaVersion": 1,
+            "generatedAt": ISO8601DateFormatter().string(from: Date()),
+            "openFishHostVersion": store.hostDescription?.version ?? "unknown",
+            "platform": "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "taskIncluded": includeTaskInExport,
+            "privateNotesIncluded": includePrivateNotesInExport,
+            "rounds": rounds,
+            "timeoutSeconds": timeoutSeconds,
+            "runs": redactedRuns,
+            "limitations": [
+                "Completion is not answer quality.",
+                "Provider-reported token fields may be absent.",
+                "No Project isolates workspace state; network, account, and Harness-side state remain provider-specific.",
+                "Run order rotates by round but this report is not a statistically powered benchmark unless the author supplies enough repetitions and an external rubric.",
+            ],
+        ]
+        if includeTaskInExport { report["task"] = task }
+        do {
+            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+            notice = "Redacted comparison report exported. Response text, account labels, paths, and local task ids were not included."
+        } catch {
+            notice = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func redactedDiagnostic(_ value: String) -> String {
+        var result = value.replacingOccurrences(of: NSHomeDirectory(), with: "$HOME")
+        result = result
+            .replacingOccurrences(of: #"/(?:Users|Volumes|private|tmp|var/folders)/[^\s,;)}\]]+"#, with: "[PATH]", options: .regularExpression)
+            .replacingOccurrences(of: #"\b[A-Za-z]:\\[^\r\n,;)}\]]+"#, with: "[PATH]", options: .regularExpression)
+            .replacingOccurrences(of: #"\bBearer\s+[A-Za-z0-9._~+/=-]{6,}\b"#, with: "Bearer [REDACTED]", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\b(?:sk|key|token)-[A-Za-z0-9_-]{12,}\b"#, with: "[REDACTED]", options: .regularExpression)
+            .replacingOccurrences(of: #"\b(?:gh[opushr]|github_pat|xox[aboprs])[-_][A-Za-z0-9_-]{8,}\b"#, with: "[REDACTED]", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"#, with: "[REDACTED]", options: .regularExpression)
+            .replacingOccurrences(of: #"(https?://)[^\s/@:]+:[^\s/@]+@"#, with: "$1[REDACTED]@", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"(?i)((?:api[_-]?key|authorization|token)\s*[:=]\s*)[^\s,;]+"#, with: "$1[REDACTED]", options: .regularExpression)
+        return String(result.prefix(800))
     }
 }
 

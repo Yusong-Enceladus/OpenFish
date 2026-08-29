@@ -44,17 +44,26 @@ function demoCatalogEntry(pack: HarnessPack) {
         : pack.distribution?.kind === 'binary' ? pack.distribution.archive : pack.distribution?.command ?? pack.source,
       detail: 'Demo package identity is pinned to the exact live Pack version; this is not a checksum claim.',
     }
+  const installation = {
+    status: builtIn ? 'builtin' as const : installed ? 'installed' as const : 'not-installed' as const,
+    ...(installed ? { installedVersion: pack.version } : {}),
+    availableVersion: pack.version,
+    previousVersions: [],
+    integrity,
+  }
+  const capabilities = demoCapabilities(pack)
+  const compatibility = {
+    status: 'ready' as const,
+    classification: 'experimental' as const,
+    message: installed
+      ? 'Deterministic Demo data; no Harness process, provider, or compatibility operation is contacted.'
+      : 'Demo catalog entry only; install and evaluate this exact version in a live OpenFish session.',
+  }
   return {
     ...pack,
     isDefault: pack.id === 'codex',
     available: true,
-    installation: {
-      status: builtIn ? 'builtin' as const : installed ? 'installed' as const : 'not-installed' as const,
-      ...(installed ? { installedVersion: pack.version } : {}),
-      availableVersion: pack.version,
-      previousVersions: [],
-      integrity,
-    },
+    installation,
     auth: {
       methods: authMethods,
       ...(selectedMethod === undefined ? {} : { selectedMethod }),
@@ -63,18 +72,65 @@ function demoCatalogEntry(pack: HarnessPack) {
         : selectedMethod === undefined ? 'needs-selection' as const : 'configured' as const,
       missingFields: [],
     },
-    compatibility: {
-      status: installed ? 'compatible' as const : 'ready' as const,
-      classification: installed && pack.graph.level !== 'opaque' ? 'supported' as const : 'experimental' as const,
-      message: installed ? 'Deterministic Demo data; no Harness process or provider is contacted.' : 'Available to install in a live OpenFish session.',
-    },
-    capabilities: demoCapabilities(pack),
+    compatibility,
+    proof: demoProof(pack, installed, builtIn, capabilities),
+    capabilities,
     driver: {
       apiVersion: 1 as const,
       protocol: pack.protocol,
       loaded: true,
       authorization: pack.driverBundle === undefined ? 'not-required' as const : 'authorized' as const,
     },
+  }
+}
+
+function demoProof(
+  pack: HarnessPack,
+  installed: boolean,
+  builtIn: boolean,
+  capabilities: readonly HarnessCapability[],
+) {
+  const observes = capabilities.some(capability => capability.id === 'architecture.runtime-observation'
+    && capability.status !== 'unsupported')
+  return {
+    // Demo mode deliberately remains partially verified: it is useful for
+    // screenshots and interaction QA but never impersonates a live provider.
+    conclusion: 'partially-verified' as const,
+    facts: [
+      {
+        kind: 'declared' as const, status: 'verified' as const, title: 'Manifest admitted',
+        detail: `${pack.graph.level} Demo architecture is generated from the same Pack manifest used by the live Host.`,
+        source: `${pack.id}@${pack.version}`,
+      },
+      {
+        kind: 'resolved' as const, status: installed ? 'available' as const : 'pending' as const,
+        title: builtIn ? 'Bundled identity represented' : 'Executable identity represented',
+        detail: installed
+          ? 'The Demo represents a pinned runtime identity but does not launch or checksum a real executable.'
+          : 'The live product would install this exact Pack version before use.',
+        source: 'Deterministic OpenFish Demo',
+      },
+      {
+        kind: 'observed' as const, status: observes ? 'available' as const : 'not-applicable' as const,
+        title: 'Runtime observation',
+        detail: observes
+          ? 'Synthetic content-free trace events can demonstrate the interaction; they are labelled Demo and are not live evidence.'
+          : 'This Pack does not declare runtime observation bindings.',
+      },
+      {
+        kind: 'evaluated' as const, status: 'available' as const, title: 'Live evaluation not run',
+        detail: 'Demo mode performs no authentication, provider request, installation, or compatibility preflight.',
+        source: 'Demo isolation contract',
+      },
+      {
+        kind: 'opaque' as const,
+        status: pack.graph.level === 'opaque' ? 'verified' as const : 'not-applicable' as const,
+        title: pack.graph.level === 'opaque' ? 'Private internals remain opaque' : 'No opaque substitution',
+        detail: pack.graph.level === 'opaque'
+          ? 'Only the declared runtime boundary is shown.'
+          : 'The Demo uses only Pack-declared components and does not invent private internals.',
+      },
+    ],
   }
 }
 

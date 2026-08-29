@@ -410,7 +410,7 @@ describe('Harness Pack v0', () => {
   })
 
   it('accepts a small observable graph when its one real responsibility is explained and evidenced', () => {
-    const evidence = [{ kind: 'source-derived', source: 'https://example.com/runtime', version: '1.0.0' }]
+    const evidence = [{ kind: 'resolved', source: 'https://example.com/runtime', version: '1.0.0' }]
     const pack = parseHarnessPack({
       schemaVersion: 0, id: 'small-runtime', name: 'Small Runtime', version: '1.0.0', publisher: 'Test', verified: false,
       protocol: 'acp', source: 'user',

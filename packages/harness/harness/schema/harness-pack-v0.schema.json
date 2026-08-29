@@ -200,7 +200,7 @@
     "graphEvidence": {
       "type": "object", "additionalProperties": false, "required": ["kind", "source"],
       "properties": {
-        "kind": { "enum": ["declared", "source-derived", "runtime-observed"] },
+        "kind": { "enum": ["declared", "resolved", "observed", "source-derived", "runtime-observed"] },
         "source": { "type": "string", "minLength": 1, "maxLength": 8192 },
         "version": { "type": "string", "minLength": 1, "maxLength": 256 }
       }

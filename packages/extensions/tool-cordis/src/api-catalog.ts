@@ -1120,6 +1120,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Admitted user Pack.',
       },
       {
+        signature: 'async validateDraft(input: unknown): Promise<HarnessPack>',
+        description: 'Admit a user-authored Pack without changing the catalog or starting code. This is the Studio dry-run boundary: schema parsing and OpenFish\'s custom Pack policy are exercised, while installation and live preflight remain separate, explicit operations.',
+        parameters: [{ name: 'input', description: 'Untrusted Pack-shaped Studio draft.' }],
+        returns: 'The normalized Pack that passed schema and custom-Pack admission.',
+      },
+      {
         signature: 'async validatePublication(input: unknown): Promise<HarnessPack>',
         description: 'Validate one public community submission without mutating the local catalog.',
         parameters: [{ name: 'input', description: 'Untrusted Pack-shaped publication payload.' }],
@@ -4486,11 +4492,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessCatalogEntry',
-    declaration: 'export interface HarnessCatalogEntry extends HarnessPack {\n    isDefault: boolean;\n    available: boolean;\n    unavailableReason?: string;\n    installation: HarnessInstallation;\n    auth: HarnessAuthentication;\n    compatibility: HarnessCompatibility;\n    publication?: HarnessPublication;\n    capabilities: HarnessCapability[];\n    authoring: HarnessAuthoringContract;\n    driver: {\n        apiVersion: 1;\n        protocol: string;\n        loaded: boolean;\n        authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
+    declaration: 'export interface HarnessCatalogEntry extends HarnessPack {\n    isDefault: boolean;\n    available: boolean;\n    unavailableReason?: string;\n    installation: HarnessInstallation;\n    auth: HarnessAuthentication;\n    compatibility: HarnessCompatibility;\n    proof: HarnessProof;\n    publication?: HarnessPublication;\n    capabilities: HarnessCapability[];\n    authoring: HarnessAuthoringContract;\n    driver: {\n        apiVersion: 1;\n        protocol: string;\n        loaded: boolean;\n        authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
   },
   {
     name: 'HarnessCatalogValue',
-    declaration: 'export interface HarnessCatalogValue {\n    readonly schemaVersion: 0;\n    readonly id: HarnessId;\n    readonly name: string;\n    readonly version: string;\n    readonly description?: string;\n    readonly publisher: string;\n    readonly license?: string;\n    readonly repository?: string;\n    readonly icon?: string;\n    readonly verified: boolean;\n    readonly protocol: string;\n    readonly account?: HarnessAccountDescriptor;\n    readonly modelConfiguration?: HarnessModelConfiguration;\n    readonly authMethods?: readonly HarnessAuthMethod[];\n    readonly authenticationDiscovery?: HarnessAuthenticationDiscovery;\n    readonly driverBundle?: HarnessDriverBundleRequirement;\n    readonly distribution?: HarnessDistribution;\n    readonly graph: HarnessGraphValue;\n    readonly source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n    readonly isDefault: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly installation: HarnessInstallation;\n    readonly auth: HarnessAuthentication;\n    readonly compatibility: HarnessCompatibility;\n    readonly publication?: HarnessPublication;\n    readonly capabilities: readonly HarnessCapability[];\n    readonly authoring: HarnessAuthoringValue;\n    readonly driver: {\n        readonly apiVersion: 1;\n        readonly protocol: string;\n        readonly loaded: boolean;\n        readonly authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
+    declaration: 'export interface HarnessCatalogValue {\n    readonly schemaVersion: 0;\n    readonly id: HarnessId;\n    readonly name: string;\n    readonly version: string;\n    readonly description?: string;\n    readonly publisher: string;\n    readonly license?: string;\n    readonly repository?: string;\n    readonly icon?: string;\n    readonly verified: boolean;\n    readonly protocol: string;\n    readonly account?: HarnessAccountDescriptor;\n    readonly modelConfiguration?: HarnessModelConfiguration;\n    readonly authMethods?: readonly HarnessAuthMethod[];\n    readonly authenticationDiscovery?: HarnessAuthenticationDiscovery;\n    readonly driverBundle?: HarnessDriverBundleRequirement;\n    readonly distribution?: HarnessDistribution;\n    readonly graph: HarnessGraphValue;\n    readonly source: \'builtin\' | \'acp-registry\' | \'openfish-community\' | \'user\';\n    readonly isDefault: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly installation: HarnessInstallation;\n    readonly auth: HarnessAuthentication;\n    readonly compatibility: HarnessCompatibility;\n    readonly proof: HarnessProof;\n    readonly publication?: HarnessPublication;\n    readonly capabilities: readonly HarnessCapability[];\n    readonly authoring: HarnessAuthoringValue;\n    readonly driver: {\n        readonly apiVersion: 1;\n        readonly protocol: string;\n        readonly loaded: boolean;\n        readonly authorization: \'not-required\' | \'required\' | \'authorized\';\n    };\n}',
   },
   {
     name: 'HarnessCommunitySubmissionRecord',
@@ -4498,7 +4504,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessCompatibility',
-    declaration: 'export interface HarnessCompatibility {\n    status: \'untested\' | \'ready\' | \'compatible\' | \'failed\';\n    classification: \'supported\' | \'experimental\' | \'opaque-but-runnable\' | \'incompatible\';\n    checkedAt?: string;\n    message?: string;\n}',
+    declaration: 'export interface HarnessCompatibility {\n    status: \'untested\' | \'ready\' | \'compatible\' | \'failed\';\n    classification: \'supported\' | \'experimental\' | \'opaque-but-runnable\' | \'incompatible\';\n    checkedAt?: string;\n    message?: string;\n    basis?: HarnessCompatibilityBasis;\n}',
+  },
+  {
+    name: 'HarnessCompatibilityBasis',
+    declaration: 'export type HarnessCompatibilityBasis = \'builtin\' | \'driver-admission\' | \'preflight\' | \'session-create\' | \'session-resume\' | \'session-fork\';',
   },
   {
     name: 'HarnessConfigBinding',
@@ -4550,7 +4560,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessGraphEvidence',
-    declaration: 'export interface HarnessGraphEvidence {\n    kind: \'declared\' | \'source-derived\' | \'runtime-observed\';\n    source: string;\n    version?: string;\n}',
+    declaration: 'export interface HarnessGraphEvidence {\n    kind: HarnessGraphEvidenceKind;\n    source: string;\n    version?: string;\n}',
+  },
+  {
+    name: 'HarnessGraphEvidenceKind',
+    declaration: 'export type HarnessGraphEvidenceKind = \'declared\' | \'resolved\' | \'observed\';',
   },
   {
     name: 'HarnessGraphLevel',
@@ -4594,7 +4608,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HarnessManageAction',
-    declaration: 'export type HarnessManageAction = \'install\' | \'update\' | \'probe\' | \'remove\' | \'login\' | \'upsert\' | \'validate-publication\' | \'submit-publication\' | \'submit-revocation\' | \'authorize-driver\';',
+    declaration: 'export type HarnessManageAction = \'install\' | \'update\' | \'probe\' | \'remove\' | \'login\' | \'upsert\' | \'validate-draft\' | \'validate-publication\' | \'submit-publication\' | \'submit-revocation\' | \'authorize-driver\';',
   },
   {
     name: 'HarnessManageRequest',
@@ -4635,6 +4649,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'HarnessPreflightResult',
     declaration: 'export interface HarnessPreflightResult {\n    message: string;\n    modelCount?: number;\n    configurationIds?: string[];\n}',
+  },
+  {
+    name: 'HarnessProof',
+    declaration: 'export interface HarnessProof {\n    conclusion: \'verified\' | \'partially-verified\' | \'pending\' | \'failed\';\n    facts: HarnessProofFact[];\n}',
+  },
+  {
+    name: 'HarnessProofFact',
+    declaration: 'export interface HarnessProofFact {\n    kind: HarnessProofKind;\n    status: \'verified\' | \'available\' | \'pending\' | \'blocked\' | \'failed\' | \'not-applicable\';\n    title: string;\n    detail: string;\n    source?: string;\n    checkedAt?: string;\n}',
+  },
+  {
+    name: 'HarnessProofKind',
+    declaration: 'export type HarnessProofKind = \'declared\' | \'resolved\' | \'observed\' | \'evaluated\' | \'opaque\';',
   },
   {
     name: 'HarnessPublication',

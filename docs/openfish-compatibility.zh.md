@@ -17,6 +17,18 @@ OpenFish 的兼容性是一份可测试契约，不是“名字叫 Harness 的�
 | 社区兼容 | 来自 ACP Registry、OpenFish 社区目录或自定义 Pack，使用通用 Driver，但不阻断 OpenFish 发布。 |
 | 协议不支持 | OpenFish 运行它之前需要新增 Driver 插件。 |
 
+## Proof 徽章究竟证明什么
+
+目录按准确 Pack 版本和具体操作保存证据。可见账本会明确写出各层含义，而不是一个含糊的绿色对勾：
+
+1. **Declared** —— 已通过准入的 Pack 描述了分发、协议、认证与 Graph；这是经过校验的元数据，不是执行证据。
+2. **Resolved** —— OpenFish 解析了准确的可执行身份与安装边界；准确版本 Pin 不会被冒充为校验和验证。
+3. **Observed** —— 真实 Session 的 Create、Resume 或 Fork 通过该准确版本成功或失败；系统只保留无内容的操作事实。
+4. **Evaluated** —— Host 根据内置契约、Driver Admission、实时 Preflight 或真实 Session 结果得出兼容性结论；它不是任务质量评分。
+5. **Opaque** —— 私有内部结构保持一个明确边界；兼容性绝不会授权系统编造内部 Graph。
+
+Studio 的非写入 Dry Run 会走与 Save 相同的 Pack Schema 与 Driver Admission Check，但刻意不会被保存成实时证据。后续 Preflight 不能抹掉真实 Session Observation，版本 A 的证据也不能认证版本 B。
+
 ## 当前矩阵
 
 | Harness | 入口 | 等级 | 认证归属 | 说明 |
@@ -34,7 +46,7 @@ OpenFish 的兼容性是一份可测试契约，不是“名字叫 Harness 的�
 
 ## 发布阻断旅程
 
-Harness 契约门禁覆盖 Manifest 接纳、首次启动、No Project、Harness 切换、模型／配置变化、恢复时版本固定、缺失认证、ACP 断开／取消、未来未知标准选项与打包 Host 生命周期。 `script/check_harness_contract.sh` 由 macOS 发布构建器强制调用。
+Harness 契约门禁覆盖 Manifest 接纳与非写入 Draft Validation、首次启动、No Project、Harness 切换、模型／配置／权限变化、恢复时版本固定、准确版本 Proof 保留、缺失认证、ACP 断开／取消、未来未知标准选项与打包 Host 生命周期。 `script/check_harness_contract.sh` 由 macOS 发布构建器强制调用。
 
 兼容报告必须包含 Harness id／版本、OpenFish Build、Host 架构、工作区模式、认证方式名称（绝不包含凭证）与首条脱敏错误。Registry 条目只是发现元数据，不代表安全审计或质量背书。
 

@@ -116,7 +116,7 @@ final class OpenCodexCoreSurfaceUITests: XCTestCase {
         let app = launchDemo(newTask: true, harnessCatalog: true)
 
         XCTAssertTrue(app.staticTexts["Harnesses"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.radioButtons["Simple"].exists)
+        XCTAssertTrue(app.radioButtons["Overview"].exists)
         XCTAssertTrue(app.staticTexts["Recommended for"].exists)
 
         let newPack = app.buttons["New Pack"]
@@ -128,6 +128,61 @@ final class OpenCodexCoreSurfaceUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(app.textFields.count, 6)
         XCTAssertTrue(app.buttons["Install & Live Preflight"].exists)
         XCTAssertFalse(app.buttons["Install & Live Preflight"].isEnabled)
+        keepScreenshot(of: app, named: "openfish-macos-harness-builder")
+    }
+
+    func testHarnessArchitectureTraceAndStudioRemainInspectable() throws {
+        let app = launchDemo(newTask: true, harnessCatalog: true)
+
+        XCTAssertTrue(app.staticTexts["Harnesses"].waitForExistence(timeout: 5))
+
+        let map = app.radioButtons["Map"]
+        XCTAssertTrue(map.exists)
+        map.click()
+        XCTAssertTrue(app.staticTexts["Architecture view"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.radioButtons["Relationship map"].exists)
+        XCTAssertTrue(app.staticTexts["Every declared relationship"].exists)
+        XCTAssertTrue(app.staticTexts["Declared connections"].exists)
+        keepScreenshot(of: app, named: "openfish-macos-harness-map")
+
+        let trace = app.radioButtons["Trace"]
+        XCTAssertTrue(trace.exists)
+        trace.click()
+        XCTAssertTrue(app.staticTexts["Live task path"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Observed components"].exists)
+        XCTAssertTrue(app.staticTexts["Execution trace"].exists)
+        keepScreenshot(of: app, named: "openfish-macos-harness-trace")
+
+        let studio = app.radioButtons["Studio"]
+        XCTAssertTrue(studio.exists)
+        studio.click()
+        XCTAssertTrue(app.staticTexts["Create or import a Harness"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Import Pack"].exists)
+        XCTAssertTrue(app.buttons["Create Pack"].exists)
+        keepScreenshot(of: app, named: "openfish-macos-harness-studio")
+    }
+
+    func testHarnessLabExplainsExactRoutesWithoutPretendingDemoIsLive() throws {
+        let app = launchDemo()
+
+        let settings = app.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.click()
+
+        let harnessLab = app.staticTexts["Harness Lab"]
+        XCTAssertTrue(harnessLab.waitForExistence(timeout: 5))
+        harnessLab.click()
+
+        XCTAssertTrue(app.staticTexts["1 · Task contract"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["2 · Harnesses"].exists)
+        XCTAssertTrue(app.staticTexts["3 · Demo routes"].exists)
+        XCTAssertTrue(app.buttons["Refresh demo routes"].exists)
+        XCTAssertTrue(app.staticTexts["Demo preview · synthetic · offline"].exists)
+        XCTAssertTrue(app.staticTexts["DeepSeek Harness"].exists)
+        XCTAssertTrue(app.staticTexts["Codex"].exists)
+        XCTAssertTrue(app.buttons["Demo preview only"].exists)
+        XCTAssertFalse(app.buttons["Demo preview only"].isEnabled)
+        keepScreenshot(of: app, named: "openfish-macos-harness-lab")
     }
 
     func testHostLoadingRecoverableAndFatalStatesNeverRenderABlankTask() throws {
@@ -159,5 +214,12 @@ final class OpenCodexCoreSurfaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Start with a task"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["OpenFish.WorkspacePicker"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["OpenFish.HarnessPicker"].exists)
+    }
+
+    private func keepScreenshot(of app: XCUIApplication, named name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

@@ -184,6 +184,9 @@ export class HarnessController extends TypertRemoteService {
       } else if (request.action === 'upsert') {
         if (request.pack === undefined) throw new Error('A Harness Pack document is required')
         await this.ctx.harnesses.upsert(request.pack)
+      } else if (request.action === 'validate-draft') {
+        if (request.pack === undefined) throw new Error('A Harness Pack document is required')
+        await this.ctx.harnesses.validateDraft(request.pack)
       } else if (request.action === 'validate-publication') {
         if (request.pack === undefined) throw new Error('A Harness Pack document is required')
         await this.ctx.harnesses.validatePublication(request.pack)

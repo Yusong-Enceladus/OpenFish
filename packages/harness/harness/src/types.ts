@@ -7,9 +7,16 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 /** Stable registry identity of one Harness Pack. */
 export type HarnessId = Branded<'HarnessId'>
 
-/** Provenance for one architecture fact exposed by a Harness Pack. */
+/** Canonical provenance for one architecture fact exposed by a Harness Pack. */
+export type HarnessGraphEvidenceKind = 'declared' | 'resolved' | 'observed'
+
+/**
+ * Evidence attached to one graph fact. `opaque` is intentionally not an
+ * evidence kind: it is the honest disclosure boundary represented by
+ * `HarnessGraphLevel` and by the catalog proof summary.
+ */
 export interface HarnessGraphEvidence {
-  kind: 'declared' | 'source-derived' | 'runtime-observed'
+  kind: HarnessGraphEvidenceKind
   source: string
   version?: string
 }
@@ -325,6 +332,8 @@ export interface HarnessCatalogEntry extends HarnessPack {
   installation: HarnessInstallation
   auth: HarnessAuthentication
   compatibility: HarnessCompatibility
+  /** Host-derived proof ledger kept separate from Pack-authored claims. */
+  proof: HarnessProof
   /** Reviewable registry lifecycle; absent for built-in and third-party catalogs. */
   publication?: HarnessPublication
   /** Negotiated capabilities drive native UI visibility and admission diagnostics. */
@@ -400,6 +409,40 @@ export interface HarnessCompatibility {
   classification: 'supported' | 'experimental' | 'opaque-but-runnable' | 'incompatible'
   checkedAt?: string
   message?: string
+  /** Exact local operation that most recently produced this conclusion. */
+  basis?: HarnessCompatibilityBasis
+}
+
+/** Local operation that produced the latest compatibility conclusion. */
+export type HarnessCompatibilityBasis =
+  | 'builtin'
+  | 'driver-admission'
+  | 'preflight'
+  | 'session-create'
+  | 'session-resume'
+  | 'session-fork'
+
+/** Five-layer truth vocabulary used by every Harness, independent of protocol. */
+export type HarnessProofKind = 'declared' | 'resolved' | 'observed' | 'evaluated' | 'opaque'
+
+/** One independently explainable fact in the Host-derived proof ledger. */
+export interface HarnessProofFact {
+  kind: HarnessProofKind
+  status: 'verified' | 'available' | 'pending' | 'blocked' | 'failed' | 'not-applicable'
+  title: string
+  detail: string
+  source?: string
+  checkedAt?: string
+}
+
+/**
+ * A compact, non-marketing conclusion over the proof ledger. It never turns a
+ * Pack declaration into runtime observation or treats an opaque boundary as a
+ * discovered internal architecture.
+ */
+export interface HarnessProof {
+  conclusion: 'verified' | 'partially-verified' | 'pending' | 'failed'
+  facts: HarnessProofFact[]
 }
 
 /** Authentication choice advertised or curated for a Harness. */

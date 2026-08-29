@@ -13,10 +13,11 @@
 ## 导出与测试
 
 1. 在 Mac 打开 **Settings → Harnesses**。
-2. 在 Manifest Editor 创建或编辑 Pack。Harness 不公开内部结构时使用 `opaque`，并且只能展示一个 Runtime 边界。`observable` 与 `composable` Manifest 必须写明 Harness 进程边界、连通展示出来的全部职责、标注关键数据／控制流，并为整张图及每个组件附上 declared、source-derived 或 runtime-observed 证据。真实只有一个组件的 Runtime 可以只画一个节点；不要为了让图看起来完整而添加填充节点，也不要把 OpenFish、操作系统或模型提供方画进去。只有 Pack 确实允许 OpenFish 编辑的节点才使用 `composable`。只有所选 Driver 定义并校验 Binding 时才添加 Schema 驱动的控制；ACP Driver 接受 `acp-session-option` Binding。`secret-reference` 控制只保存 `OPENAI_API_KEY` 这类 Host 引用名，绝不保存 Secret 值。OpenFish 会在第一轮之前根据实时 Harness 校验控制；未知 Binding 会被拒绝，而不会被冒充为可执行能力。协议专属实时事实必须使用 `driver.<protocol>.*` Signal 并由 Driver 映射；OpenFish 只投影 Signal／Status，不会投影 Prompt、路径、工具参数或账号内容。
-3. 对于非内置协议，在 **Self-installing Driver Bundle** 中填写 npm 包身份，并提供准确的 `package@version` 或 `github:owner/repository#<完整 commit>`。Bundle patch 只能激活该包自己拥有的模块。只有无法避免时才声明 npm 生命周期脚本；每位安装用户都会看到单独的本地代码警告。编辑器实时预检会暂存同一个准确 Bundle，只重启 OpenFish 验证过的内置 Host，等待 Driver 注册后再测试 Harness。
-4. 分别使用该 Pack 启动一个 No Project 任务和一个项目任务，确认安装、认证、模型／配置发现、取消与恢复。
-5. 选择 **Prepare community submission**。OpenFish 要求公开 HTTPS 源码仓库和许可证，拒绝私有路径、带凭据 URL 与疑似凭据值，并生成 `{id}.openfish-harness.json` 和一份脱敏兼容报告。
+2. 在 Harness Studio 创建或编辑 Pack。Harness 不公开内部结构时使用 `opaque`，并且只能展示一个 Runtime 边界。`observable` 与 `composable` Manifest 必须写明 Harness 进程边界、连通展示出来的全部职责、标注关键数据／控制流，并为整张图及每个组件附上 declared、resolved 或 observed 证据。真实只有一个组件的 Runtime 可以只画一个节点；不要为了让图看起来完整而添加填充节点，也不要把 OpenFish、操作系统或模型提供方画进去。只有 Pack 确实允许 OpenFish 编辑的节点才使用 `composable`。只有所选 Driver 定义并校验 Binding 时才添加 Schema 驱动的控制；ACP Driver 接受 `acp-session-option` Binding。`secret-reference` 控制只保存 `OPENAI_API_KEY` 这类 Host 引用名，绝不保存 Secret 值。OpenFish 会在第一轮之前根据实时 Harness 校验控制；未知 Binding 会被拒绝，而不会被冒充为可执行能力。协议专属实时事实必须使用 `driver.<protocol>.*` Signal 并由 Driver 映射；OpenFish 只投影 Signal／Status，不会投影 Prompt、路径、工具参数或账号内容。
+3. 打开 **Review** 检查重大变更摘要，先运行 **Validate draft**。它会走与 Save 相同的 Schema 与 Driver Admission 路径，但不会修改 Catalog、安装代码或启动 Harness；后续编辑会让该结果明确过期。只有 Review 后才保存准确版本。
+4. 对于非内置协议，在 **Self-installing Driver Bundle** 中填写 npm 包身份，并提供准确的 `package@version` 或 `github:owner/repository#<完整 commit>`。Bundle Patch 只能激活该包自己拥有的模块。只有无法避免时才声明 npm Lifecycle Script；每位安装用户都会看到单独的本地代码警告。**Install & live preflight** 会暂存同一个准确 Bundle，只重启 OpenFish 验证过的内置 Host，等待 Driver 注册后再测试 Harness。该操作刻意与 Dry Run 分开，因为它可能创建 Harness 自己的状态或产生 Provider 定义的初始化成本。
+5. 分别使用该 Pack 启动一个 No Project 任务和一个项目任务，确认安装、认证、模型／配置／权限发现、取消与恢复，并确认 Proof Ledger 把 Admission、Preflight 和 Session Observation 归到正确的准确版本。
+6. 选择 **Prepare community submission**。OpenFish 要求公开 HTTPS 源码仓库和许可证，拒绝私有路径、带凭据 URL 与疑似凭据值，并生成 `{id}.openfish-harness.json` 和一份脱敏兼容报告。
 
 ## 提交
 

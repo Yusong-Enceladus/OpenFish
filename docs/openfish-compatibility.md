@@ -17,6 +17,18 @@ OpenFish compatibility is a tested contract, not a claim that every program call
 | Community compatible | Comes from the ACP Registry, OpenFish community catalog, or a custom Pack and uses the generic driver, but is not an OpenFish release blocker. |
 | Unsupported protocol | Needs a Driver plugin before OpenFish can run it. |
 
+## What a proof badge means
+
+The catalog keeps evidence per exact Pack version and per operation. The visible ledger is intentionally explicit in meaning, not a single green check:
+
+1. **Declared** — the admitted Pack described the distribution, protocol, authentication, and graph. This is validated metadata, not execution evidence.
+2. **Resolved** — OpenFish resolved the exact executable identity and installation boundary; a version pin is not mislabeled as checksum verification.
+3. **Observed** — a real session create, resume, or fork operation succeeded or failed through that exact version. Only content-free operation facts are retained.
+4. **Evaluated** — the Host derived a compatibility conclusion from its bundled contract, Driver admission, live preflight, or real session result. It is not a task-quality score.
+5. **Opaque** — private internals remain one explicit boundary; compatibility never authorizes an invented internal graph.
+
+A non-mutating Studio dry-run exercises the same Pack schema and Driver admission checks as save but is deliberately not persisted as live evidence. A later preflight cannot erase a real session observation, and evidence for version A cannot certify version B.
+
 ## Current matrix
 
 | Harness | Entry | Level | Authentication authority | Notes |
@@ -34,7 +46,7 @@ The live ACP Registry contained 39 agents on 2026-08-29, including Codex, Claude
 
 ## Release-blocking journeys
 
-The Harness contract gate covers manifest admission, first launch, no-project sessions, Harness switching, model/config changes, resume pinning, missing authentication, ACP disconnect/cancel, unknown future standard options, and the packaged Host lifecycle. `script/check_harness_contract.sh` is called by the macOS release builder.
+The Harness contract gate covers manifest admission and non-mutating draft validation, first launch, No Project sessions, Harness switching, model/config/permission changes, resume pinning, exact-version proof retention, missing authentication, ACP disconnect/cancel, unknown future standard options, and the packaged Host lifecycle. `script/check_harness_contract.sh` is called by the macOS release builder.
 
 Compatibility reports must include the Harness id and version, OpenFish build, host architecture, workspace mode, authentication method name (never the credential), and a redacted first error. A passing Registry entry is discovery metadata, not a security review or quality endorsement.
 

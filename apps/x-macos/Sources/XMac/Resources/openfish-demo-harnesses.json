@@ -26,7 +26,7 @@
         "boundary": "DeepSeek Harness process",
         "evidence": [
           {
-            "kind": "source-derived",
+            "kind": "resolved",
             "source": "docs/architecture.md",
             "version": "0.1.0-x.0"
           }
@@ -48,11 +48,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/context",
                 "version": "0.1.0-x.0"
               }
-            ]
+            ],
+            "position": {
+              "x": 80,
+              "y": 80
+            }
           },
           {
             "id": "loop",
@@ -70,7 +74,7 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/core/agent-loop",
                 "version": "0.1.0-x.0"
               }
@@ -79,7 +83,11 @@
               "turn.started",
               "turn.completed",
               "turn.failed"
-            ]
+            ],
+            "position": {
+              "x": 300,
+              "y": 180
+            }
           },
           {
             "id": "models",
@@ -96,14 +104,18 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/llm",
                 "version": "0.1.0-x.0"
               }
             ],
             "observes": [
               "model.completed"
-            ]
+            ],
+            "position": {
+              "x": 520,
+              "y": 70
+            }
           },
           {
             "id": "tools",
@@ -121,14 +133,18 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/core/tools",
                 "version": "0.1.0-x.0"
               }
             ],
             "observes": [
               "tool.activity"
-            ]
+            ],
+            "position": {
+              "x": 520,
+              "y": 190
+            }
           },
           {
             "id": "sandbox",
@@ -145,11 +161,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/sandbox",
                 "version": "0.1.0-x.0"
               }
-            ]
+            ],
+            "position": {
+              "x": 960,
+              "y": 190
+            }
           },
           {
             "id": "approvals",
@@ -166,7 +186,7 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/guard",
                 "version": "0.1.0-x.0"
               }
@@ -174,7 +194,11 @@
             "observes": [
               "approval.requested",
               "approval.resolved"
-            ]
+            ],
+            "position": {
+              "x": 740,
+              "y": 190
+            }
           },
           {
             "id": "session",
@@ -192,11 +216,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/session",
                 "version": "0.1.0-x.0"
               }
-            ]
+            ],
+            "position": {
+              "x": 520,
+              "y": 310
+            }
           },
           {
             "id": "extensions",
@@ -213,11 +241,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "packages/core",
                 "version": "0.1.0-x.0"
               }
-            ]
+            ],
+            "position": {
+              "x": 80,
+              "y": 300
+            }
           }
         ],
         "edges": [
@@ -308,9 +340,47 @@
         "missingFields": []
       },
       "compatibility": {
-        "status": "compatible",
-        "classification": "supported",
-        "message": "Deterministic Demo data; no Harness process or provider is contacted."
+        "status": "ready",
+        "classification": "experimental",
+        "message": "Deterministic Demo data; no Harness process, provider, or compatibility operation is contacted."
+      },
+      "proof": {
+        "conclusion": "partially-verified",
+        "facts": [
+          {
+            "kind": "declared",
+            "status": "verified",
+            "title": "Manifest admitted",
+            "detail": "observable Demo architecture is generated from the same Pack manifest used by the live Host.",
+            "source": "dsh@0.1.0-x.0"
+          },
+          {
+            "kind": "resolved",
+            "status": "available",
+            "title": "Bundled identity represented",
+            "detail": "The Demo represents a pinned runtime identity but does not launch or checksum a real executable.",
+            "source": "Deterministic OpenFish Demo"
+          },
+          {
+            "kind": "observed",
+            "status": "available",
+            "title": "Runtime observation",
+            "detail": "Synthetic content-free trace events can demonstrate the interaction; they are labelled Demo and are not live evidence."
+          },
+          {
+            "kind": "evaluated",
+            "status": "available",
+            "title": "Live evaluation not run",
+            "detail": "Demo mode performs no authentication, provider request, installation, or compatibility preflight.",
+            "source": "Demo isolation contract"
+          },
+          {
+            "kind": "opaque",
+            "status": "not-applicable",
+            "title": "No opaque substitution",
+            "detail": "The Demo uses only Pack-declared components and does not invent private internals."
+          }
+        ]
       },
       "capabilities": [
         {
@@ -571,7 +641,7 @@
         "boundary": "Codex app-server process",
         "evidence": [
           {
-            "kind": "source-derived",
+            "kind": "resolved",
             "source": "https://github.com/openai/codex/tree/main/codex-rs/app-server",
             "version": "0.150.1"
           }
@@ -585,14 +655,18 @@
             "responsibility": "Owns the official JSON-RPC boundary used by Codex interfaces.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/app-server",
                 "version": "0.150.1"
               }
             ],
             "observes": [
               "protocol.ready"
-            ]
+            ],
+            "position": {
+              "x": 80,
+              "y": 180
+            }
           },
           {
             "id": "thread",
@@ -602,7 +676,7 @@
             "responsibility": "Owns durable Codex threads, turns, items, cancellation, and resume.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/app-server-protocol",
                 "version": "0.150.1"
               }
@@ -612,7 +686,11 @@
               "turn.started",
               "turn.completed",
               "turn.failed"
-            ]
+            ],
+            "position": {
+              "x": 290,
+              "y": 180
+            }
           },
           {
             "id": "context",
@@ -622,11 +700,15 @@
             "responsibility": "Builds model input from instructions, history, skills, apps, and the environment.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/core",
                 "version": "0.150.1"
               }
-            ]
+            ],
+            "position": {
+              "x": 500,
+              "y": 75
+            }
           },
           {
             "id": "model",
@@ -636,14 +718,18 @@
             "responsibility": "Streams inference using the selected live model and advertised reasoning effort.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/core",
                 "version": "0.150.1"
               }
             ],
             "observes": [
               "model.completed"
-            ]
+            ],
+            "position": {
+              "x": 710,
+              "y": 75
+            }
           },
           {
             "id": "tools",
@@ -653,14 +739,18 @@
             "responsibility": "Executes coding, shell, MCP, skills, apps, and other enabled capabilities.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/core",
                 "version": "0.150.1"
               }
             ],
             "observes": [
               "tool.activity"
-            ]
+            ],
+            "position": {
+              "x": 710,
+              "y": 220
+            }
           },
           {
             "id": "sandbox",
@@ -670,11 +760,15 @@
             "responsibility": "Constrains filesystem and network effects under the selected policy.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/core",
                 "version": "0.150.1"
               }
-            ]
+            ],
+            "position": {
+              "x": 1110,
+              "y": 220
+            }
           },
           {
             "id": "approvals",
@@ -684,7 +778,7 @@
             "responsibility": "Requests user review before boundary-crossing operations.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/app-server",
                 "version": "0.150.1"
               }
@@ -692,7 +786,11 @@
             "observes": [
               "approval.requested",
               "approval.resolved"
-            ]
+            ],
+            "position": {
+              "x": 910,
+              "y": 220
+            }
           },
           {
             "id": "output",
@@ -702,14 +800,18 @@
             "responsibility": "Publishes reasoning summaries, tool progress, and final answers as typed items.",
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "codex-rs/app-server-protocol",
                 "version": "0.150.1"
               }
             ],
             "observes": [
               "output.activity"
-            ]
+            ],
+            "position": {
+              "x": 1110,
+              "y": 75
+            }
           }
         ],
         "edges": [
@@ -875,9 +977,47 @@
         "missingFields": []
       },
       "compatibility": {
-        "status": "compatible",
-        "classification": "supported",
-        "message": "Deterministic Demo data; no Harness process or provider is contacted."
+        "status": "ready",
+        "classification": "experimental",
+        "message": "Deterministic Demo data; no Harness process, provider, or compatibility operation is contacted."
+      },
+      "proof": {
+        "conclusion": "partially-verified",
+        "facts": [
+          {
+            "kind": "declared",
+            "status": "verified",
+            "title": "Manifest admitted",
+            "detail": "observable Demo architecture is generated from the same Pack manifest used by the live Host.",
+            "source": "codex@0.150.1"
+          },
+          {
+            "kind": "resolved",
+            "status": "available",
+            "title": "Executable identity represented",
+            "detail": "The Demo represents a pinned runtime identity but does not launch or checksum a real executable.",
+            "source": "Deterministic OpenFish Demo"
+          },
+          {
+            "kind": "observed",
+            "status": "available",
+            "title": "Runtime observation",
+            "detail": "Synthetic content-free trace events can demonstrate the interaction; they are labelled Demo and are not live evidence."
+          },
+          {
+            "kind": "evaluated",
+            "status": "available",
+            "title": "Live evaluation not run",
+            "detail": "Demo mode performs no authentication, provider request, installation, or compatibility preflight.",
+            "source": "Demo isolation contract"
+          },
+          {
+            "kind": "opaque",
+            "status": "not-applicable",
+            "title": "No opaque substitution",
+            "detail": "The Demo uses only Pack-declared components and does not invent private internals."
+          }
+        ]
       },
       "capabilities": [
         {
@@ -1084,7 +1224,7 @@
         "boundary": "Oh My Pi agent process",
         "evidence": [
           {
-            "kind": "source-derived",
+            "kind": "resolved",
             "source": "https://github.com/can1357/oh-my-pi",
             "version": "18.0.10"
           }
@@ -1105,11 +1245,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/tree/main/packages/coding-agent/src",
                 "version": "18.0.10"
               }
-            ]
+            ],
+            "position": {
+              "x": 260,
+              "y": 60
+            }
           },
           {
             "id": "session",
@@ -1127,7 +1271,7 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/agent-session.ts",
                 "version": "18.0.10"
               }
@@ -1138,7 +1282,11 @@
               "turn.completed",
               "turn.failed",
               "output.activity"
-            ]
+            ],
+            "position": {
+              "x": 480,
+              "y": 180
+            }
           },
           {
             "id": "models",
@@ -1155,14 +1303,18 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/config/model-registry.ts",
                 "version": "18.0.10"
               }
             ],
             "observes": [
               "model.completed"
-            ]
+            ],
+            "position": {
+              "x": 480,
+              "y": 60
+            }
           },
           {
             "id": "tools",
@@ -1179,14 +1331,18 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
                 "version": "18.0.10"
               }
             ],
             "observes": [
               "tool.activity"
-            ]
+            ],
+            "position": {
+              "x": 700,
+              "y": 180
+            }
           },
           {
             "id": "permissions",
@@ -1203,7 +1359,7 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/tools/index.ts",
                 "version": "18.0.10"
               }
@@ -1211,7 +1367,11 @@
             "observes": [
               "approval.requested",
               "approval.resolved"
-            ]
+            ],
+            "position": {
+              "x": 900,
+              "y": 180
+            }
           },
           {
             "id": "execution",
@@ -1228,11 +1388,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
                 "version": "18.0.10"
               }
-            ]
+            ],
+            "position": {
+              "x": 1100,
+              "y": 180
+            }
           },
           {
             "id": "extensions",
@@ -1248,11 +1412,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md",
                 "version": "18.0.10"
               }
-            ]
+            ],
+            "position": {
+              "x": 260,
+              "y": 300
+            }
           },
           {
             "id": "persistence",
@@ -1268,11 +1436,15 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/session/session-manager.ts",
                 "version": "18.0.10"
               }
-            ]
+            ],
+            "position": {
+              "x": 700,
+              "y": 320
+            }
           },
           {
             "id": "acp",
@@ -1289,14 +1461,18 @@
             ],
             "evidence": [
               {
-                "kind": "source-derived",
+                "kind": "resolved",
                 "source": "https://github.com/can1357/oh-my-pi/blob/main/README.md",
                 "version": "18.0.10"
               }
             ],
             "observes": [
               "protocol.ready"
-            ]
+            ],
+            "position": {
+              "x": 60,
+              "y": 180
+            }
           }
         ],
         "edges": [
@@ -1425,7 +1601,45 @@
       "compatibility": {
         "status": "ready",
         "classification": "experimental",
-        "message": "Available to install in a live OpenFish session."
+        "message": "Demo catalog entry only; install and evaluate this exact version in a live OpenFish session."
+      },
+      "proof": {
+        "conclusion": "partially-verified",
+        "facts": [
+          {
+            "kind": "declared",
+            "status": "verified",
+            "title": "Manifest admitted",
+            "detail": "observable Demo architecture is generated from the same Pack manifest used by the live Host.",
+            "source": "oh-my-pi@18.0.10"
+          },
+          {
+            "kind": "resolved",
+            "status": "pending",
+            "title": "Executable identity represented",
+            "detail": "The live product would install this exact Pack version before use.",
+            "source": "Deterministic OpenFish Demo"
+          },
+          {
+            "kind": "observed",
+            "status": "available",
+            "title": "Runtime observation",
+            "detail": "Synthetic content-free trace events can demonstrate the interaction; they are labelled Demo and are not live evidence."
+          },
+          {
+            "kind": "evaluated",
+            "status": "available",
+            "title": "Live evaluation not run",
+            "detail": "Demo mode performs no authentication, provider request, installation, or compatibility preflight.",
+            "source": "Demo isolation contract"
+          },
+          {
+            "kind": "opaque",
+            "status": "not-applicable",
+            "title": "No opaque substitution",
+            "detail": "The Demo uses only Pack-declared components and does not invent private internals."
+          }
+        ]
       },
       "capabilities": [
         {

@@ -9,6 +9,7 @@ OpenFish 为截图、演示和发布预览提供确定性状态。该模式中�
 - Mac 应用跳过偏好迁移，不启动内置 Host。
 - iPhone 应用不恢复已保存的 Host 凭证，也不建立网络连接。
 - Demo 状态只在内存中构造，不写入任务缓存。
+- Harness Catalog 由实时 Host 使用的同一份内置 Pack Manifest 生成。它的 Proof Ledger 明确标为 `partially verified`：只表示精确身份与合成 Trace 支持，绝不声称已完成安装、认证、实时 Preflight、Provider 连接或真实 Session。
 - Fixture Client 使用不能联网的 `openfish-demo:` URL Scheme；普通 Demo State 会拒绝听写与启动语音对话。合成 Harness 执行轨迹只包含声明过的组件 ID、标准信号 ID、状态、序号与时间，不复制任何任务内容。单独的 iPhone Voice Smoke 启动模式只用于测试，不用于生成公开素材。
 - 界面会显示 `DEMO` 或 `Demo data · offline`，与真实会话区分。
 

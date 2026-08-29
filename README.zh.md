@@ -50,7 +50,9 @@ OpenAI 目前已经公开 Codex Harness，并把 `exec`、SDK 与 app-server 作
 - **托管隔离，而非启动器菜单。** OpenFish 按 Harness 管理精确版本、认证配置、运行时状态、更新、回滚、取消与卸载；Registry 可发现性绝不会显示成安全背书。
 - **Mac 与 iPhone 共享一个权威状态。** 手机通过 LAN 或 Tailscale 配对到 Mac Host，共用会话日志、审批、队列与任务状态。
 - **任务固定 Harness 版本。** 已有任务继续使用创建时的 Pack；新任务可以选更新版本。
-- **渐进式 Harness Lens。** 先看普通用户能理解的摘要，再检查带证据的架构，并沿着 Pack 明确声明为可观测的节点与连接查看有界、有序、无内容的真实执行轨迹；点选组件即可只看实际经过它的步骤。Mac 端 Manifest Editor 可创建或编辑声明为可组合的节点、执行不发送模型提示词的实时预检，并交换不含凭证的 Manifest。预检仍可能创建 Provider 自己的会话状态或产生其定义的初始化成本；无法验证的私有内部结构会明确保持不透明，不会被画成臆造的架构图。
+- **先证明，再信任。** 每个准确 Pack 版本都有可见的证据账本，明确区分已经准入的声明、解析出的可执行身份、真实 Session 观测、Host 的兼容性评估，以及刻意保持不透明的边界。一个版本的证据绝不会套到另一个版本上；Registry 收录也绝不会变成兼容性或质量徽章。
+- **渐进式 Harness Lens。** **Overview** 用普通语言解释当前路线，**Map** 只展示 Harness 边界内有证据的职责和关系，**Trace** 展示有界、有序、无内容的实际执行路径，**Studio** 只开放 Driver 真正支持的可编辑控件。Studio 包含撤销／重做、重大变更 Review、不会写入状态的准入 Dry Run、准确版本安装／预检，以及不含凭证的导入导出；无法验证的私有内部结构会明确保持不透明，不会被画成臆造架构。
+- **Harness Lab，不做伪排行榜。** Mac 可让两个或更多已安装 Harness 在相互隔离的 No Project Session 中运行同一项用户任务，并为每条路线明确选择模型、思考强度、权限模式、轮换顺序、重复次数和超时。OpenFish 绝不会代替用户回答 Approval Request；所选权限模式仍可能允许某项操作无需询问。机械失败、耗时与 Usage 和用户自己的 1–5 质量判断分开记录；可选导出经过脱敏，默认不含 Response、账号数据和任务原文。这些运行会使用所选 Provider，并可能消耗其额度。
 
 ![使用合成 DSH、Oh My Pi 与 Codex 条目的 OpenFish 默认 Harness 选择器](docs/assets/openfish-harness-picker-demo.png)
 

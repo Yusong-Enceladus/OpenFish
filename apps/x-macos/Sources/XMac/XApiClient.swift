@@ -810,6 +810,20 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
         let classification: String
         let checkedAt: String?
         let message: String?
+        let basis: String?
+    }
+    struct Proof: Decodable, Equatable, Sendable {
+        struct Fact: Decodable, Identifiable, Equatable, Sendable {
+            let kind: String
+            let status: String
+            let title: String
+            let detail: String
+            let source: String?
+            let checkedAt: String?
+            var id: String { kind }
+        }
+        let conclusion: String
+        let facts: [Fact]
     }
     struct Publication: Decodable, Equatable, Sendable {
         let status: String
@@ -846,13 +860,14 @@ struct HarnessCatalogEntry: Decodable, Identifiable, Equatable, Sendable {
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let proof: Proof?
     let publication: Publication?
     let capabilities: [Capability]
     let authoring: HarnessAuthoringContract?
     let driver: Driver
 
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, distribution, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, authoring, driver
+        case id, isDefault, name, version, description, publisher, license, repository, icon, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, distribution, graph, available, unavailableReason, installation, auth, compatibility, proof, publication, capabilities, authoring, driver
         case protocolName = "protocol"
     }
 }
@@ -1470,7 +1485,7 @@ actor DshApiClient {
             let pack: JSONValue?
         }
         struct Value: Decodable, Sendable { let items: [HarnessCatalogEntry] }
-        let hostLocalActions: Set<String> = ["remove", "login", "upsert", "validate-publication", "submit-publication", "submit-revocation"]
+        let hostLocalActions: Set<String> = ["remove", "login", "upsert", "validate-draft", "validate-publication", "submit-publication", "submit-revocation"]
         let hostLocalCodeConsent = acceptUnverified == true && ["install", "update", "probe"].contains(action)
         let method = hostLocalActions.contains(action) || hostLocalCodeConsent ? "harness/manage" : "harness/mutate"
         let value: Value = try await rpc(method, Payload(action: action, id: id, authMethod: authMethod, reason: reason, acceptUnverified: acceptUnverified, pack: pack))

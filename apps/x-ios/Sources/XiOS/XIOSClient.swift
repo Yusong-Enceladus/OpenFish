@@ -361,7 +361,15 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
         let methods: [Method]; let selectedMethod: String?; let status: String; let missingFields: [String]; let detail: String?
     }
     struct Compatibility: Decodable, Equatable, Sendable {
-        let status: String; let classification: String; let checkedAt: String?; let message: String?
+        let status: String; let classification: String; let checkedAt: String?; let message: String?; let basis: String?
+    }
+    struct Proof: Decodable, Equatable, Sendable {
+        struct Fact: Decodable, Identifiable, Equatable, Sendable {
+            let kind: String; let status: String; let title: String; let detail: String
+            let source: String?; let checkedAt: String?
+            var id: String { kind }
+        }
+        let conclusion: String; let facts: [Fact]
     }
     struct Publication: Decodable, Equatable, Sendable {
         let status: String; let review: String; let publishedVersion: String?; let knownVersions: [String]
@@ -387,11 +395,12 @@ struct MobileHarness: Decodable, Identifiable, Equatable, Sendable {
     let installation: Installation
     let auth: Authentication
     let compatibility: Compatibility
+    let proof: Proof?
     let publication: Publication?
     let capabilities: [Capability]
     let driver: Driver
     enum CodingKeys: String, CodingKey {
-        case id, isDefault, name, version, description, publisher, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, graph, available, unavailableReason, installation, auth, compatibility, publication, capabilities, driver
+        case id, isDefault, name, version, description, publisher, verified, source, account, modelConfiguration, authenticationDiscovery, driverBundle, graph, available, unavailableReason, installation, auth, compatibility, proof, publication, capabilities, driver
         case protocolName = "protocol"
     }
 }

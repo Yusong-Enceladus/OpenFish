@@ -94,6 +94,11 @@ interface FixtureHarnessEntry {
     status: 'untested' | 'ready' | 'compatible' | 'failed'
     classification: 'supported' | 'experimental' | 'opaque-but-runnable' | 'incompatible'
     message?: string
+    basis?: string
+  }
+  readonly proof: {
+    conclusion: 'verified' | 'partially-verified' | 'pending' | 'failed'
+    facts: readonly Readonly<Record<string, unknown>>[]
   }
   readonly capabilities: readonly Readonly<Record<string, unknown>>[]
   readonly driver: Readonly<Record<string, unknown>>
@@ -1847,14 +1852,14 @@ function fixtureHarnessGraph(
     level: 'observable',
     manifestVersion: 1,
     boundary,
-    evidence: [{ kind: 'source-derived', source: evidenceSource, version: 'fixture' }],
+    evidence: [{ kind: 'resolved', source: evidenceSource, version: 'fixture' }],
     nodes: nodes.map(([id, title, responsibility]) => ({
       id,
       kind: id,
       title,
       editable: false,
       responsibility,
-      evidence: [{ kind: 'source-derived', source: evidenceSource, version: 'fixture' }],
+      evidence: [{ kind: 'resolved', source: evidenceSource, version: 'fixture' }],
     })),
     edges: nodes.slice(1).map(([id], index) => {
       const predecessor = nodes[index]
@@ -1867,6 +1872,19 @@ function fixtureHarnessGraph(
         label: 'typed control and event flow',
       }
     }),
+  }
+}
+
+function fixtureHarnessProof(id: string, installed: boolean, opaque = false) {
+  return {
+    conclusion: installed ? 'partially-verified' as const : 'pending' as const,
+    facts: [
+      { kind: 'declared', status: 'verified', title: 'Manifest admitted', detail: 'Synthetic Pack fixture passed the same shape contract.', source: `${id}@fixture` },
+      { kind: 'resolved', status: installed ? 'available' : 'pending', title: 'Executable identity', detail: installed ? 'Represented by fixture data; no executable is launched.' : 'Not installed in this fixture.', source: 'OpenFish fixture' },
+      { kind: 'observed', status: 'available', title: 'Runtime observation', detail: 'Synthetic content-free events are available for UI development.' },
+      { kind: 'evaluated', status: 'available', title: 'Live evaluation not run', detail: 'Fixture mode never contacts a real Harness or provider.', source: 'Fixture isolation contract' },
+      { kind: 'opaque', status: opaque ? 'verified' : 'not-applicable', title: opaque ? 'Private internals remain opaque' : 'No opaque substitution', detail: opaque ? 'Only one runtime boundary is represented.' : 'Only fixture-declared components are represented.' },
+    ],
   }
 }
 
@@ -1905,6 +1923,7 @@ function fixtureHarnessCatalog(): FixtureHarnessEntry[] {
       installation: { status: 'builtin', installedVersion: '0.1.0-x.0', availableVersion: '0.1.0-x.0', previousVersions: [], integrity },
       auth: { methods: [], status: 'not-required', missingFields: [], detail: 'No Harness-level sign-in is required.' },
       compatibility: { status: 'compatible', classification: 'supported' },
+      proof: fixtureHarnessProof('dsh', true),
       capabilities: lifecycle,
       driver: { apiVersion: 1, protocol: 'dsh', loaded: true, authorization: 'not-required' },
     },
@@ -1927,6 +1946,7 @@ function fixtureHarnessCatalog(): FixtureHarnessEntry[] {
         selectedMethod: 'codex-managed-login', status: 'configured', missingFields: [],
       },
       compatibility: { status: 'compatible', classification: 'supported' },
+      proof: fixtureHarnessProof('codex', true),
       capabilities: lifecycle,
       driver: { apiVersion: 1, protocol: 'codex-app-server', loaded: true, authorization: 'not-required' },
     },
@@ -1946,6 +1966,7 @@ function fixtureHarnessCatalog(): FixtureHarnessEntry[] {
       installation: { status: 'not-installed', availableVersion: '18.0.10', previousVersions: [], integrity },
       auth: { methods: [], status: 'needs-selection', missingFields: [], detail: 'Choose a sign-in method.' },
       compatibility: { status: 'ready', classification: 'experimental' },
+      proof: fixtureHarnessProof('oh-my-pi', false),
       capabilities: lifecycle,
       driver: { apiVersion: 1, protocol: 'acp', loaded: true, authorization: 'not-required' },
     },
@@ -3829,6 +3850,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             for (const candidate of harnesses) candidate.isDefault = false
           } else if (mutation.action === 'default' && item !== undefined) {
             for (const candidate of harnesses) candidate.isDefault = candidate.id === item.id
+          } else if (mutation.action === 'validate-draft') {
+            // Demo State exercises the same UI boundary without persisting a
+            // synthetic Pack or pretending that third-party code was run.
           } else if (item === undefined) {
             return Promise.resolve({
               ok: false,

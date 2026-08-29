@@ -9,6 +9,7 @@ OpenFish includes a deterministic state for screenshots, talks, and release prev
 - The Mac app skips preference migration and does not bootstrap the bundled Host.
 - The iPhone app does not restore a saved Host credential and does not start a network connection.
 - Demo state is constructed in memory and is not written to the task cache.
+- The Harness catalog is generated from the same built-in Pack manifests as the live Host. Its proof ledger is explicitly `partially verified`: it represents exact identities and synthetic trace support but never claims installation, authentication, live preflight, provider contact, or a completed session.
 - Fixture clients use the non-network `openfish-demo:` URL scheme, and normal Demo State refuses dictation and voice-conversation starts. The synthetic Harness execution trace contains only declared component ids, standard signal ids, status, sequence, and timing; it contains no copied task content. The separate iPhone voice-smoke launch mode is test-only and is not used to create public assets.
 - A visible `DEMO` or `Demo data · offline` label distinguishes it from a live session.
 

@@ -72,6 +72,45 @@ struct OpenFishHostIssue: Equatable, Sendable {
     let message: String
 }
 
+/** One real, prompt-free session prepared for a reproducible Harness comparison. */
+struct HarnessExperimentPreparation: Identifiable, Equatable, Sendable {
+    let sessionId: String
+    let harnessId: String
+    let harnessName: String
+    let harnessVersion: String
+    let accountLabel: String
+    let models: SessionModels
+    let permissions: PermissionSelect
+    var selection: ModelSelection
+    var permissionValue: String
+
+    var id: String { sessionId }
+}
+
+/** Host-derived measurements for one real comparison run; response text stays in the task. */
+struct HarnessExperimentOutcome: Identifiable, Equatable, Sendable {
+    let sessionId: String
+    let harnessId: String
+    let harnessName: String
+    let harnessVersion: String
+    let accountLabel: String
+    let model: ModelSelection
+    let permission: String
+    let round: Int
+    let order: Int
+    let terminalReason: String
+    let elapsedMilliseconds: Int
+    let firstOutputMilliseconds: Int?
+    let toolCalls: Int
+    let approvalRequests: Int
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let finalAnswerCharacters: Int
+    let error: String?
+
+    var id: String { sessionId }
+}
+
 enum OpenFishHostPresentationState: Equatable, Sendable {
     case loading
     case ready
@@ -392,7 +431,11 @@ final class OpenCodexStore: ObservableObject {
                 detail: "Demo data: the official Codex app-server reported a ChatGPT Pro route. OpenFish retained neither email nor credentials."
             )
         )
-        store.harnesses = Self.generatedVisualHarnesses().filter { $0.id == "codex" }
+        // Keep the whole generated catalog available in the isolated fixture.
+        // The current task is still pinned to Codex, while surfaces such as
+        // Harness Lab can demonstrate multi-Harness route selection without
+        // launching, authenticating, or contacting any runtime.
+        store.harnesses = Self.generatedVisualHarnesses()
         store.sessions = store.sessions.map { session in
             SessionSummary(
                 sessionId: session.sessionId, harnessId: "codex", updatedAt: session.updatedAt,
@@ -1134,6 +1177,226 @@ final class OpenCodexStore: ObservableObject {
             errorBanner = "Could not prepare a new task: \(error)"
             scheduleProjectionCache()
         }
+    }
+
+    /**
+     * Create one No Project draft and read the exact live model/account and
+     * permission contract without sending a prompt. The caller owns the draft
+     * and must either run it or discard it.
+     */
+    func prepareHarnessExperiment(_ harness: HarnessCatalogEntry) async throws -> HarnessExperimentPreparation {
+        guard !isDemoMode else {
+            throw DshApiError.host("demo-read-only", "Harness Lab requires a live OpenFish Host.")
+        }
+        guard harness.available,
+              harness.installation.status == "builtin" || harness.installation.status == "installed" else {
+            throw DshApiError.host("harness-unavailable", "Install and configure \(harness.name) before comparing it.")
+        }
+        let requestedSessionId = UUID().uuidString.lowercased()
+        var created = false
+        do {
+            let sessionId = try await api.createSession(
+                workspaceId: nil,
+                harnessId: harness.id,
+                sessionId: requestedSessionId
+            )
+            created = true
+            guard sessionId == requestedSessionId else {
+                throw DshApiError.host("session-identity-mismatch", "Harness Lab received a different task id.")
+            }
+            async let modelRequest = api.models(sessionId: sessionId)
+            async let historyRequest = api.history(sessionId: sessionId, maxMessages: 1)
+            let (models, history) = try await (modelRequest, historyRequest)
+            guard models.routable else {
+                throw DshApiError.host(
+                    "model-unavailable",
+                    "\(harness.name) did not expose a runnable model/account route for this comparison."
+                )
+            }
+            let permissions = history.projections?.values["permissions"]
+                .flatMap { try? $0.decode(PermissionSelect.self) }
+                ?? PermissionSelect(
+                    options: [PermissionOption(value: "harness-default", name: "Harness default", description: nil)],
+                    currentValue: "harness-default"
+                )
+            return HarnessExperimentPreparation(
+                sessionId: sessionId,
+                harnessId: harness.id,
+                harnessName: harness.name,
+                harnessVersion: harness.version,
+                accountLabel: models.account?.label ?? harness.account?.label ?? "Account not declared",
+                models: models,
+                permissions: permissions,
+                selection: models.current,
+                permissionValue: permissions.currentValue
+            )
+        } catch {
+            if created { try? await api.discardSession(requestedSessionId) }
+            throw error
+        }
+    }
+
+    /** Discard a prompt-free comparison draft without leaving provider state behind. */
+    func discardHarnessExperimentDraft(_ sessionId: String) async {
+        try? await api.discardSession(sessionId)
+    }
+
+    /**
+     * Run the exact selected route once and return content-free metrics. The
+     * complete prompt and answer remain in the ordinary inspectable task; this
+     * result intentionally carries neither text nor tool arguments.
+     */
+    func runHarnessExperiment(
+        _ preparation: HarnessExperimentPreparation,
+        prompt: String,
+        round: Int,
+        order: Int,
+        timeoutSeconds: TimeInterval
+    ) async -> HarnessExperimentOutcome {
+        var effectiveModel = preparation.selection
+        let effectivePermission = preparation.permissions.options
+            .first(where: { $0.value == preparation.permissionValue })?.name
+            ?? preparation.permissionValue
+        let promptStartedAt = Date()
+        do {
+            if preparation.permissionValue != preparation.permissions.currentValue,
+               preparation.permissionValue != "harness-default",
+               preparation.permissionValue != "custom" {
+                let permission = try await api.executeCommand(
+                    sessionId: preparation.sessionId,
+                    line: "/permission \(preparation.permissionValue)"
+                )
+                guard permission.result.kind == "success" else {
+                    throw DshApiError.host(
+                        "permission-unavailable",
+                        permission.result.text ?? "The selected permission route was rejected."
+                    )
+                }
+            }
+            effectiveModel = try await api.selectModel(
+                sessionId: preparation.sessionId,
+                selection: preparation.selection
+            )
+            let before = try await api.history(sessionId: preparation.sessionId, maxMessages: 500)
+            let afterSeq = before.events.last?.event.seq ?? -1
+            _ = try await api.prompt(sessionId: preparation.sessionId, text: prompt)
+            let deadline = Date().addingTimeInterval(max(15, timeoutSeconds))
+            var terminalHistory: SessionHistory?
+            while !Task.isCancelled, Date() < deadline {
+                let history = try await api.history(sessionId: preparation.sessionId, maxMessages: 500)
+                if history.events.contains(where: { $0.event.seq > afterSeq && $0.event.type == "turn/end" }) {
+                    terminalHistory = history
+                    break
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+            if Task.isCancelled {
+                try? await api.cancel(sessionId: preparation.sessionId)
+                return experimentFailure(
+                    preparation, model: effectiveModel, round: round, order: order,
+                    reason: "cancelled", startedAt: promptStartedAt, error: "Comparison cancelled by the user."
+                )
+            }
+            guard let history = terminalHistory else {
+                try? await api.cancel(sessionId: preparation.sessionId)
+                await refreshSessions()
+                return experimentFailure(
+                    preparation, model: effectiveModel, round: round, order: order,
+                    reason: "timed-out", startedAt: promptStartedAt,
+                    error: "No terminal turn arrived within \(Int(timeoutSeconds)) seconds."
+                )
+            }
+            let events = history.events.map(\.event).filter { $0.seq > afterSeq }
+            let turnStart = events.first(where: { $0.type == "turn/start" })?.time
+            let firstOutput = events.first(where: { event in
+                if event.type == "assistant/chunk" {
+                    return event.data["chunk"]?["type"]?.stringValue == "text-delta"
+                        && !(event.data["chunk"]?["text"]?.stringValue ?? "").isEmpty
+                }
+                guard event.type == "assistant/message" else { return false }
+                return event.data["message"]?["content"]?.arrayValue?.contains(where: { block in
+                    block["type"]?.stringValue == "text"
+                        && !(block["text"]?.stringValue ?? "").isEmpty
+                }) == true
+            })?.time
+            let terminal = events.last(where: { $0.type == "turn/end" })
+            let terminalReason = terminal?.data["reason"]?["kind"]?.stringValue ?? "unknown"
+            let usageEvents = events.filter { $0.type == "assistant/message" }
+            let inputValues = usageEvents.compactMap { $0.data["usage"]?["inputTokens"]?.intValue }
+            let outputValues = usageEvents.compactMap { $0.data["usage"]?["outputTokens"]?.intValue }
+            let finalCharacters = ConversationProjector.project(
+                history.events.filter { $0.event.seq > afterSeq }
+            )
+                .last(where: { $0.kind == .assistant && !$0.text.isEmpty })?.text.count ?? 0
+            await refreshSessions()
+            return HarnessExperimentOutcome(
+                sessionId: preparation.sessionId,
+                harnessId: preparation.harnessId,
+                harnessName: preparation.harnessName,
+                harnessVersion: preparation.harnessVersion,
+                accountLabel: preparation.accountLabel,
+                model: effectiveModel,
+                permission: effectivePermission,
+                round: round,
+                order: order,
+                terminalReason: terminalReason,
+                elapsedMilliseconds: max(0, Int(Date().timeIntervalSince(promptStartedAt) * 1_000)),
+                firstOutputMilliseconds: firstOutput.flatMap { first in
+                    turnStart.map { start in max(0, Int(first - start)) }
+                },
+                toolCalls: events.filter { $0.type == "tool/call" }.count,
+                approvalRequests: events.filter { $0.type == "approval/asked" }.count,
+                inputTokens: inputValues.isEmpty ? nil : inputValues.reduce(0, +),
+                outputTokens: outputValues.isEmpty ? nil : outputValues.reduce(0, +),
+                finalAnswerCharacters: finalCharacters,
+                error: terminalReason == "completed" || terminalReason == "max-tokens" ? nil : "Harness ended with \(terminalReason)."
+            )
+        } catch {
+            if Task.isCancelled { try? await api.cancel(sessionId: preparation.sessionId) }
+            await refreshSessions()
+            return experimentFailure(
+                preparation,
+                model: effectiveModel,
+                round: round,
+                order: order,
+                reason: Task.isCancelled ? "cancelled" : "failed",
+                startedAt: promptStartedAt,
+                error: String(describing: error)
+            )
+        }
+    }
+
+    private func experimentFailure(
+        _ preparation: HarnessExperimentPreparation,
+        model: ModelSelection,
+        round: Int,
+        order: Int,
+        reason: String,
+        startedAt: Date,
+        error: String
+    ) -> HarnessExperimentOutcome {
+        HarnessExperimentOutcome(
+            sessionId: preparation.sessionId,
+            harnessId: preparation.harnessId,
+            harnessName: preparation.harnessName,
+            harnessVersion: preparation.harnessVersion,
+            accountLabel: preparation.accountLabel,
+            model: model,
+            permission: preparation.permissions.options
+                .first(where: { $0.value == preparation.permissionValue })?.name
+                ?? preparation.permissionValue,
+            round: round,
+            order: order,
+            terminalReason: reason,
+            elapsedMilliseconds: max(0, Int(Date().timeIntervalSince(startedAt) * 1_000)),
+            firstOutputMilliseconds: nil,
+            toolCalls: 0,
+            approvalRequests: 0,
+            inputTokens: nil,
+            outputTokens: nil,
+            finalAnswerCharacters: 0,
+            error: error
+        )
     }
 
     func selectSession(_ sessionId: String) async {
@@ -2134,7 +2397,8 @@ final class OpenCodexStore: ObservableObject {
         modelOwner: String, modelConfigurationRequired: Bool, modelConfigurationDetail: String,
         terminalAuthArguments: String, terminalAuthEnvironment: String,
         nodes: [HarnessGraphNode], edges: [HarnessGraphEdge], positions: [String: CGPoint],
-        existingPack: HarnessCatalogEntry? = nil
+        existingPack: HarnessCatalogEntry? = nil,
+        validateOnly: Bool = false
     ) async -> Bool {
         func environment(_ source: String) -> [String: JSONValue] {
             source.split(whereSeparator: \.isNewline).reduce(into: [:]) { result, line in
@@ -2373,11 +2637,17 @@ final class OpenCodexStore: ObservableObject {
         }
         let pack: JSONValue = .object(packObject)
         do {
-            harnesses = try await api.mutateHarness(action: "upsert", pack: pack)
+            let catalog = try await api.mutateHarness(
+                action: validateOnly ? "validate-draft" : "upsert",
+                pack: pack
+            )
+            if !validateOnly { harnesses = catalog }
             errorBanner = nil
             return true
         } catch {
-            errorBanner = "Could not save the custom Harness: \(error)"
+            errorBanner = validateOnly
+                ? "The Harness draft was rejected: \(error)"
+                : "Could not save the custom Harness: \(error)"
             return false
         }
     }

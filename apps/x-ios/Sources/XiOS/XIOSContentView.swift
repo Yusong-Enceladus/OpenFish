@@ -531,7 +531,7 @@ private struct MobileCurrentHarnessCard: View {
                         Text(displayName).font(.subheadline.weight(.semibold))
                         if harness.verified { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue) }
                     }
-                    Text("\(harness.graph.nodes.count) components · \(harness.graph.level.capitalized)")
+                    Text("Proof \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "unavailable") · \(harness.graph.nodes.count) components")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -762,7 +762,7 @@ private struct MobileHarnessOnboardingView: View {
                                 Text(mobileHarnessDisplayName(harness, among: store.harnesses)).font(.headline)
                                 Text(harness.description ?? "No description provided.")
                                     .font(.subheadline).foregroundStyle(.secondary)
-                                Text("v\(harness.version) · \(harness.installation.status.replacingOccurrences(of: "-", with: " ")) · \(harness.compatibility.classification.replacingOccurrences(of: "-", with: " "))")
+                                Text("v\(harness.version) · \(harness.compatibility.classification.replacingOccurrences(of: "-", with: " ")) · proof \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "unavailable")")
                                     .font(.caption).foregroundStyle(.secondary)
                                 if let publication = harness.publication {
                                     Text("Community · \(publication.status.replacingOccurrences(of: "-", with: " "))")
@@ -1004,7 +1004,7 @@ private struct MobileHarnessDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var lens: String
     @State private var selectedNodeId: String?
-    @State private var architecturePresentation = "Flow"
+    @State private var architecturePresentation = "Map"
     @State private var handoffCopied = false
     @State private var showsRuntimeComponents = false
 
@@ -1065,15 +1065,16 @@ private struct MobileHarnessDetailView: View {
                     }
                     if let description = harness.description { Text(description).foregroundStyle(.secondary) }
                     Picker("Harness lens", selection: $lens) {
-                        Text("Simple").tag("Simple")
-                        Text("How it works").tag("Architecture")
-                        Text("Live").tag("Runtime")
-                        Text("Manifest").tag("Manifest")
+                        Text("Overview").tag("Simple")
+                        Text("Map").tag("Architecture")
+                        Text("Trace").tag("Runtime")
+                        Text("Studio").tag("Manifest")
                     }
                     .pickerStyle(.segmented)
 
                     if lens == "Simple" {
                         VStack(spacing: 10) {
+                            MobileHarnessProofPanel(harness: currentHarness, runtime: matchingRuntime)
                             MobileLensFact(
                                 title: "What changes",
                                 value: "\(currentHarness.description ?? "This Pack does not declare a usage summary.") New tasks can use it; existing tasks stay pinned to their original Harness and version.",
@@ -1241,18 +1242,23 @@ private struct MobileHarnessDetailView: View {
                             }
                             .font(.caption.weight(.semibold))
                             Picker("Architecture presentation", selection: $architecturePresentation) {
-                                Text("Operational lens").tag("Flow")
-                                Text("Full map").tag("Map")
+                                Text("Relationship map").tag("Map")
+                                Text("Stage summary").tag("Flow")
                             }
                             .pickerStyle(.segmented)
-                            if architecturePresentation == "Flow" {
+                            if architecturePresentation == "Map" {
+                                MobileHarnessGraphPreview(
+                                    graph: harness.graph,
+                                    runtime: matchingRuntime,
+                                    selectedNodeId: selectedNodeId,
+                                    onSelect: { selectedNodeId = $0 }
+                                )
+                                    .frame(height: max(300, min(620, CGFloat(harness.graph.nodes.count) * 78 + 40)))
+                            } else {
                                 MobileHarnessArchitectureFlow(
                                     graph: harness.graph, selectedNodeId: selectedNodeId,
                                     onSelect: { selectedNodeId = $0 }
                                 )
-                            } else {
-                                MobileHarnessGraphPreview(graph: harness.graph)
-                                    .frame(height: max(240, min(560, CGFloat(harness.graph.nodes.count) * 72 + 20)))
                             }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
@@ -1317,6 +1323,7 @@ private struct MobileHarnessDetailView: View {
                                                 .font(.caption2).foregroundStyle(.secondary)
                                         }
                                     }
+                                    MobileDeclaredConnections(graph: harness.graph, node: node)
                                 }
                                 .padding(12)
                                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
@@ -1485,6 +1492,52 @@ private struct MobileArchitectureValues: View {
                 Text(values.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct MobileDeclaredConnections: View {
+    let graph: MobileHarness.Graph
+    let node: MobileHarness.GraphNode
+
+    private var incoming: [MobileHarness.GraphEdge] { graph.edges.filter { $0.to == node.id } }
+    private var outgoing: [MobileHarness.GraphEdge] { graph.edges.filter { $0.from == node.id } }
+
+    var body: some View {
+        if !incoming.isEmpty || !outgoing.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Declared connections")
+                    .font(.caption.weight(.semibold))
+                ForEach(Array(incoming.enumerated()), id: \.offset) { _, edge in
+                    connection(edge, incoming: true)
+                }
+                ForEach(Array(outgoing.enumerated()), id: \.offset) { _, edge in
+                    connection(edge, incoming: false)
+                }
+            }
+            .padding(10)
+            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func connection(_ edge: MobileHarness.GraphEdge, incoming: Bool) -> some View {
+        let otherID = incoming ? edge.from : edge.to
+        let other = graph.nodes.first(where: { $0.id == otherID })?.title ?? otherID
+        return HStack(alignment: .top, spacing: 7) {
+            Image(systemName: incoming ? "arrow.down.left" : "arrow.up.right")
+                .foregroundStyle(incoming ? Color.secondary : Color.accentColor)
+                .frame(width: 15)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(incoming ? "From \(other)" : "To \(other)")
+                    .font(.caption.weight(.semibold))
+                if let label = edge.label, !label.isEmpty {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1702,6 +1755,106 @@ private struct MobileLensFact: View {
     }
 }
 
+private struct MobileHarnessProofPanel: View {
+    let harness: MobileHarness
+    var runtime: MobileHarnessRuntimeProjection? = nil
+
+    private var hasLiveObservation: Bool {
+        guard runtime?.harnessId == nil || runtime?.harnessId == harness.id else { return false }
+        return !(runtime?.observations ?? []).isEmpty || !(runtime?.nodes ?? [:]).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Why this Harness is usable", systemImage: "checkmark.shield")
+                    .font(.headline)
+                Spacer()
+                if let conclusion = harness.proof?.conclusion {
+                    Text(conclusion.replacingOccurrences(of: "-", with: " ").capitalized)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(conclusionColor(conclusion))
+                }
+            }
+            Text("Declared, resolved, observed, evaluated, and opaque facts stay separate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let facts = harness.proof?.facts, !facts.isEmpty {
+                ForEach(Array(facts.enumerated()), id: \.element.id) { index, fact in
+                    if index > 0 { Divider() }
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: icon(fact.kind))
+                            .foregroundStyle(statusColor(effectiveStatus(fact)))
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(fact.kind.capitalized).font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(effectiveStatus(fact).replacingOccurrences(of: "-", with: " ").capitalized)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(statusColor(effectiveStatus(fact)))
+                            }
+                            Text(fact.title).font(.footnote.weight(.semibold))
+                            Text(effectiveDetail(fact)).font(.caption).foregroundStyle(.secondary)
+                            if let source = fact.source, !source.isEmpty {
+                                Text(source).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+                            }
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            } else {
+                Label("Update the connected OpenFish Host to inspect its proof ledger.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("OpenFish.iOS.HarnessProof")
+    }
+
+    private func effectiveStatus(_ fact: MobileHarness.Proof.Fact) -> String {
+        fact.kind == "observed" && hasLiveObservation ? "verified" : fact.status
+    }
+
+    private func effectiveDetail(_ fact: MobileHarness.Proof.Fact) -> String {
+        fact.kind == "observed" && hasLiveObservation
+            ? "The current task contains Pack-bound, content-free runtime evidence. Open Trace for the ordered path."
+            : fact.detail
+    }
+
+    private func icon(_ kind: String) -> String {
+        switch kind {
+        case "declared": return "doc.text"
+        case "resolved": return "shippingbox"
+        case "observed": return "waveform.path.ecg"
+        case "evaluated": return "checkmark.seal"
+        default: return "eye.slash"
+        }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "verified": return .green
+        case "available": return .blue
+        case "failed", "blocked": return .red
+        case "pending": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func conclusionColor(_ conclusion: String) -> Color {
+        switch conclusion {
+        case "verified": return .green
+        case "failed": return .red
+        case "partially-verified": return .blue
+        default: return .orange
+        }
+    }
+}
+
 private struct MobileHarnessTraceRow: View {
     let observation: MobileHarnessRuntimeProjection.Observation
     let graph: MobileHarness.Graph
@@ -1764,6 +1917,8 @@ private struct MobileHarnessTraceRow: View {
 private struct MobileHarnessGraphPreview: View {
     let graph: MobileHarness.Graph
     var runtime: MobileHarnessRuntimeProjection? = nil
+    var selectedNodeId: String? = nil
+    var onSelect: ((String) -> Void)? = nil
     @State private var scale: CGFloat = 1
     @GestureState private var gestureScale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -1771,67 +1926,66 @@ private struct MobileHarnessGraphPreview: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let nodeWidth = min(154, max(118, (proxy.size.width - 40) / 2))
             let points = layout(in: proxy.size)
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color.secondary.opacity(0.055))
                 ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
                     if let from = points[edge.from], let to = points[edge.to] {
-                        let endpoints = edgeEndpoints(from: from, to: to)
+                        let endpoints = edgeEndpoints(from: from, to: to, nodeWidth: nodeWidth)
+                        let controls = edgeControls(start: endpoints.start, end: endpoints.end)
                         let liveEdge = runtimeEdge(edge)
+                        let connected = selectedNodeId == nil || edge.from == selectedNodeId || edge.to == selectedNodeId
                         Path { path in
                             path.move(to: endpoints.start)
-                            path.addLine(to: endpoints.end)
+                            path.addCurve(to: endpoints.end, control1: controls.first, control2: controls.second)
                         }
-                        .stroke(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.45 : 0.95), style: StrokeStyle(
-                            lineWidth: liveEdge == nil ? 1.35 : 2.4, lineCap: .round, lineJoin: .round
+                        .stroke(edgeColor(liveEdge?.status).opacity(
+                            liveEdge == nil ? (connected ? 0.65 : 0.18) : (connected ? 0.98 : 0.4)
+                        ), style: StrokeStyle(
+                            lineWidth: liveEdge == nil ? (connected ? 1.5 : 1) : (connected ? 2.5 : 1.5),
+                            lineCap: .round, lineJoin: .round
                         ))
                         Image(systemName: "arrowtriangle.right.fill")
                             .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(edgeColor(liveEdge?.status).opacity(liveEdge == nil ? 0.65 : 0.95))
+                            .foregroundStyle(edgeColor(liveEdge?.status).opacity(
+                                liveEdge == nil ? (connected ? 0.75 : 0.22) : (connected ? 0.98 : 0.45)
+                            ))
                             .rotationEffect(.radians(atan2(
-                                endpoints.end.y - endpoints.start.y,
-                                endpoints.end.x - endpoints.start.x
+                                endpoints.end.y - controls.second.y,
+                                endpoints.end.x - controls.second.x
                             )))
                             .position(endpoints.end)
-                        if let label = edge.label {
-                            Text(label)
-                                .font(.system(size: 8.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 5)
-                                .frame(height: 17)
-                                .background(.regularMaterial, in: Capsule())
-                                .position(
-                                    x: (endpoints.start.x + endpoints.end.x) / 2,
-                                    y: (endpoints.start.y + endpoints.end.y) / 2 - 10
-                                )
-                        }
                     }
                 }
                 ForEach(graph.nodes) { node in
-                    HStack(spacing: 9) {
-                        Circle()
-                            .fill(runtimeColor(node.id))
-                            .frame(width: 8, height: 8)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(node.title)
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                            Text(node.kind)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                    Button { onSelect?(node.id) } label: {
+                        HStack(spacing: 9) {
+                            Circle()
+                                .fill(runtimeColor(node.id))
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(node.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(node.kind)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer(minLength: 0)
+                        .padding(.horizontal, 12)
+                        .frame(width: nodeWidth, height: 56)
+                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(
+                            selectedNodeId == node.id ? Color.accentColor : runtimeColor(node.id).opacity(runtime?.nodes[node.id] == nil ? 0.25 : 0.9),
+                            lineWidth: selectedNodeId == node.id ? 2 : runtime?.nodes[node.id] == nil ? 1 : 2
+                        ))
                     }
-                    .padding(.horizontal, 12)
-                    .frame(width: min(250, proxy.size.width - 72), height: 56)
-                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(
-                        runtimeColor(node.id).opacity(runtime?.nodes[node.id] == nil ? 0.25 : 0.9),
-                        lineWidth: runtime?.nodes[node.id] == nil ? 1 : 2
-                    ))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(node.title), \(node.kind)")
                     .position(points[node.id] ?? .zero)
                 }
             }
@@ -1865,72 +2019,126 @@ private struct MobileHarnessGraphPreview: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(graph.level) Harness architecture with \(graph.nodes.count) nodes")
     }
 
     private func layout(in size: CGSize) -> [String: CGPoint] {
         guard !graph.nodes.isEmpty else { return [:] }
-        let authored = graph.nodes.compactMap { node -> (String, MobileHarness.GraphNode.Position)? in
-            node.position.map { (node.id, $0) }
-        }
-        if authored.count == graph.nodes.count {
-            let xs = authored.map { $0.1.x }
-            let ys = authored.map { $0.1.y }
-            let minX = xs.min() ?? 0, maxX = xs.max() ?? 0
-            let minY = ys.min() ?? 0, maxY = ys.max() ?? 0
-            let xInset: CGFloat = min(128, max(58, size.width * 0.20))
-            let yInset: CGFloat = 40
-            return Dictionary(uniqueKeysWithValues: authored.map { id, point in
-                let x = maxX == minX ? size.width / 2
-                    : xInset + CGFloat((point.x - minX) / (maxX - minX)) * max(1, size.width - xInset * 2)
-                let y = maxY == minY ? size.height / 2
-                    : yInset + CGFloat((point.y - minY) / (maxY - minY)) * max(1, size.height - yInset * 2)
-                return (id, CGPoint(x: x, y: y))
-            })
-        }
-
-        var level = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, 0) })
-        let order = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
-        for _ in 0..<max(1, graph.nodes.count - 1) {
-            var changed = false
-            for edge in graph.edges where (order[edge.from] ?? 0) < (order[edge.to] ?? 0) {
-                let candidate = min(graph.nodes.count - 1, (level[edge.from] ?? 0) + 1)
-                if candidate > (level[edge.to] ?? 0) {
-                    level[edge.to] = candidate
-                    changed = true
-                }
-            }
-            if !changed { break }
-        }
-        let levels = Array(Set(level.values)).sorted()
-        let normalized = Dictionary(uniqueKeysWithValues: levels.enumerated().map { ($0.element, $0.offset) })
-        let rows = Dictionary(grouping: graph.nodes) { normalized[level[$0.id] ?? 0] ?? 0 }
-        let maxRow = rows.keys.max() ?? 0
+        let orderedRows = compactRows()
+        let rowCount = max(1, orderedRows.count)
+        let horizontalInset: CGFloat = 16
+        let verticalInset: CGFloat = 42
+        let nodeWidth = min(154, max(118, (size.width - 40) / 2))
+        let rowStep = rowCount <= 1 ? 0 : min(106, max(78, (size.height - verticalInset * 2) / CGFloat(rowCount - 1)))
+        let contentHeight = rowStep * CGFloat(max(0, rowCount - 1))
+        let startY = rowCount <= 1 ? size.height / 2 : max(verticalInset, (size.height - contentHeight) / 2)
         var result: [String: CGPoint] = [:]
-        for row in 0...maxRow {
-            let nodes = rows[row] ?? []
-            let step = nodes.count <= 1 ? 0 : max(116, (size.width - 136) / CGFloat(nodes.count - 1))
-            let width = step * CGFloat(max(0, nodes.count - 1))
-            let start = nodes.count <= 1 ? size.width / 2 : (size.width - width) / 2
+        for (row, nodes) in orderedRows.enumerated() {
             for (column, node) in nodes.enumerated() {
+                let x: CGFloat
+                if nodes.count == 1 {
+                    x = size.width / 2
+                } else {
+                    x = column == 0
+                        ? horizontalInset + nodeWidth / 2
+                        : size.width - horizontalInset - nodeWidth / 2
+                }
                 result[node.id] = CGPoint(
-                    x: start + CGFloat(column) * step,
-                    y: 42 + CGFloat(row) * max(78, (size.height - 84) / CGFloat(max(1, maxRow)))
+                    x: x,
+                    y: min(size.height - verticalInset, startY + CGFloat(row) * rowStep)
                 )
             }
         }
         return result
     }
 
-    private func edgeEndpoints(from: CGPoint, to: CGPoint) -> (start: CGPoint, end: CGPoint) {
+    /// Mobile is a reading surface, not a squeezed desktop canvas. Preserve
+    /// authored vertical bands (or inferred dependency levels), then split each
+    /// band into rows of at most two full-size cards. That keeps labels and tap
+    /// targets legible without inventing a different architecture.
+    private func compactRows() -> [[MobileHarness.GraphNode]] {
+        let sourceOrder = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($0.element.id, $0.offset) })
+        let authored = graph.nodes.compactMap { node -> (MobileHarness.GraphNode, MobileHarness.GraphNode.Position)? in
+            node.position.map { (node, $0) }
+        }
+
+        let bands: [[MobileHarness.GraphNode]]
+        if authored.count == graph.nodes.count {
+            let sorted = authored.sorted {
+                if abs($0.1.y - $1.1.y) > 44 { return $0.1.y < $1.1.y }
+                return $0.1.x < $1.1.x
+            }
+            var grouped: [[(MobileHarness.GraphNode, MobileHarness.GraphNode.Position)]] = []
+            for item in sorted {
+                if let last = grouped.indices.last,
+                   let anchor = grouped[last].first?.1.y,
+                   abs(item.1.y - anchor) <= 44 {
+                    grouped[last].append(item)
+                } else {
+                    grouped.append([item])
+                }
+            }
+            bands = grouped.map { $0.sorted { $0.1.x < $1.1.x }.map(\.0) }
+        } else {
+            var level = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, 0) })
+            let nodeIDs = Set(graph.nodes.map(\.id))
+            for _ in 0..<max(1, graph.nodes.count - 1) {
+                var changed = false
+                for edge in graph.edges where nodeIDs.contains(edge.from)
+                    && nodeIDs.contains(edge.to)
+                    && (sourceOrder[edge.from] ?? 0) < (sourceOrder[edge.to] ?? 0) {
+                    let candidate = min(graph.nodes.count - 1, (level[edge.from] ?? 0) + 1)
+                    if candidate > (level[edge.to] ?? 0) {
+                        level[edge.to] = candidate
+                        changed = true
+                    }
+                }
+                if !changed { break }
+            }
+            let grouped = Dictionary(grouping: graph.nodes) { level[$0.id] ?? 0 }
+            bands = grouped.keys.sorted().map { key in
+                (grouped[key] ?? []).sorted { (sourceOrder[$0.id] ?? 0) < (sourceOrder[$1.id] ?? 0) }
+            }
+        }
+
+        return bands.flatMap { band in
+            stride(from: 0, to: band.count, by: 2).map { start in
+                Array(band[start..<min(start + 2, band.count)])
+            }
+        }
+    }
+
+    private func edgeEndpoints(from: CGPoint, to: CGPoint, nodeWidth: CGFloat) -> (start: CGPoint, end: CGPoint) {
         let dx = to.x - from.x, dy = to.y - from.y
         let distance = max(1, hypot(dx, dy))
-        let inset: CGFloat = abs(dx) >= abs(dy) ? 124 : 31
         let ux = dx / distance, uy = dy / distance
+        let horizontalDistance = abs(ux) < 0.001 ? CGFloat.greatestFiniteMagnitude : (nodeWidth / 2 + 4) / abs(ux)
+        let verticalDistance = abs(uy) < 0.001 ? CGFloat.greatestFiniteMagnitude : 32 / abs(uy)
+        let inset = min(horizontalDistance, verticalDistance)
         return (
             CGPoint(x: from.x + ux * inset, y: from.y + uy * inset),
             CGPoint(x: to.x - ux * inset, y: to.y - uy * inset)
+        )
+    }
+
+    /// Keep the topology readable on a phone without placing relationship
+    /// prose over cards or crossings. Selecting a component highlights its
+    /// routes; the exact Pack-declared labels are shown in the inspector below.
+    private func edgeControls(start: CGPoint, end: CGPoint) -> (first: CGPoint, second: CGPoint) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        if abs(dy) < 24 {
+            return (
+                CGPoint(x: start.x + dx * 0.34, y: start.y),
+                CGPoint(x: start.x + dx * 0.66, y: end.y)
+            )
+        }
+        let bend = max(28, min(62, abs(dy) * 0.46))
+        let direction: CGFloat = dy >= 0 ? 1 : -1
+        return (
+            CGPoint(x: start.x, y: start.y + bend * direction),
+            CGPoint(x: end.x, y: end.y - bend * direction)
         )
     }
 
@@ -4079,6 +4287,9 @@ private struct MobileConnectionView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.orange)
                                 }
+                                Text("Proof · \(harness.proof?.conclusion.replacingOccurrences(of: "-", with: " ") ?? "Host update required")")
+                                    .font(.caption2)
+                                    .foregroundStyle(harness.proof?.conclusion == "failed" ? Color.red : Color.secondary)
                             }
                             Spacer()
                             Button("Details") { inspectedHarness = harness }

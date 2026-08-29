@@ -144,9 +144,12 @@ final class OpenFishVoiceUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["OpenFish.iOS.HarnessDetail"].waitForExistence(timeout: 5)
         )
-        XCTAssertTrue(app.staticTexts["Operational architecture"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Map"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Relationship map"].exists)
         XCTAssertTrue(app.staticTexts["App-server"].exists)
         XCTAssertTrue(app.staticTexts["Thread & turn"].exists)
+        XCTAssertTrue(app.staticTexts["Declared connections"].exists)
+        keepScreenshot(of: app, named: "openfish-ios-harness-map")
     }
 
     @MainActor
@@ -159,7 +162,7 @@ final class OpenFishVoiceUITests: XCTestCase {
             app.descendants(matching: .any)["OpenFish.iOS.HarnessDetail"].waitForExistence(timeout: 5)
         )
 
-        let runtime = app.buttons["Live"]
+        let runtime = app.buttons["Trace"]
         XCTAssertTrue(runtime.waitForExistence(timeout: 5))
         runtime.tap()
 
@@ -175,6 +178,7 @@ final class OpenFishVoiceUITests: XCTestCase {
         let last = app.descendants(matching: .any)["OpenFish.iOS.HarnessTrace.36"]
         for _ in 0..<10 where !last.exists { app.swipeUp() }
         XCTAssertTrue(last.exists)
+        keepScreenshot(of: app, named: "openfish-ios-harness-trace")
     }
 
     @MainActor
@@ -235,5 +239,13 @@ final class OpenFishVoiceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["OpenFish.iOS.HarnessModelPicker"].exists)
         XCTAssertEqual(app.state, .runningForeground)
 #endif
+    }
+
+    @MainActor
+    private func keepScreenshot(of app: XCUIApplication, named name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

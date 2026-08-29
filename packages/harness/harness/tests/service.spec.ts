@@ -29,7 +29,10 @@ function pack(version: string): unknown {
       evidence,
       nodes: [
         { id: 'input', kind: 'input', title: 'Input', editable: false, responsibility: 'Accepts user intent.', evidence, position: { x: 10, y: 20 } },
-        { id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false, responsibility: 'Runs the agent loop.', evidence },
+        {
+          id: 'runtime', kind: 'runtime', title: 'Runtime', editable: false,
+          responsibility: 'Runs the agent loop.', evidence, observes: ['session.ready'],
+        },
         { id: 'output', kind: 'output', title: 'Output', editable: false, responsibility: 'Publishes session updates.', evidence },
       ],
       edges: [{ from: 'input', to: 'runtime' }, { from: 'runtime', to: 'output' }],
@@ -141,8 +144,91 @@ describe('Harness lifecycle and Driver SDK', () => {
       const restoredRow = (await restored.list()).find(item => item.id === 'community.driver-demo')
       expect(restoredRow).toMatchObject({ isDefault: true, version: '1.0.0', installation: { installedVersion: '1.0.0' }, source: 'user' })
       const stored = JSON.parse(await readFile(join(stateDir, 'state.json'), 'utf8')) as { version: number }
-      expect(stored.version).toBe(7)
+      expect(stored.version).toBe(8)
     } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('admits a Studio draft without mutating the local catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-draft-admission-'))
+    try {
+      const service = new HarnessService(new Context(), { stateDir })
+      const candidate = pack('1.0.0') as Record<string, unknown>
+      candidate.id = 'community.dry-run'
+      const admitted = await service.validateDraft(candidate)
+      expect(admitted).toMatchObject({ id: 'community.dry-run', source: 'user', verified: false })
+      expect((await service.list()).some(item => item.id === 'community.dry-run')).toBe(false)
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('retains real session proof by exact Pack version after a later preflight and update', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
+    const stateDir = await mkdtemp(join(tmpdir(), 'openfish-proof-ledger-'))
+    const context = await contextWithSessions()
+    const driver: HarnessDriver = {
+      apiVersion: 1,
+      protocol: 'community-protocol',
+      capabilities: async () => [
+        { id: 'session.create', status: 'supported', source: 'driver' },
+        { id: 'session.resume', status: 'supported', source: 'driver' },
+        { id: 'workspace.no-project', status: 'supported', source: 'driver' },
+        { id: 'configuration.auth', status: 'supported', source: 'driver' },
+        { id: 'architecture.manifest', status: 'supported', source: 'pack' },
+        { id: 'architecture.runtime-observation', status: 'runtime', source: 'runtime' },
+        { id: 'diagnostics.preflight', status: 'supported', source: 'driver' },
+      ],
+      available: async () => undefined,
+      install: async () => undefined,
+      preflight: async () => ({ message: 'Live protocol initialized without a prompt.' }),
+      create: async (request, candidate) => publishDriverAgent(context, request, candidate),
+      resume: async (request, candidate) => publishDriverAgent(context, request, candidate),
+      dispose: async () => undefined,
+    }
+    try {
+      const service = new HarnessService(context, { stateDir, packs: [pack('1.0.0')] })
+      service.registerDriver(driver)
+      await authorizePackDriver(service)
+      await service.install('community.driver-demo' as never)
+      await service.selectAuth('community.driver-demo' as never, 'local-login')
+      await service.probe('community.driver-demo' as never)
+      const preflightOnly = await service.describe('community.driver-demo' as never, '1.0.0')
+      expect(preflightOnly.proof).toMatchObject({ conclusion: 'partially-verified' })
+      expect(preflightOnly.proof.facts.find(fact => fact.kind === 'observed')).toMatchObject({ status: 'available' })
+      await service.create(
+        'community.driver-demo' as never,
+        'proof-task' as never,
+        join(stateDir, 'no-project', 'proof-task'),
+        'no-project',
+      )
+      await service.probe('community.driver-demo' as never)
+      const afterProbe = await service.describe('community.driver-demo' as never, '1.0.0')
+      expect(afterProbe.compatibility.basis).toBe('preflight')
+      // A real session verifies observation and preflight, but this fixture is
+      // still only a local executable identity without a trusted checksum.
+      expect(afterProbe.proof.conclusion).toBe('partially-verified')
+      expect(afterProbe.proof.facts.find(fact => fact.kind === 'resolved')).toMatchObject({ status: 'available' })
+      expect(afterProbe.proof.facts.find(fact => fact.kind === 'evaluated')).toMatchObject({ status: 'verified' })
+      expect(afterProbe.proof.facts.find(fact => fact.kind === 'observed')).toMatchObject({
+        status: 'verified', source: 'session-create',
+      })
+
+      await service.upsert(pack('2.0.0'))
+      await service.install('community.driver-demo' as never)
+      const current = await service.describe('community.driver-demo' as never, '2.0.0')
+      expect(current.proof.facts.find(fact => fact.kind === 'observed')?.status).not.toBe('verified')
+      const pinned = await service.describe('community.driver-demo' as never, '1.0.0')
+      expect(pinned.proof.facts.find(fact => fact.kind === 'observed')).toMatchObject({ status: 'verified' })
+
+      const restored = new HarnessService(new Context(), { stateDir })
+      restored.registerDriver(driver)
+      const restoredPinned = await restored.describe('community.driver-demo' as never, '1.0.0')
+      expect(restoredPinned.proof.facts.find(fact => fact.kind === 'observed')).toMatchObject({ status: 'verified' })
+    } finally {
+      await context.fiber.dispose()
       await rm(stateDir, { recursive: true, force: true })
     }
   })

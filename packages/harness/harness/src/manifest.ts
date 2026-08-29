@@ -71,7 +71,12 @@ const distribution = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('executable'), command: z.string().min(1).max(MAX_URL_TEXT), args: argumentList.default([]), env: stringRecord.default({}) }),
 ])
 const graphEvidence = z.object({
-  kind: z.enum(['declared', 'source-derived', 'runtime-observed']),
+  // v0 Packs written before the proof-ledger vocabulary used
+  // source-derived/runtime-observed. Admit and normalize those aliases so an
+  // OpenFish update never strands an already-pinned task or community Pack.
+  kind: z.enum(['declared', 'resolved', 'observed', 'source-derived', 'runtime-observed'])
+    .transform(kind => kind === 'source-derived' ? 'resolved' as const
+      : kind === 'runtime-observed' ? 'observed' as const : kind),
   source: detailText,
   version: shortText.optional(),
 })

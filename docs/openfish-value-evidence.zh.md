@@ -12,8 +12,9 @@
 | 用户无需学习不同 CLI 即可切换 Harness | 新任务 Override 成功、出现正确账号／模型／思考控件，而且旧任务不被修改 | Harness／ACP Contract 与 Apple Silicon Packaged-runtime Gate 已通过；官方 Codex `0.150.1` 既有登录路径与 OMP `18.0.10` 未认证生命周期已有 Working-copy 实时证据，带认证 OMP 与最终 DSH／Codex／OMP Artifact Matrix 仍待完成 | 可以声明协议驱动选择与两条精确验证过的路径，不能声明通用成功 |
 | App 与 Host 重启后任务可靠恢复 | 按 Harness／版本／Workspace 模式统计 Resume 成功，并保留 Remote Identity 与固定配置 | Resume、Fork、Pack Pinning Fixture 与 Packaged Clean-state Host Smoke 已通过；真实 Multi-Harness Retention Matrix 仍待完成 | 不能发布可靠性百分比 |
 | 安装配置失败可以恢复 | 从缺失认证、无可路由模型、下载损坏、更新中断、Harness 退出、Registry 故障与 Host 重连恢复，同时不丢已有任务 | Missing Auth／Model、Invalid Pack、ACP Exit／Cancel、Host Reconnect 与 Update／Rollback Contract 已通过；尚未记录完整 Chaos Run | 可以说明存在明确恢复状态，不能声称鲁棒性已证明 |
-| Architecture View 改善理解 | 用户能够从代表性 Pack 中正确识别 Host、Harness、Account／Provider、模型、Workspace Boundary、Evidence Level，以及实际观测到的有序执行路径 | Mac 与 iPhone 已实现 Evidence-backed Manifest 和有界、无内容的执行轨迹；尚未进行理解度研究 | 只能称为 Evidence-backed Lens 与 Execution Trace，不能声称已证明提升理解 |
-| 技术用户可以高效创建 Pack | 从空 Manifest Editor 到通过接纳的准确版本 Pack、不发送模型提示词的实时 Preflight、无凭证 Export 与成功任务所需时间 | 已实现可执行 Workflow；尚未测量任务时间样本；不宣称 Provider 不创建状态或没有初始化成本 | 当前只能称 Manifest Editor，不能称通用可视化 Harness Builder |
+| Architecture View 改善理解 | 用户能够从代表性 Pack 中正确识别 Host、Harness、Account／Provider、模型、Workspace Boundary、Evidence Level，以及实际观测到的有序执行路径 | Mac 与 iPhone 已实现 Overview／Map／Trace／Studio，并提供按准确版本隔离已准入声明、可执行身份解析、真实 Session 观测、Host 兼容性评估与 Opaque Disclosure 的证据账本；尚未进行理解度研究 | 只能称为 Evidence-backed Lens 与 Execution Trace，不能声称已证明提升理解 |
+| 技术用户可以高效创建 Pack | 从空 Studio 到通过准入的准确版本 Pack、不写入状态的准入 Dry Run、准确安装／实时 Preflight、无凭证 Export 与成功任务所需时间 | 已实现 Driver-backed 控件、撤销／重做、重大变更 Review、非写入验证、版本保留、实时 Preflight 与 GitHub Review Export；尚未测量任务时间样本 | 可以称 Harness Studio，不能称可把任意程序自动变成 Harness 的通用可视化编译器 |
+| Harness 比较可检查而不是靠传闻 | 用同一项明确任务、准确 Harness／模型／思考强度／权限路线、重复次数与轮换顺序运行；失败、耗时、Usage 与用户质量评分保持可区分 | 本地 Harness Lab 已实现隔离 No Project 运行、绝不代替用户回答 Approval Request、保留可检查的源任务、分离用户评分并生成无内容脱敏 Export；所选权限模式仍可能允许某项操作无需询问，且尚未形成代表性 Benchmark 结果 | 可以声明实验工具，不能声称 OpenFish 已知道哪个 Harness 最好 |
 | Mac–iPhone 连续性减少中断 | 在真实手机上完成 Pair／Reconnect／Follow-up／Approval／Question／Revoke，并能从后台或断网恢复 | 当前源码的 DEBUG App 已在所连接的 iPhone 17 Pro 上完成构建、签名、安装与启动。其无内容硬件检查通过了五轮生产麦克风启停，并通过了一条真实 Host 生命周期路径：冷启动 Profile 恢复、认证基线、主动后台停连、回到前台重连及基线恢复。Simulator 的 Approval／Question 与 Microphone-denied UI，以及认证 Host 的 Self-revoke Contract 已通过。真机 XCTest Runner 可以安装并启动，但其本地网络 DTX 控制通道在用例开始前断开；因此当前依赖点击的 Follow-up、Approval、Question 与 Revoke 真机证据仍待完成 | 可以声明精确通过的真机硬件与生命周期路径；不能从 Simulator 或 Protocol Test 推导尚未记录的交互 |
 
 ## 生态校准：2026-08-29
@@ -34,7 +35,9 @@ OpenFish 开发期间，行业基线已经提高。OpenAI 目前把开放 Codex 
 
 OpenFish Compatibility 回答一个 Harness 能否通过壳子完成安装、配置、调用、观测、恢复与控制；它不回答谁“最好”。比较 DSH、Codex、OMP、Pi、OpenCode、Claude Code 或其他 Agent，必须使用相同任务集，并分别测量任务完成、回归、延迟、成本、工具保真、安全行为与主观适配；结果还必须注明 Provider Quota 与账号类型。
 
-OpenFish 不会根据 Repository Star、发布时间、名称、单次 Demo 或壳子自身的兼容结果给 Harness 排名。未来 Benchmark 报告必须公开任务、Harness 与模型版本、设置、账号／计费模式、重复次数、失败与脱敏后的 Raw Outcome。
+OpenFish 不会根据 Repository Star、发布时间、名称、单次 Demo 或壳子自身的兼容结果给 Harness 排名。Harness Lab 现在可以让两个或更多已安装 Harness 在各自的 No Project Session 中运行用户选择的同一项任务。每条路线使用明确的实时模型、思考强度与权限模式；每轮会轮换顺序，OpenFish 绝不代替用户回答 Approval Request，原始任务也保留供用户检查。所选权限模式仍可能允许某项操作无需询问，因此报告始终记录实际 Route。汇总把完成／失败、耗时和 Provider 报告的 Usage 当作机械事实，并与用户自己的 1–5 质量评分分开。
+
+Lab 会使用所选账号并可能消耗 Provider 额度。可选 JSON Export 不含 Response、Prompt、账号数据和路径；只有用户明确选择后才会包含任务原文。这样可以让一次比较具备可检查性，而不会把某个人的结果伪装成全球排行榜。可发布的 Benchmark 仍需公开任务、准确 Harness 与模型版本、设置、账号／计费模式、重复次数、失败与脱敏后的 Outcome。
 
 ## Release Evidence 记录
 

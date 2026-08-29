@@ -30,6 +30,7 @@ import type {
   HarnessInstallation,
   HarnessPack,
   HarnessPreflightResult,
+  HarnessProof,
   HarnessSessionRequest,
 } from './types.ts'
 
@@ -252,13 +253,29 @@ function withUserBuilderCapabilities(
   return [...byId.values()]
 }
 
+type StoredCompatibility = {
+  status: 'ready' | 'compatible' | 'failed'
+  checkedAt: string
+  message?: string
+  basis: NonNullable<HarnessCompatibility['basis']>
+}
+
+type StoredProofEvidence = Partial<Record<NonNullable<HarnessCompatibility['basis']>, StoredCompatibility>>
+
 interface StoredInstall {
   active?: HarnessPack
   previous: HarnessPack[]
   authMethod?: string
   /** Exact Pack versions whose installed Driver completed authentication discovery. */
   authDiscoveries?: Record<string, string>
-  compatibility?: { status: 'ready' | 'compatible' | 'failed'; checkedAt: string; message?: string }
+  compatibility?: {
+    status: 'ready' | 'compatible' | 'failed'
+    checkedAt: string
+    message?: string
+    basis?: NonNullable<HarnessCompatibility['basis']>
+  }
+  /** Operation evidence is isolated by exact Pack version and proof basis. */
+  proofEvidence?: Record<string, StoredProofEvidence>
 }
 
 type StoredCommunitySubmission = HarnessCommunitySubmissionRecord
@@ -277,7 +294,7 @@ interface StoredDriverAuthorization {
 }
 
 interface StoredHarnessState {
-  version: 7
+  version: 8
   defaultHarnessId?: string
   customPacks: HarnessPack[]
   registryPacks: HarnessPack[]
@@ -290,7 +307,7 @@ interface StoredHarnessState {
 }
 
 interface StoredHarnessStateCandidate {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   defaultHarnessId?: string
   customPacks: HarnessPack[]
   registryPacks?: HarnessPack[]
@@ -303,7 +320,7 @@ interface StoredHarnessStateCandidate {
 }
 
 const EMPTY_STATE: StoredHarnessState = {
-  version: 7,
+  version: 8,
   customPacks: [],
   registryPacks: [],
   communityPacks: [],
@@ -312,6 +329,50 @@ const EMPTY_STATE: StoredHarnessState = {
   communityRevocationSubmissions: [],
   driverAuthorizations: {},
   installs: {},
+}
+
+const COMPATIBILITY_BASES = [
+  'builtin', 'driver-admission', 'preflight', 'session-create', 'session-resume', 'session-fork',
+] as const
+
+function storedCompatibility(input: unknown, expectedBasis?: StoredCompatibility['basis']): StoredCompatibility | undefined {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return undefined
+  const value = input as Record<string, unknown>
+  if (!['ready', 'compatible', 'failed'].includes(String(value.status))) return undefined
+  if (typeof value.checkedAt !== 'string' || Number.isNaN(Date.parse(value.checkedAt))) return undefined
+  // Pre-v8 state did not record provenance. Preserve its compatibility result
+  // conservatively as Driver admission; never upgrade it to live preflight or
+  // session observation during migration.
+  const basis = expectedBasis ?? value.basis ?? 'driver-admission'
+  if (typeof basis !== 'string' || !COMPATIBILITY_BASES.includes(basis as StoredCompatibility['basis'])) return undefined
+  if (value.message !== undefined && typeof value.message !== 'string') return undefined
+  return {
+    status: value.status as StoredCompatibility['status'],
+    checkedAt: value.checkedAt,
+    basis: basis as StoredCompatibility['basis'],
+    ...(typeof value.message === 'string' ? { message: value.message } : {}),
+  }
+}
+
+function storedProofEvidence(input: unknown): Record<string, StoredProofEvidence> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return {}
+  return Object.fromEntries(Object.entries(input).flatMap(([version, raw]) => {
+    if (!/^[0-9A-Za-z][0-9A-Za-z._+-]*$/u.test(version)
+      || typeof raw !== 'object' || raw === null || Array.isArray(raw)) return []
+    const candidate = raw as Record<string, unknown>
+    const evidence = Object.fromEntries(COMPATIBILITY_BASES.flatMap((basis) => {
+      const item = storedCompatibility(candidate[basis], basis)
+      return item === undefined ? [] : [[basis, item]]
+    })) as StoredProofEvidence
+    return Object.keys(evidence).length === 0 ? [] : [[version, evidence]]
+  }))
+}
+
+function latestStoredCompatibility(evidence: StoredProofEvidence | undefined): StoredCompatibility | undefined {
+  if (evidence === undefined) return undefined
+  return Object.values(evidence)
+    .filter((item): item is StoredCompatibility => item !== undefined)
+    .sort((left, right) => Date.parse(right.checkedAt) - Date.parse(left.checkedAt))[0]
 }
 
 function storedAuthenticationDiscoveries(input: unknown): Record<string, string> {
@@ -665,59 +726,67 @@ const BUILTIN_DSH = parseHarnessPack({
     level: 'observable',
     manifestVersion: 1,
     boundary: 'DeepSeek Harness process',
-    evidence: [{ kind: 'source-derived', source: 'docs/architecture.md', version: BUILTIN_DSH_VERSION }],
+    evidence: [{ kind: 'resolved', source: 'docs/architecture.md', version: BUILTIN_DSH_VERSION }],
     nodes: [
       {
         id: 'context', kind: 'context-runtime', title: 'Context assembly', editable: false,
         responsibility: 'Builds the model-visible prompt from instructions, workspace context, skills, and session history.',
         inputs: ['user intent', 'workspace', 'session history'], outputs: ['model context'],
-        evidence: [{ kind: 'source-derived', source: 'packages/context', version: BUILTIN_DSH_VERSION }],
+        position: { x: 80, y: 80 },
+        evidence: [{ kind: 'resolved', source: 'packages/context', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'loop', kind: 'agent-loop', title: 'Agent loop', editable: false,
         responsibility: 'Coordinates inference, tool calls, approvals, and turn termination.',
         inputs: ['model context', 'session controls'], outputs: ['assistant events', 'tool requests'],
         observes: ['turn.started', 'turn.completed', 'turn.failed'],
-        evidence: [{ kind: 'source-derived', source: 'packages/core/agent-loop', version: BUILTIN_DSH_VERSION }],
+        position: { x: 300, y: 180 },
+        evidence: [{ kind: 'resolved', source: 'packages/core/agent-loop', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'models', kind: 'model-router', title: 'Model routing', editable: false,
         responsibility: 'Resolves a configured provider, model, and reasoning controls for each inference request.',
         inputs: ['model selection', 'credentials'], outputs: ['streamed inference'],
         observes: ['model.completed'],
-        evidence: [{ kind: 'source-derived', source: 'packages/llm', version: BUILTIN_DSH_VERSION }],
+        position: { x: 520, y: 70 },
+        evidence: [{ kind: 'resolved', source: 'packages/llm', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'tools', kind: 'tool-runtime', title: 'Tool runtime', editable: false,
         responsibility: 'Publishes active tools, validates arguments, and records structured results.',
         inputs: ['tool request', 'active catalog'], outputs: ['tool result', 'render intent'],
         observes: ['tool.activity'],
-        evidence: [{ kind: 'source-derived', source: 'packages/core/tools', version: BUILTIN_DSH_VERSION }],
+        position: { x: 520, y: 190 },
+        evidence: [{ kind: 'resolved', source: 'packages/core/tools', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'sandbox', kind: 'execution-boundary', title: 'Execution boundary', editable: false,
         responsibility: 'Applies the active sandbox provider to operations that request confinement; exact enforcement depends on the selected provider and policy.',
         inputs: ['approved operation', 'workspace policy'], outputs: ['enforced or reported effect'],
-        evidence: [{ kind: 'source-derived', source: 'packages/sandbox', version: BUILTIN_DSH_VERSION }],
+        position: { x: 960, y: 190 },
+        evidence: [{ kind: 'resolved', source: 'packages/sandbox', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false,
         responsibility: 'Stops sensitive operations until the configured policy or user grants permission.',
         inputs: ['operation risk', 'preset policy'], outputs: ['allow or deny decision'],
         observes: ['approval.requested', 'approval.resolved'],
-        evidence: [{ kind: 'source-derived', source: 'packages/guard', version: BUILTIN_DSH_VERSION }],
+        position: { x: 740, y: 190 },
+        evidence: [{ kind: 'resolved', source: 'packages/guard', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'session', kind: 'session-runtime', title: 'Session persistence', editable: false,
         responsibility: 'Persists events, selected Harness identity, and resumable conversation state.',
         inputs: ['agent events', 'control state'], outputs: ['durable session', 'replay'],
-        evidence: [{ kind: 'source-derived', source: 'packages/session', version: BUILTIN_DSH_VERSION }],
+        position: { x: 520, y: 310 },
+        evidence: [{ kind: 'resolved', source: 'packages/session', version: BUILTIN_DSH_VERSION }],
       },
       {
         id: 'extensions', kind: 'plugin-runtime', title: 'Plugin composition', editable: false,
         responsibility: 'Composes optional capabilities without changing the core agent loop.',
         inputs: ['plugin manifests', 'configuration'], outputs: ['capability graph'],
-        evidence: [{ kind: 'source-derived', source: 'packages/core', version: BUILTIN_DSH_VERSION }],
+        position: { x: 80, y: 300 },
+        evidence: [{ kind: 'resolved', source: 'packages/core', version: BUILTIN_DSH_VERSION }],
       },
     ],
     edges: [
@@ -798,16 +867,16 @@ function curatedCodex(version = '0.150.1'): HarnessPack {
     distribution: { kind: 'npx', package: `@openai/codex@${version}`, args: ['app-server', '--stdio'], env: {} },
     graph: {
       level: 'observable', manifestVersion: 1, boundary: 'Codex app-server process',
-      evidence: [{ kind: 'source-derived', source: 'https://github.com/openai/codex/tree/main/codex-rs/app-server', version }],
+      evidence: [{ kind: 'resolved', source: 'https://github.com/openai/codex/tree/main/codex-rs/app-server', version }],
       nodes: [
-        { id: 'app-server', kind: 'protocol-adapter', title: 'App-server', editable: false, responsibility: 'Owns the official JSON-RPC boundary used by Codex interfaces.', observes: ['protocol.ready'], evidence: [{ kind: 'source-derived', source: 'codex-rs/app-server', version }] },
-        { id: 'thread', kind: 'agent-session', title: 'Thread & turn', editable: false, responsibility: 'Owns durable Codex threads, turns, items, cancellation, and resume.', observes: ['session.ready', 'turn.started', 'turn.completed', 'turn.failed'], evidence: [{ kind: 'source-derived', source: 'codex-rs/app-server-protocol', version }] },
-        { id: 'context', kind: 'context-runtime', title: 'Context', editable: false, responsibility: 'Builds model input from instructions, history, skills, apps, and the environment.', evidence: [{ kind: 'source-derived', source: 'codex-rs/core', version }] },
-        { id: 'model', kind: 'model-client', title: 'Model client', editable: false, responsibility: 'Streams inference using the selected live model and advertised reasoning effort.', observes: ['model.completed'], evidence: [{ kind: 'source-derived', source: 'codex-rs/core', version }] },
-        { id: 'tools', kind: 'tool-runtime', title: 'Tools', editable: false, responsibility: 'Executes coding, shell, MCP, skills, apps, and other enabled capabilities.', observes: ['tool.activity'], evidence: [{ kind: 'source-derived', source: 'codex-rs/core', version }] },
-        { id: 'sandbox', kind: 'execution-boundary', title: 'Sandbox', editable: false, responsibility: 'Constrains filesystem and network effects under the selected policy.', evidence: [{ kind: 'source-derived', source: 'codex-rs/core', version }] },
-        { id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false, responsibility: 'Requests user review before boundary-crossing operations.', observes: ['approval.requested', 'approval.resolved'], evidence: [{ kind: 'source-derived', source: 'codex-rs/app-server', version }] },
-        { id: 'output', kind: 'output-stream', title: 'Output stream', editable: false, responsibility: 'Publishes reasoning summaries, tool progress, and final answers as typed items.', observes: ['output.activity'], evidence: [{ kind: 'source-derived', source: 'codex-rs/app-server-protocol', version }] },
+        { id: 'app-server', kind: 'protocol-adapter', title: 'App-server', editable: false, responsibility: 'Owns the official JSON-RPC boundary used by Codex interfaces.', observes: ['protocol.ready'], position: { x: 80, y: 180 }, evidence: [{ kind: 'resolved', source: 'codex-rs/app-server', version }] },
+        { id: 'thread', kind: 'agent-session', title: 'Thread & turn', editable: false, responsibility: 'Owns durable Codex threads, turns, items, cancellation, and resume.', observes: ['session.ready', 'turn.started', 'turn.completed', 'turn.failed'], position: { x: 290, y: 180 }, evidence: [{ kind: 'resolved', source: 'codex-rs/app-server-protocol', version }] },
+        { id: 'context', kind: 'context-runtime', title: 'Context', editable: false, responsibility: 'Builds model input from instructions, history, skills, apps, and the environment.', position: { x: 500, y: 75 }, evidence: [{ kind: 'resolved', source: 'codex-rs/core', version }] },
+        { id: 'model', kind: 'model-client', title: 'Model client', editable: false, responsibility: 'Streams inference using the selected live model and advertised reasoning effort.', observes: ['model.completed'], position: { x: 710, y: 75 }, evidence: [{ kind: 'resolved', source: 'codex-rs/core', version }] },
+        { id: 'tools', kind: 'tool-runtime', title: 'Tools', editable: false, responsibility: 'Executes coding, shell, MCP, skills, apps, and other enabled capabilities.', observes: ['tool.activity'], position: { x: 710, y: 220 }, evidence: [{ kind: 'resolved', source: 'codex-rs/core', version }] },
+        { id: 'sandbox', kind: 'execution-boundary', title: 'Sandbox', editable: false, responsibility: 'Constrains filesystem and network effects under the selected policy.', position: { x: 1110, y: 220 }, evidence: [{ kind: 'resolved', source: 'codex-rs/core', version }] },
+        { id: 'approvals', kind: 'permission-policy', title: 'Approvals', editable: false, responsibility: 'Requests user review before boundary-crossing operations.', observes: ['approval.requested', 'approval.resolved'], position: { x: 910, y: 220 }, evidence: [{ kind: 'resolved', source: 'codex-rs/app-server', version }] },
+        { id: 'output', kind: 'output-stream', title: 'Output stream', editable: false, responsibility: 'Publishes reasoning summaries, tool progress, and final answers as typed items.', observes: ['output.activity'], position: { x: 1110, y: 75 }, evidence: [{ kind: 'resolved', source: 'codex-rs/app-server-protocol', version }] },
       ],
       edges: [
         { from: 'app-server', to: 'thread', label: 'JSON-RPC lifecycle', observes: ['session.ready'] },
@@ -864,66 +933,75 @@ function curatedOmp(version = '18.0.10'): HarnessPack {
       level: 'observable',
       manifestVersion: 1,
       boundary: 'Oh My Pi agent process',
-      evidence: [{ kind: 'source-derived', source: 'https://github.com/can1357/oh-my-pi', version }],
+      evidence: [{ kind: 'resolved', source: 'https://github.com/can1357/oh-my-pi', version }],
       nodes: [
         {
           id: 'resources', kind: 'context-loader', title: 'Resource loader', editable: false,
           responsibility: 'Discovers context files, prompts, skills, and project configuration.',
           inputs: ['workspace', 'OMP configuration'], outputs: ['agent resources'],
-          evidence: [{ kind: 'source-derived', source: ompSource('tree', 'packages', 'coding-agent', 'src'), version }],
+          position: { x: 260, y: 60 },
+          evidence: [{ kind: 'resolved', source: ompSource('tree', 'packages', 'coding-agent', 'src'), version }],
         },
         {
           id: 'session', kind: 'agent-session', title: 'Agent session', editable: false,
           responsibility: 'Owns the conversation, agent loop, compaction, and lifecycle events.',
           inputs: ['prompt', 'agent resources'], outputs: ['messages', 'tool requests'],
           observes: ['session.ready', 'turn.started', 'turn.completed', 'turn.failed', 'output.activity'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'session', 'agent-session.ts'), version }],
+          position: { x: 480, y: 180 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'session', 'agent-session.ts'), version }],
         },
         {
           id: 'models', kind: 'model-registry', title: 'Model registry', editable: false,
           responsibility: 'Combines bundled, configured, discovered, and extension-provided model catalogs.',
           inputs: ['provider config', 'credentials'], outputs: ['available model route'],
           observes: ['model.completed'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'config', 'model-registry.ts'), version }],
+          position: { x: 480, y: 60 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'config', 'model-registry.ts'), version }],
         },
         {
           id: 'tools', kind: 'tool-registry', title: 'Tool registry', editable: false,
           responsibility: 'Selects built-in and discoverable tools for the active session.',
           inputs: ['tool configuration', 'session'], outputs: ['validated tool execution'],
           observes: ['tool.activity'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'tools', 'index.ts'), version }],
+          position: { x: 700, y: 180 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'tools', 'index.ts'), version }],
         },
         {
           id: 'permissions', kind: 'permission-policy', title: 'Permission policy', editable: false,
           responsibility: 'Classifies tool effects and requests approval for guarded operations.',
           inputs: ['tool request', 'policy'], outputs: ['permission decision'],
           observes: ['approval.requested', 'approval.resolved'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'tools', 'index.ts'), version }],
+          position: { x: 900, y: 180 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'tools', 'index.ts'), version }],
         },
         {
           id: 'execution', kind: 'execution-runtime', title: 'Execution runtime', editable: false,
           responsibility: 'Runs filesystem, shell, language, browser, and other coding tools.',
           inputs: ['approved tool request'], outputs: ['workspace effect', 'tool result'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'README.md'), version }],
+          position: { x: 1100, y: 180 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'README.md'), version }],
         },
         {
           id: 'extensions', kind: 'extension-runtime', title: 'Extensions', editable: false,
           responsibility: 'Adds tools, commands, event handlers, providers, and custom interaction behavior.',
           inputs: ['extension packages'], outputs: ['runtime contributions'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'docs', 'extensions.md'), version }],
+          position: { x: 260, y: 300 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'docs', 'extensions.md'), version }],
         },
         {
           id: 'persistence', kind: 'session-storage', title: 'Persistence', editable: false,
           responsibility: 'Stores session entries, branches, checkpoints, and resumable agent state.',
           inputs: ['session events'], outputs: ['durable history'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'session', 'session-manager.ts'), version }],
+          position: { x: 700, y: 320 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'packages', 'coding-agent', 'src', 'session', 'session-manager.ts'), version }],
         },
         {
           id: 'acp', kind: 'protocol-adapter', title: 'ACP interface', editable: false,
           responsibility: 'Projects the OMP session into ACP prompts, updates, controls, and permission requests.',
           inputs: ['ACP client requests', 'agent events'], outputs: ['ACP session updates'],
           observes: ['protocol.ready'],
-          evidence: [{ kind: 'source-derived', source: ompSource('blob', 'README.md'), version }],
+          position: { x: 60, y: 180 },
+          evidence: [{ kind: 'resolved', source: ompSource('blob', 'README.md'), version }],
         },
       ],
       edges: [
@@ -1041,6 +1119,125 @@ function catalogCompatibility(
   }
 }
 
+/**
+ * Derive one protocol-neutral proof ledger from admitted Pack metadata and
+ * Host-owned lifecycle evidence. This function never upgrades a declaration
+ * into observation and never guesses inside an opaque Harness boundary.
+ */
+function catalogProof(
+  pack: HarnessPack,
+  installation: HarnessInstallation,
+  authentication: HarnessCatalogEntry['auth'],
+  compatibility: HarnessCompatibility,
+  driver: HarnessCatalogEntry['driver'],
+  capabilities: readonly HarnessCapability[],
+  versionEvidence: StoredProofEvidence = {},
+): HarnessProof {
+  const declared = {
+    kind: 'declared' as const,
+    status: 'verified' as const,
+    title: 'Manifest admitted',
+    detail: `${pack.graph.level} architecture with ${pack.graph.nodes.length} component${pack.graph.nodes.length === 1 ? '' : 's'} and ${pack.graph.edges.length} declared connection${pack.graph.edges.length === 1 ? '' : 's'} passed Pack v0 admission.`,
+    source: `${pack.id}@${pack.version}`,
+  }
+
+  const resolvedStatus = installation.status === 'failed'
+    ? 'failed' as const
+    : installation.status === 'builtin'
+      ? 'verified' as const
+      : installation.status !== 'installed'
+        ? 'pending' as const
+        : installation.integrity.status === 'unverified'
+          ? 'blocked' as const
+          : installation.integrity.status === 'local-executable' || installation.integrity.status === 'checksum-declared'
+            ? 'available' as const
+            : 'verified' as const
+  const resolved = {
+    kind: 'resolved' as const,
+    status: resolvedStatus,
+    title: installation.status === 'builtin' ? 'Bundled runtime resolved' : 'Executable identity resolved',
+    detail: installation.status === 'builtin'
+      ? `OpenFish includes this exact ${pack.protocol} Driver and runtime.`
+      : installation.status === 'installed'
+        ? `${installation.integrity.detail} Driver API v${driver.apiVersion} is ${driver.loaded ? 'loaded' : 'not loaded'}; authentication is ${authentication.status.replaceAll('-', ' ')}.`
+        : installation.status === 'failed'
+          ? installation.error ?? 'Installation failed before an executable identity could be resolved.'
+          : `Exact version ${installation.availableVersion} has not been installed into the private runtime yet.`,
+    source: installation.integrity.source,
+  }
+
+  const runtimeObservation = capabilities.find(capability => capability.id === 'architecture.runtime-observation')
+  const sessionEvidence: StoredProofEvidence = {}
+  for (const basis of ['session-create', 'session-resume', 'session-fork'] as const) {
+    const evidence = versionEvidence[basis]
+    if (evidence !== undefined) sessionEvidence[basis] = evidence
+  }
+  const latestSessionEvidence = latestStoredCompatibility(sessionEvidence)
+  const sessionObserved = latestSessionEvidence?.status === 'compatible'
+  const observed = {
+    kind: 'observed' as const,
+    status: sessionObserved
+      ? 'verified' as const
+      : latestSessionEvidence?.status === 'failed'
+        ? 'failed' as const
+        : runtimeObservation?.status === 'runtime' || runtimeObservation?.status === 'supported'
+          ? 'available' as const
+          : 'not-applicable' as const,
+    title: sessionObserved ? 'Session lifecycle observed' : 'Runtime observation',
+    detail: sessionObserved
+      ? `A real ${latestSessionEvidence.basis.replace('session-', '')} lifecycle completed through the pinned Driver. OpenFish records only Pack-bound, content-free runtime signals.`
+      : latestSessionEvidence?.status === 'failed'
+        ? latestSessionEvidence.message ?? `The latest ${latestSessionEvidence.basis.replace('session-', '')} lifecycle failed before OpenFish could verify it.`
+        : runtimeObservation?.status === 'runtime' || runtimeObservation?.status === 'supported'
+          ? 'The Pack and Driver expose content-free runtime bindings. Start a task to produce session-specific trace evidence.'
+          : 'This Pack does not expose a truthful runtime-observation binding.',
+    ...(latestSessionEvidence === undefined ? {} : {
+      source: latestSessionEvidence.basis,
+      checkedAt: latestSessionEvidence.checkedAt,
+    }),
+  }
+
+  const evaluatedStatus = compatibility.status === 'compatible'
+    ? 'verified' as const
+    : compatibility.status === 'ready'
+      ? 'available' as const
+      : compatibility.status === 'failed'
+        ? 'failed' as const
+        : 'pending' as const
+  const evaluated = {
+    kind: 'evaluated' as const,
+    status: evaluatedStatus,
+    title: compatibility.basis === 'preflight' ? 'Live preflight evaluated'
+      : compatibility.basis?.startsWith('session-') === true ? 'Real session evaluated'
+        : compatibility.basis === 'builtin' ? 'Bundled contract evaluated' : 'Compatibility evaluation',
+    detail: compatibility.message ?? (compatibility.status === 'untested'
+      ? 'No Host-owned live compatibility result exists for this exact Pack version.'
+      : 'Driver admission passed; run live preflight or a real task for a stronger conclusion.'),
+    ...(compatibility.basis === undefined ? {} : { source: compatibility.basis }),
+    ...(compatibility.checkedAt === undefined ? {} : { checkedAt: compatibility.checkedAt }),
+  }
+
+  const opaque = {
+    kind: 'opaque' as const,
+    status: pack.graph.level === 'opaque' ? 'verified' as const : 'not-applicable' as const,
+    title: pack.graph.level === 'opaque' ? 'Private internals remain opaque' : 'No opaque substitution',
+    detail: pack.graph.level === 'opaque'
+      ? 'OpenFish shows one evidenced runtime boundary and makes no claim about private internal components.'
+      : 'The relationship map contains only components supported by the Pack evidence; OpenFish does not add decorative or inferred nodes.',
+    source: pack.graph.boundary ?? `${pack.name} Harness boundary`,
+  }
+
+  const facts = [declared, resolved, observed, evaluated, opaque]
+  const conclusion = facts.some(fact => fact.status === 'failed')
+    ? 'failed' as const
+    : facts.every(fact => fact.status === 'verified' || fact.status === 'not-applicable')
+      ? 'verified' as const
+      : facts.some(fact => fact.status === 'verified' || fact.status === 'available')
+        ? 'partially-verified' as const
+        : 'pending' as const
+  return { conclusion, facts }
+}
+
 /** Catalog plus effect-scoped protocol drivers. */
 export class HarnessService extends Service {
   static Config = Config
@@ -1112,7 +1309,7 @@ export class HarnessService extends Service {
     await ensureManagedDirectory(this.runtimeRoot, 'Harness runtime root')
     try {
       const parsed = JSON.parse(await readFile(this.stateFile, 'utf8')) as unknown
-      if (typeof parsed === 'object' && parsed !== null && [1, 2, 3, 4, 5, 6, 7].includes(Number((parsed as { version?: unknown }).version))) {
+      if (typeof parsed === 'object' && parsed !== null && [1, 2, 3, 4, 5, 6, 7, 8].includes(Number((parsed as { version?: unknown }).version))) {
         const candidate = parsed as StoredHarnessStateCandidate
         const customPacks = candidate.customPacks
           .map(pack => parseHarnessPack({ ...pack, source: 'user' }))
@@ -1142,18 +1339,29 @@ export class HarnessService extends Service {
         ])
         const installs = Object.fromEntries(Object.entries(candidate.installs).map(([id, install]) => {
           const fallback = catalog.get(id as HarnessId) ?? this.packs.get(id as HarnessId)
+          const active = install.active === undefined ? undefined : parseStoredHarnessPack(install.active, fallback)
+          const proofEvidence = storedProofEvidence(install.proofEvidence)
+          const legacyCompatibility = storedCompatibility(install.compatibility)
+          if (active !== undefined && legacyCompatibility !== undefined
+            && proofEvidence[active.version]?.[legacyCompatibility.basis] === undefined) {
+            proofEvidence[active.version] = {
+              ...proofEvidence[active.version],
+              [legacyCompatibility.basis]: legacyCompatibility,
+            }
+          }
           return [id, {
-            ...(install.active === undefined ? {} : { active: parseStoredHarnessPack(install.active, fallback) }),
+            ...(active === undefined ? {} : { active }),
             previous: install.previous.map(pack => parseStoredHarnessPack(pack, fallback)),
             ...(install.authMethod === undefined ? {} : { authMethod: install.authMethod }),
             ...(Object.keys(storedAuthenticationDiscoveries(install.authDiscoveries)).length === 0
               ? {}
               : { authDiscoveries: storedAuthenticationDiscoveries(install.authDiscoveries) }),
-            ...(install.compatibility === undefined ? {} : { compatibility: install.compatibility }),
+            ...(legacyCompatibility === undefined ? {} : { compatibility: legacyCompatibility }),
+            ...(Object.keys(proofEvidence).length === 0 ? {} : { proofEvidence }),
           } satisfies StoredInstall]
         }))
         this.state = {
-          version: 7,
+          version: 8,
           // v1 always materialized DSH even when the user never chose it. Do
           // not mistake that compatibility default for consent during upgrade.
           ...(candidate.version >= 2 && candidate.defaultHarnessId !== undefined
@@ -1596,8 +1804,13 @@ export class HarnessService extends Service {
       ...(selectedAuthMethod === undefined ? {} : { selectedMethod: selectedAuthMethod }),
       ...await this.authenticationState(effectivePack, selectedAuthMethod, driver),
     }
-    const compatibility = catalogCompatibility(effectivePack, install?.compatibility ?? (effectivePack.protocol === 'dsh'
-      ? { status: 'compatible' as const, checkedAt: new Date(0).toISOString(), message: 'Built in to this Open Fish runtime.' }
+    const versionEvidence = install?.proofEvidence?.[effectivePack.version] ?? {}
+    const legacyCompatibility = install?.active?.version === effectivePack.version
+      ? install.compatibility
+      : undefined
+    const storedVersionCompatibility = latestStoredCompatibility(versionEvidence) ?? legacyCompatibility
+    const compatibility = catalogCompatibility(effectivePack, storedVersionCompatibility ?? (effectivePack.protocol === 'dsh'
+      ? { status: 'compatible' as const, checkedAt: new Date(0).toISOString(), message: 'Built in to this Open Fish runtime.', basis: 'builtin' as const }
       : { status: 'untested' as const }))
     const publication = this.publicationFor(effectivePack)
     const publicationFields = publication === undefined ? {} : { publication }
@@ -1651,15 +1864,23 @@ export class HarnessService extends Service {
     }
     const emptyAuthoring: HarnessAuthoringContract = { nodeKinds: [], bindingKinds: [] }
     if (effectivePack.protocol === 'dsh') {
+      const capabilities = [...builtinCapabilities]
       return {
         ...effectivePack, ...publicationFields, isDefault, available: true, installation, auth, compatibility,
-        capabilities: [...builtinCapabilities], authoring: emptyAuthoring, driver: driverInfo,
+        capabilities, authoring: emptyAuthoring, driver: driverInfo,
+        proof: catalogProof(effectivePack, installation, auth, compatibility, driverInfo, capabilities, versionEvidence),
       }
     }
     if (driver === undefined) {
+      const capabilities = withUserBuilderCapabilities(
+        effectivePack,
+        [{ id: 'architecture.manifest', status: 'supported', source: 'pack' }],
+        false,
+      )
       return {
         ...effectivePack, ...publicationFields, isDefault, available: false, unavailableReason: revokedReason ?? `No ${effectivePack.protocol} driver is loaded`, installation, auth, compatibility,
-        capabilities: withUserBuilderCapabilities(effectivePack, [{ id: 'architecture.manifest', status: 'supported', source: 'pack' }], false), authoring: emptyAuthoring, driver: driverInfo,
+        capabilities, authoring: emptyAuthoring, driver: driverInfo,
+        proof: catalogProof(effectivePack, installation, auth, compatibility, driverInfo, capabilities, versionEvidence),
       }
     }
     let capabilities: HarnessCapability[]
@@ -1672,6 +1893,13 @@ export class HarnessService extends Service {
           `Harness Driver conformance failed: ${inspection.issues.join(' ')}`,
           'Driver conformance failed',
         )
+        const failedCompatibility = catalogCompatibility(effectivePack, {
+          status: 'failed' as const,
+          checkedAt: new Date().toISOString(),
+          message: reason,
+          basis: 'driver-admission',
+        })
+        const failedCapabilities = withUserBuilderCapabilities(effectivePack, capabilities, false)
         return {
           ...effectivePack,
           ...publicationFields,
@@ -1680,21 +1908,30 @@ export class HarnessService extends Service {
           unavailableReason: revokedReason ?? reason,
           installation,
           auth,
-          compatibility: catalogCompatibility(effectivePack, { status: 'failed' as const, checkedAt: new Date().toISOString(), message: reason }),
-          capabilities: withUserBuilderCapabilities(effectivePack, capabilities, false),
+          compatibility: failedCompatibility,
+          capabilities: failedCapabilities,
           authoring: emptyAuthoring,
           driver: driverInfo,
+          proof: catalogProof(effectivePack, installation, auth, failedCompatibility, driverInfo, failedCapabilities, versionEvidence),
         }
       }
       authoring = inspection.authoring
     } catch (error: unknown) {
       const reason = safeHarnessDiagnostic(error, 'Driver inspection failed')
+      const failedCompatibility = catalogCompatibility(effectivePack, {
+        status: 'failed' as const,
+        checkedAt: new Date().toISOString(),
+        message: reason,
+        basis: 'driver-admission',
+      })
+      const failedCapabilities = withUserBuilderCapabilities(effectivePack, withHostCapabilities([]), false)
       return {
         ...effectivePack, ...publicationFields, isDefault, available: false, unavailableReason: revokedReason ?? reason, installation, auth,
-        compatibility: catalogCompatibility(effectivePack, { status: 'failed' as const, checkedAt: new Date().toISOString(), message: reason }),
-        capabilities: withUserBuilderCapabilities(effectivePack, withHostCapabilities([]), false),
+        compatibility: failedCompatibility,
+        capabilities: failedCapabilities,
         authoring: emptyAuthoring,
         driver: driverInfo,
+        proof: catalogProof(effectivePack, installation, auth, failedCompatibility, driverInfo, failedCapabilities, versionEvidence),
       }
     }
     capabilities = withUserBuilderCapabilities(effectivePack, capabilities, driver.preflight !== undefined)
@@ -1710,15 +1947,17 @@ export class HarnessService extends Service {
     const authenticationIssue = snapshotExpected && auth.status === 'unknown' ? auth.detail : undefined
     const unavailableReason = driverAuthorizationIssue ?? snapshotIssue ?? driverUnavailableReason ?? authenticationIssue
     const effectiveUnavailableReason = revokedReason ?? unavailableReason
+    const finalCompatibility = catalogCompatibility(effectivePack, storedVersionCompatibility ?? (unavailableReason === undefined
+      ? { status: 'ready' as const, message: 'Launch prerequisites are present; first session has not been verified yet.', basis: 'driver-admission' as const }
+      : { status: 'failed' as const, checkedAt: new Date().toISOString(), message: unavailableReason, basis: 'driver-admission' as const }))
     return {
       ...effectivePack, ...publicationFields,
       isDefault,
       available: revokedReason === undefined && unavailableReason === undefined,
       ...(effectiveUnavailableReason === undefined ? {} : { unavailableReason: effectiveUnavailableReason }),
       installation, auth, capabilities, authoring, driver: driverInfo,
-      compatibility: catalogCompatibility(effectivePack, install?.compatibility ?? (unavailableReason === undefined
-        ? { status: 'ready' as const, message: 'Launch prerequisites are present; first session has not been verified yet.' }
-        : { status: 'failed' as const, checkedAt: new Date().toISOString(), message: unavailableReason })),
+      compatibility: finalCompatibility,
+      proof: catalogProof(effectivePack, installation, auth, finalCompatibility, driverInfo, capabilities, versionEvidence),
     }
   }
 
@@ -1822,6 +2061,7 @@ export class HarnessService extends Service {
             active: retainedPack,
             previous: [existing.active, ...existing.previous.filter(candidate => candidate.version !== retained.version)],
             ...(authMethod === undefined ? {} : { authMethod }),
+            ...(existing.proofEvidence === undefined ? {} : { proofEvidence: existing.proofEvidence }),
             ...(existing.authDiscoveries === undefined && !needsAuthenticationDiscovery
               ? {}
               : {
@@ -1902,6 +2142,7 @@ export class HarnessService extends Service {
           active: installedPack,
           previous,
           ...(existing?.authMethod === undefined ? {} : { authMethod: existing.authMethod }),
+          ...(existing?.proofEvidence === undefined ? {} : { proofEvidence: existing.proofEvidence }),
           ...(driver.discoverAuth === undefined
             ? (existing?.authDiscoveries === undefined ? {} : { authDiscoveries: existing.authDiscoveries })
             : {
@@ -1942,7 +2183,10 @@ export class HarnessService extends Service {
     await this.initialRefresh
     const catalogPack = this.require(id)
     if (catalogPack.protocol === 'dsh') {
-      await this.recordCompatibility(id, { status: 'compatible', checkedAt: new Date().toISOString(), message: 'Built-in runtime and Driver API v1 are loaded.' })
+      await this.recordCompatibility(id, {
+        status: 'compatible', checkedAt: new Date().toISOString(),
+        message: 'Built-in runtime and Driver API v1 are loaded.', basis: 'builtin',
+      }, catalogPack.version)
       return
     }
     const install = this.state.installs[id]
@@ -1962,7 +2206,8 @@ export class HarnessService extends Service {
       await this.recordCompatibility(id, {
         status: 'ready', checkedAt: new Date().toISOString(),
         message: `Driver and installation passed; authentication is ${auth.status.replaceAll('-', ' ')}. Live protocol preflight was not started.`,
-      })
+        basis: 'driver-admission',
+      }, effective.version)
       throw new Error(`Harness "${effective.id}" authentication is ${auth.status.replaceAll('-', ' ')}; configure an account before live preflight`)
     }
     const installationDirectory = join(this.installRoot, effective.id, effective.version)
@@ -1993,13 +2238,14 @@ export class HarnessService extends Service {
         ?? 'Driver API, exact installation snapshot, launch prerequisites, and authentication checks passed. This Driver does not implement a live protocol preflight.'
       await this.recordCompatibility(id, {
         status: result === undefined ? 'ready' : 'compatible', checkedAt: new Date().toISOString(), message,
-      })
+        basis: 'preflight',
+      }, effective.version)
     } catch (error: unknown) {
       if (signal?.aborted === true) throw error
       const message = safeHarnessDiagnostic(error, 'Harness live preflight failed')
       await this.recordCompatibilityWithoutMasking(id, {
-        status: 'failed', checkedAt: new Date().toISOString(), message,
-      })
+        status: 'failed', checkedAt: new Date().toISOString(), message, basis: 'preflight',
+      }, effective.version)
       throw new Error(message)
     } finally {
       await rm(preflightDirectory, { recursive: true, force: true }).catch(() => undefined)
@@ -2234,6 +2480,25 @@ export class HarnessService extends Service {
       this.packs.set(pack.id, pack)
       await this.saveState()
     })
+    return pack
+  }
+
+  /**
+   * Admit a user-authored Pack without changing the catalog or starting code.
+   * This is the Studio dry-run boundary: schema parsing and OpenFish's custom
+   * Pack policy are exercised, while installation and live preflight remain
+   * separate, explicit operations.
+   * @param input - Untrusted Pack-shaped Studio draft.
+   * @returns The normalized Pack that passed schema and custom-Pack admission.
+   */
+  async validateDraft(input: unknown): Promise<HarnessPack> {
+    await this.initialRefresh
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new Error('A custom Harness Pack must be an object')
+    }
+    const pack = parseHarnessPack({ ...input, source: 'user', verified: false })
+    const admissionIssue = customPackAdmissionIssue(pack)
+    if (admissionIssue !== undefined) throw new Error(admissionIssue)
     return pack
   }
 
@@ -2592,13 +2857,13 @@ export class HarnessService extends Service {
       const message = safeHarnessDiagnostic(error, 'Harness fork failed')
       await this.recordCompatibilityWithoutMasking(pack.id, {
         status: 'failed', checkedAt: new Date().toISOString(),
-        message,
-      })
+        message, basis: 'session-fork',
+      }, pack.version)
       throw new Error(message)
     }
     await this.recordCompatibilityWithoutMasking(pack.id, {
-      status: 'compatible', checkedAt: new Date().toISOString(),
-    })
+      status: 'compatible', checkedAt: new Date().toISOString(), basis: 'session-fork',
+    }, pack.version)
     return agent
   }
 
@@ -2747,13 +3012,14 @@ export class HarnessService extends Service {
       const message = safeHarnessDiagnostic(error, 'Harness session failed')
       await this.recordCompatibilityWithoutMasking(pack.id, {
         status: 'failed', checkedAt: new Date().toISOString(),
-        message,
-      })
+        message, basis: operation === 'create' ? 'session-create' : 'session-resume',
+      }, pack.version)
       throw new Error(message)
     }
     await this.recordCompatibilityWithoutMasking(pack.id, {
       status: 'compatible', checkedAt: new Date().toISOString(),
-    })
+      basis: operation === 'create' ? 'session-create' : 'session-resume',
+    }, pack.version)
     return agent
   }
 
@@ -2923,17 +3189,33 @@ export class HarnessService extends Service {
       }
   }
 
-  private async recordCompatibility(id: HarnessId, compatibility: NonNullable<StoredInstall['compatibility']>): Promise<void> {
+  private async recordCompatibility(
+    id: HarnessId,
+    compatibility: NonNullable<StoredInstall['compatibility']>,
+    exactVersion?: string,
+  ): Promise<void> {
     await this.serialize(async () => {
       const existing = this.state.installs[id] ?? { previous: [] }
+      const sanitized = {
+        ...compatibility,
+        ...(compatibility.message === undefined
+          ? {}
+          : { message: safeHarnessDiagnostic(compatibility.message, 'Harness compatibility check failed') }),
+      }
+      const version = exactVersion ?? existing.active?.version
+      const proofEvidence = version === undefined || sanitized.basis === undefined
+        ? existing.proofEvidence
+        : {
+          ...existing.proofEvidence,
+          [version]: {
+            ...existing.proofEvidence?.[version],
+            [sanitized.basis]: sanitized as StoredCompatibility,
+          },
+        }
       this.state.installs[id] = {
         ...existing,
-        compatibility: {
-          ...compatibility,
-          ...(compatibility.message === undefined
-            ? {}
-            : { message: safeHarnessDiagnostic(compatibility.message, 'Harness compatibility check failed') }),
-        },
+        compatibility: sanitized,
+        ...(proofEvidence === undefined ? {} : { proofEvidence }),
       }
       await this.saveState()
     })
@@ -2943,9 +3225,10 @@ export class HarnessService extends Service {
   private async recordCompatibilityWithoutMasking(
     id: HarnessId,
     compatibility: NonNullable<StoredInstall['compatibility']>,
+    exactVersion?: string,
   ): Promise<void> {
     try {
-      await this.recordCompatibility(id, compatibility)
+      await this.recordCompatibility(id, compatibility, exactVersion)
     } catch (error: unknown) {
       this.ctx.logger.warn(
         `Harness "${id}" compatibility state could not be persisted after a session lifecycle result: ${safeHarnessDiagnostic(error, 'state write failed')}`,

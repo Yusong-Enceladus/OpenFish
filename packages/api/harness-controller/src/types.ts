@@ -17,6 +17,7 @@ import type {
   HarnessModelConfiguration,
   HarnessNodeConfigSchema,
   HarnessNodeConfigValue,
+  HarnessProof,
   HarnessPublication,
 } from '@deepseek-ai/dsh-harness'
 import type { JsonValue } from '@deepseek-ai/dsh-session/types'
@@ -114,6 +115,7 @@ export interface HarnessCatalogValue {
   readonly installation: HarnessInstallation
   readonly auth: HarnessAuthentication
   readonly compatibility: HarnessCompatibility
+  readonly proof: HarnessProof
   readonly publication?: HarnessPublication
   readonly capabilities: readonly HarnessCapability[]
   readonly authoring: HarnessAuthoringValue
@@ -164,6 +166,7 @@ export interface HarnessMutationRequest {
 /** Host-local authoring and executable-code actions. */
 export type HarnessManageAction =
   | 'install' | 'update' | 'probe' | 'remove' | 'login' | 'upsert'
+  | 'validate-draft'
   | 'validate-publication' | 'submit-publication' | 'submit-revocation'
   | 'authorize-driver'
 
