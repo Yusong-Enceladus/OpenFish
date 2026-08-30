@@ -48,7 +48,7 @@ function catalogRow(overrides: Partial<HarnessCatalogEntry> = {}): HarnessCatalo
   }
 }
 
-function fakeHarnesses(row = catalogRow()): HarnessService {
+function fakeHarnesses(row = catalogRow()) {
   return {
     list: vi.fn(async () => [row]),
     describe: vi.fn(async () => row),
@@ -69,17 +69,17 @@ function fakeHarnesses(row = catalogRow()): HarnessService {
     recordCommunityRevocationSubmission: vi.fn(async () => undefined),
     removeUserPack: vi.fn(async () => undefined),
     authenticateInteractive: vi.fn(async () => undefined),
-  } as unknown as HarnessService
+  }
 }
 
 async function boot(row = catalogRow()): Promise<{
   context: Context
   controller: HarnessController
-  harnesses: HarnessService
+  harnesses: ReturnType<typeof fakeHarnesses>
 }> {
   const context = new Context()
   const harnesses = fakeHarnesses(row)
-  context.provide('harnesses', harnesses)
+  context.provide('harnesses', harnesses as unknown as HarnessService)
   await context.plugin(TypertRegistry)
   await context.plugin(HarnessController)
   return { context, controller: context.harnessController, harnesses }

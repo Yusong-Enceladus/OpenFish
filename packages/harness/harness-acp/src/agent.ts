@@ -9,13 +9,13 @@ import { closeSync, constants, createReadStream, existsSync, mkdirSync, openSync
 import { access, chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  ClientSideConnection,
+  client as acpClient,
+  methods as acpMethods,
   CreateElicitationRequest as AcpCreateElicitationRequest,
   ElicitationPropertySchema as AcpElicitationPropertySchema,
   MultiSelectItems as AcpMultiSelectItems,
   PROTOCOL_VERSION,
-  type Agent as AcpConnection,
-  type Client,
+  type ClientConnection,
   type ContentBlock as AcpContentBlock,
   type BooleanPropertySchema,
   type CreateElicitationRequest,
@@ -25,12 +25,16 @@ import {
   type ElicitationPropertySchema,
   type IntegerPropertySchema,
   type KillTerminalRequest,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
   type MultiSelectPropertySchema,
   type NumberPropertySchema,
   type ReadTextFileRequest,
   type ReleaseTerminalRequest,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
+  type ResumeSessionRequest,
+  type ResumeSessionResponse,
   type SessionConfigOption,
   type SessionModeState,
   type SessionNotification,
@@ -173,17 +177,22 @@ function validAcpText(value: unknown, maximum: number, allowEmpty = false): valu
   return (allowEmpty || value.trim().length > 0) && length <= maximum && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
 }
 
+function isAcpSelectOption(value: unknown): value is Extract<SessionConfigOption, { type: 'select' }> {
+  return value !== null && typeof value === 'object' && (value as Record<string, unknown>).type === 'select'
+}
+
 /**
  * Admit one bounded, unambiguous ACP configuration directory before UI projection or mutation.
  * @param input - Untrusted live ACP configuration options.
  * @returns A validated, bounded option directory.
  */
 export function admitAcpSessionConfigOptions(input: readonly SessionConfigOption[]): SessionConfigOption[] {
+  const options: readonly SessionConfigOption[] = input
   if (!Array.isArray(input) || input.length > MAX_ACP_CONFIG_OPTIONS) {
     throw new Error(`ACP configuration directory exceeds ${MAX_ACP_CONFIG_OPTIONS} options`)
   }
   const optionIds = new Set<string>()
-  for (const raw of input) {
+  for (const raw of options) {
     const option = raw as SessionConfigOption & Record<string, unknown>
     if (!validAcpText(option.id, MAX_ACP_ID_CODE_POINTS) || optionIds.has(option.id)) {
       throw new Error('ACP configuration option ids must be unique, non-empty, and bounded')
@@ -206,7 +215,7 @@ export function admitAcpSessionConfigOptions(input: readonly SessionConfigOption
       }
       continue
     }
-    if (option.type !== 'select' || !Array.isArray(option.options)) {
+    if (!isAcpSelectOption(option) || !Array.isArray(option.options)) {
       throw new Error('ACP configuration option has an unsupported type')
     }
     const values = flattenedSelectOptions(option)
@@ -238,7 +247,7 @@ export function admitAcpSessionConfigOptions(input: readonly SessionConfigOption
       throw new Error(`ACP configuration option "${option.id}" selected an unadvertised value`)
     }
   }
-  return [...input]
+  return [...options]
 }
 
 /**
@@ -576,18 +585,15 @@ export async function discoverAcpAuthentication(
     child.terminate()
     throw new Error('ACP Harness authentication probe did not expose protocol pipes')
   }
-  const connection = new ClientSideConnection(
-    (): Client => ({
-      sessionUpdate: () => Promise.resolve(),
-      requestPermission: () => Promise.resolve({ outcome: { outcome: 'cancelled' } }),
-    }),
-    boundedAcpNdJsonStream(
+  const connection = acpClient({ name: 'open-fish' })
+    .onNotification(acpMethods.client.session.update, () => undefined)
+    .onRequest(acpMethods.client.session.requestPermission, () => ({ outcome: { outcome: 'cancelled' } }))
+    .connect(boundedAcpNdJsonStream(
       NodeWritable.toWeb(child.stdin) as WritableStream<Uint8Array>,
       NodeReadable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    ),
-  )
+    ))
   try {
-    const initialized = await connection.initialize({
+    const initialized = await connection.agent.request(acpMethods.agent.initialize, {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: { plan: {}, auth: { terminal: true }, fs: { readTextFile: false, writeTextFile: false } },
       clientInfo: { name: 'open-fish', title: 'Open Fish', version: '0.1.0' },
@@ -597,7 +603,7 @@ export async function discoverAcpAuthentication(
       throw new Error('ACP Harness advertised too many authentication methods')
     }
     const methods = advertised.map((method): HarnessAuthMethod => {
-      if ('type' in method && method.type === 'terminal') {
+      if ('type' in method) {
         if ((method.args?.length ?? 0) > 128 || Object.keys(method.env ?? {}).length > 128) {
           throw new Error('ACP Harness terminal authentication exceeds the supported process configuration limits')
         }
@@ -612,6 +618,7 @@ export async function discoverAcpAuthentication(
     // process, secret-reference, and duplicate-id rules as authored Packs.
     return parseHarnessPack({ ...pack, authMethods: methods }).authMethods ?? []
   } finally {
+    connection.close()
     child.terminate()
     await child.done.catch(() => undefined)
   }
@@ -1204,7 +1211,7 @@ export class AcpHarnessAgent implements Agent {
   private process: SubprocessHandle | undefined
   private processFailure: Promise<never> | undefined
   private processStopped = false
-  private connection: ClientSideConnection | undefined
+  private connection: ClientConnection | undefined
   private remoteSessionId: string | undefined
   private sessionDeleteSupported = false
   private sessionCloseSupported = false
@@ -1320,28 +1327,24 @@ export class AcpHarnessAgent implements Agent {
     // recovery resumes the exact pinned remote session.
     processFailure.catch(() => undefined)
     this.processFailure = processFailure
-    const makeClient = (_agent: AcpConnection): Client => ({
-      sessionUpdate: notification => this.sessionUpdate(notification),
-      requestPermission: request => this.requestPermission(request),
-      readTextFile: request => this.readTextFile(request),
-      writeTextFile: request => this.writeTextFile(request),
-      createTerminal: request => this.createTerminal(request),
-      terminalOutput: request => this.terminalOutput(request),
-      waitForTerminalExit: request => this.waitForTerminalExit(request),
-      killTerminal: request => this.killTerminal(request),
-      releaseTerminal: request => this.releaseTerminal(request),
-      createElicitation: request => this.createElicitation(request),
-    })
-    const connection = new ClientSideConnection(
-      makeClient,
-      boundedAcpNdJsonStream(
+    const connection = acpClient({ name: 'open-fish' })
+      .onNotification(acpMethods.client.session.update, ({ params }) => this.sessionUpdate(params))
+      .onRequest(acpMethods.client.session.requestPermission, ({ params }) => this.requestPermission(params))
+      .onRequest(acpMethods.client.fs.readTextFile, ({ params }) => this.readTextFile(params))
+      .onRequest(acpMethods.client.fs.writeTextFile, ({ params }) => this.writeTextFile(params))
+      .onRequest(acpMethods.client.terminal.create, ({ params }) => this.createTerminal(params))
+      .onRequest(acpMethods.client.terminal.output, ({ params }) => this.terminalOutput(params))
+      .onRequest(acpMethods.client.terminal.waitForExit, ({ params }) => this.waitForTerminalExit(params))
+      .onRequest(acpMethods.client.terminal.kill, ({ params }) => this.killTerminal(params))
+      .onRequest(acpMethods.client.terminal.release, ({ params }) => this.releaseTerminal(params))
+      .onRequest(acpMethods.client.elicitation.create, ({ params }) => this.createElicitation(params))
+      .connect(boundedAcpNdJsonStream(
         NodeWritable.toWeb(child.stdin) as WritableStream<Uint8Array>,
         NodeReadable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-      ),
-    )
+      ))
     this.connection = connection
     try {
-      const initialized = await abortableHarnessOperation(connection.initialize({
+      const initialized = await abortableHarnessOperation(connection.agent.request(acpMethods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {
           plan: {},
@@ -1372,7 +1375,7 @@ export class AcpHarnessAgent implements Agent {
         const metadata = selectedPackMethod?.agent === undefined
           ? undefined
           : await this.resolveAgentAuthenticationMetadata(selectedPackMethod)
-        await abortableHarnessOperation(connection.authenticate({
+        await abortableHarnessOperation(connection.agent.request(acpMethods.agent.authenticate, {
           methodId: agentAuth.id,
           ...(metadata === undefined ? {} : { _meta: metadata }),
         }), startup)
@@ -1387,9 +1390,13 @@ export class AcpHarnessAgent implements Agent {
         // history again is redundant. Codex advertises this capability and
         // its lightweight resume path is the reliable way to rejoin a thread.
         const loaded = initialized.agentCapabilities?.sessionCapabilities?.resume !== undefined
-          ? await abortableHarnessOperation(connection.resumeSession(request), startup)
+          ? await abortableHarnessOperation(connection.agent.request<ResumeSessionResponse, ResumeSessionRequest>(
+            acpMethods.agent.session.resume, request,
+          ), startup)
           : initialized.agentCapabilities?.loadSession
-            ? await abortableHarnessOperation(connection.loadSession(request), startup)
+            ? await abortableHarnessOperation(connection.agent.request<LoadSessionResponse, LoadSessionRequest>(
+              acpMethods.agent.session.load, request,
+            ), startup)
             : undefined
         if (loaded === undefined) throw new Error(`Harness "${this.pack.id}" cannot resume sessions`)
         this.configOptions = admitAcpSessionConfigOptions(loaded.configOptions ?? [])
@@ -1397,7 +1404,7 @@ export class AcpHarnessAgent implements Agent {
         this.remoteSessionId = resumeRemoteSessionId
       } else {
         const created = await abortableHarnessOperation(
-          connection.newSession({ cwd: this.workspaceDirectory, mcpServers: [] }),
+          connection.agent.request(acpMethods.agent.session.new, { cwd: this.workspaceDirectory, mcpServers: [] }),
           startup,
         )
         this.configOptions = admitAcpSessionConfigOptions(created.configOptions ?? [])
@@ -1567,7 +1574,7 @@ export class AcpHarnessAgent implements Agent {
         throw new Error(`Harness "${this.pack.id}" does not advertise operating mode "${String(value)}"`)
       }
       signal?.throwIfAborted()
-      const operation = connection.setSessionMode({ sessionId: remoteSessionId, modeId: value })
+      const operation = connection.agent.request(acpMethods.agent.session.setMode, { sessionId: remoteSessionId, modeId: value })
       // ACP does not define cancellation for configuration mutation. Once the
       // request is on the wire, await its authoritative response even if the
       // UI closes so local and remote state cannot diverge.
@@ -1588,7 +1595,7 @@ export class AcpHarnessAgent implements Agent {
       }
     }
     signal?.throwIfAborted()
-    const operation = connection.setSessionConfigOption({
+    const operation = connection.agent.request(acpMethods.agent.session.setConfigOption, {
       sessionId: remoteSessionId,
       configId,
       ...(config.type === 'boolean' ? { type: 'boolean' as const, value: value as boolean } : { value: value as string }),
@@ -1638,7 +1645,7 @@ export class AcpHarnessAgent implements Agent {
       throw new Error(`Harness "${this.pack.id}" does not advertise model "${model}"`)
     }
     signal?.throwIfAborted()
-    const modelOperation = connection.setSessionConfigOption({
+    const modelOperation = connection.agent.request(acpMethods.agent.session.setConfigOption, {
       sessionId: remoteSessionId,
       configId: config.id,
       value: model,
@@ -1655,7 +1662,7 @@ export class AcpHarnessAgent implements Agent {
         throw new Error(`Harness "${this.pack.id}" does not advertise reasoning effort "${reasoningEffort}" for model "${model}"`)
       }
       signal?.throwIfAborted()
-      const effortOperation = connection.setSessionConfigOption({
+      const effortOperation = connection.agent.request(acpMethods.agent.session.setConfigOption, {
         sessionId: remoteSessionId,
         configId: thought.id,
         value: reasoningEffort,
@@ -1686,7 +1693,7 @@ export class AcpHarnessAgent implements Agent {
       this.phase.abort.abort(cause)
       if (this.remoteSessionId !== undefined) {
         // A process that exits concurrently has already enacted the cancel.
-        void this.connection?.cancel({ sessionId: this.remoteSessionId }).catch(() => undefined)
+        void this.connection?.agent.notify(acpMethods.agent.session.cancel, { sessionId: this.remoteSessionId }).catch(() => undefined)
       }
     }
   }
@@ -1744,7 +1751,7 @@ export class AcpHarnessAgent implements Agent {
       const remoteSessionId = this.remoteSessionId
       if (connection === undefined || remoteSessionId === undefined || !this.sessionDeleteSupported) return
       signal.throwIfAborted()
-      await connection.deleteSession({ sessionId: remoteSessionId })
+      await connection.agent.request(acpMethods.agent.session.delete, { sessionId: remoteSessionId })
       signal.throwIfAborted()
       this.remoteSessionId = undefined
     })
@@ -1800,7 +1807,7 @@ export class AcpHarnessAgent implements Agent {
       if (connection === undefined || remoteSessionId === undefined) throw new Error('ACP Harness connection is not ready')
       const prompt = (await Promise.all(messages.map(message =>
         promptBlocks(message, this.hostCtx.attachments, running.abort.signal)))).flat()
-      const promptOperation = connection.prompt({
+      const promptOperation = connection.agent.request(acpMethods.agent.session.prompt, {
         sessionId: remoteSessionId,
         prompt,
       })
@@ -2269,7 +2276,7 @@ export class AcpHarnessAgent implements Agent {
     const remoteSessionId = this.remoteSessionId
     try {
       if (connection !== undefined && remoteSessionId !== undefined && this.sessionCloseSupported) {
-        await connection.closeSession({ sessionId: remoteSessionId })
+        await connection.agent.request(acpMethods.agent.session.close, { sessionId: remoteSessionId })
       }
     } finally {
       await this.scope.dispose()
@@ -2293,6 +2300,7 @@ export class AcpHarnessAgent implements Agent {
     this.process = undefined
     this.processFailure = undefined
     this.processStopped = false
+    this.connection?.close()
     this.connection = undefined
     this.sessionDeleteSupported = false
     this.sessionCloseSupported = false

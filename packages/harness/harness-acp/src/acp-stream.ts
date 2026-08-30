@@ -70,7 +70,7 @@ export function boundedAcpNdJsonStream(
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          if (value === undefined || value.byteLength === 0) continue
+          if (value.byteLength === 0) continue
           let start = 0
           for (let index = 0; index < value.byteLength; index++) {
             if (value[index] !== 0x0a) continue

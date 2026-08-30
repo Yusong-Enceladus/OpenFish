@@ -160,9 +160,9 @@ describe('x-native HTTP validation', () => {
       })
       expect(response.status).toBe(201)
       await expect(response.json()).resolves.toMatchObject({
-        deviceId: expect.any(String),
-        token: expect.any(String),
-        hostURL: expect.stringMatching(/^https:\/\/[A-Za-z0-9-]+\.local:3081$/u),
+        deviceId: expect.any(String) as unknown,
+        token: expect.any(String) as unknown,
+        hostURL: expect.stringMatching(/^https:\/\/[A-Za-z0-9-]+\.local:3081$/u) as unknown,
       })
     } finally {
       await server.close()

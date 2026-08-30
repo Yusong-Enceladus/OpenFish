@@ -28,7 +28,7 @@ const detailText = z.string().min(1).max(MAX_DETAIL_TEXT)
   .refine(value => value.trim().length > 0 && !FORBIDDEN_TEXT_CONTROL.test(value), 'Expected non-empty display text.')
 const optionalDetailText = z.string().max(MAX_DETAIL_TEXT)
   .refine(value => !FORBIDDEN_TEXT_CONTROL.test(value), 'Expected display text.')
-const urlText = z.string().max(MAX_URL_TEXT).url()
+const urlText = z.url().max(MAX_URL_TEXT)
 const processText = z.string().max(MAX_DETAIL_TEXT).refine(value => !value.includes('\u0000'), 'Process text cannot contain NUL.')
 const argumentList = z.array(processText).max(MAX_ARGUMENTS)
 const stringRecord = z.record(z.string().min(1).max(MAX_SHORT_TEXT), processText).superRefine((record, context) => {
@@ -95,7 +95,7 @@ const configField = z.object({
 })
 const nodeConfiguration = z.record(
   stableId,
-  z.union([optionalDetailText, z.boolean(), z.number().finite()]),
+  z.union([optionalDetailText, z.boolean(), z.number()]),
 ).superRefine((record, context) => {
   if (Object.keys(record).length > MAX_NODE_CONTROLS + 2) {
     context.addIssue({ code: 'custom', message: `Node configuration may contain at most ${MAX_NODE_CONTROLS} controls.` })
@@ -112,7 +112,7 @@ const graphNode = z.object({
   ports: z.array(graphPort).max(MAX_NODE_PORTS).optional(),
   evidence: z.array(graphEvidence).min(1).max(32).optional(),
   observes: z.array(runtimeSignal).min(1).max(MAX_RUNTIME_SIGNALS).optional(),
-  position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  position: z.object({ x: z.number(), y: z.number() }).optional(),
   configSchema: z.object({ version: z.literal(1), fields: z.array(configField).min(1).max(MAX_NODE_CONTROLS) }).optional(),
   config: nodeConfiguration.optional(),
 })

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -165,13 +165,14 @@ describe('unknown ACP Harness end-to-end contract', () => {
     }
   })
 
-  it('starts, discovers controls, sends, persists identity, and resumes without Harness-specific code', async () => {
+  it.each(['resume', 'load'] as const)('discovers controls, sends and restores identity through session/%s', async (resumeMethod) => {
     const ctx = await runtime()
     const noProject = await mkdtemp(join(tmpdir(), 'openfish-no-project-'))
+    const selectedPack = packWithEnvironment({ OPENFISH_ACP_RESUME_METHOD: resumeMethod })
     try {
       const firstSession = ctx.sessions.create(SessionId('future-first'), { meta: { cwd: noProject } })
       const first = new AcpHarnessAgent(
-        ctx, firstSession.id, firstSession, pack, noProject, join(noProject, 'runtime-first'),
+        ctx, firstSession.id, firstSession, selectedPack, noProject, join(noProject, 'runtime-first'),
       )
       await first.start()
       await first.applyPackConfiguration()
@@ -212,7 +213,7 @@ describe('unknown ACP Harness end-to-end contract', () => {
 
       const resumedSession = ctx.sessions.create(SessionId('future-resumed'), { meta: { cwd: noProject } })
       const resumed = new AcpHarnessAgent(
-        ctx, resumedSession.id, resumedSession, pack, noProject, join(noProject, 'runtime-resumed'),
+        ctx, resumedSession.id, resumedSession, selectedPack, noProject, join(noProject, 'runtime-resumed'),
       )
       await resumed.start('future-remote-session')
       resumed.commitSelection()
@@ -250,7 +251,7 @@ describe('unknown ACP Harness end-to-end contract', () => {
         kind: 'error',
         error: {
           code: 'ACP_ERROR',
-          message: expect.stringContaining('restored the pinned Harness session'),
+          message: expect.stringContaining('restored the pinned Harness session') as unknown,
         },
       })
       expect(session.events.filter(event => event.type === 'assistant/message')).toHaveLength(0)
@@ -315,7 +316,7 @@ describe('unknown ACP Harness end-to-end contract', () => {
       await agent.whenIdle()
       const failure = session.events.findLast(event => event.type === 'turn/end')
       expect(failure?.data.reason).toMatchObject({
-        kind: 'error', error: { code: 'ACP_ERROR', message: expect.stringContaining(expected) },
+        kind: 'error', error: { code: 'ACP_ERROR', message: expect.stringContaining(expected) as unknown },
       })
       expect(JSON.stringify(failure)).not.toContain('sk-test-supersecret123456')
 
@@ -367,10 +368,10 @@ describe('unknown ACP Harness end-to-end contract', () => {
           nodeKinds: expect.arrayContaining([
             expect.objectContaining({ kind: 'model-router', editable: true }),
             expect.objectContaining({ kind: 'agent-session', editable: true }),
-          ]),
+          ]) as unknown,
           bindingKinds: expect.arrayContaining([
             expect.objectContaining({ kind: 'acp-session-option' }),
-          ]),
+          ]) as unknown,
         },
       })
 
@@ -401,6 +402,31 @@ describe('unknown ACP Harness end-to-end contract', () => {
     } finally {
       await ctx.fiber.dispose()
       await rm(stateDir, { recursive: true, force: true })
+      await rm(noProject, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['delete', 'close'] as const)('uses the advertised ACP session/%s lifecycle method', async (operation) => {
+    const noProject = await mkdtemp(join(tmpdir(), 'openfish-acp-lifecycle-'))
+    const marker = join(noProject, 'lifecycle.txt')
+    const ctx = await runtime()
+    const session = ctx.sessions.create(SessionId(`lifecycle-${operation}`), { meta: { cwd: noProject } })
+    const agent = new AcpHarnessAgent(
+      ctx, session.id, session,
+      packWithEnvironment({ OPENFISH_ACP_LIFECYCLE_MARKER: marker }),
+      noProject, join(noProject, 'runtime'),
+    )
+    try {
+      try {
+        await agent.start()
+        agent.commitSelection()
+        if (operation === 'delete') await agent.deleteCurrentRemoteSession()
+      } finally {
+        await agent.dispose()
+      }
+      // Deleting clears the remote identity; disposal must not close it again.
+      expect(await readFile(marker, 'utf8')).toBe(operation === 'delete' ? 'deleted\n' : 'closed\n')
+    } finally {
       await rm(noProject, { recursive: true, force: true })
     }
   })

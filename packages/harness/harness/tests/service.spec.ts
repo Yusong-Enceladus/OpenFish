@@ -424,13 +424,13 @@ describe('Harness lifecycle and Driver SDK', () => {
       const before = (await service.list()).find(item => item.id === 'future-registry')
       expect(before?.auth).toMatchObject({
         status: 'unknown', methods: [],
-        detail: expect.stringContaining('does not declare account requirements'),
+        detail: expect.stringContaining('does not declare account requirements') as unknown,
       })
       await service.install('future-registry' as never)
       const after = (await service.list()).find(item => item.id === 'future-registry')
       expect(after?.auth).toMatchObject({
         status: 'not-required', methods: [],
-        detail: expect.stringContaining('advertised no required sign-in method'),
+        detail: expect.stringContaining('advertised no required sign-in method') as unknown,
       })
       await service.selectDefault('future-registry' as never)
       expect(await service.defaultId()).toBe('future-registry')
@@ -816,8 +816,8 @@ describe('Harness lifecycle and Driver SDK', () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-install-phase-'))
     let releaseInstall!: () => void
     let announceInstall!: () => void
-    const installing = new Promise<void>((resolve) => { announceInstall = () => resolve() })
-    const released = new Promise<void>((resolve) => { releaseInstall = () => resolve() })
+    const installing = new Promise<void>((resolve) => { announceInstall = () => { resolve() } })
+    const released = new Promise<void>((resolve) => { releaseInstall = () => { resolve() } })
     const driver: HarnessDriver = {
       apiVersion: 1,
       protocol: 'community-protocol',
@@ -846,7 +846,7 @@ describe('Harness lifecycle and Driver SDK', () => {
       expect((await service.list()).find(item => item.id === 'community.driver-demo')).toMatchObject({
         installation: {
           status: 'installing', operationPhase: 'staging',
-          operationDetail: expect.stringContaining('isolated runtime'),
+          operationDetail: expect.stringContaining('isolated runtime') as unknown,
         },
       })
       releaseInstall()
@@ -863,7 +863,7 @@ describe('Harness lifecycle and Driver SDK', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ version: '1', agents: [] }))))
     const stateDir = await mkdtemp(join(tmpdir(), 'openfish-install-cancel-'))
     let installStarted!: () => void
-    const started = new Promise<void>((resolve) => { installStarted = () => resolve() })
+    const started = new Promise<void>((resolve) => { installStarted = () => { resolve() } })
     const driver: HarnessDriver = {
       apiVersion: 1,
       protocol: 'community-protocol',

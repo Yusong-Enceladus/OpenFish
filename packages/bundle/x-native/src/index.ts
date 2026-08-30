@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionAuthenticationRequest } from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-voice'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { followNativeContracts } from './feed.ts'
@@ -41,7 +42,6 @@ import {
   type NativeHostDescription,
   type NativeImportRequest,
   type NativeImportValue,
-  type NativeVoiceProviderDescriptor,
   type PairingCodeResponse,
   type PairRequest,
   type PairResponse,
@@ -517,7 +517,7 @@ export class XNative extends TypertRemoteService {
     const voiceCapabilities = voice?.describe()
     const endpoints = new Set(this.methods().map(method => method.endpoint))
     const hasEndpoints = (...required: string[]): boolean => required.every(endpoint => endpoints.has(endpoint))
-    const hasLocalVoice = voiceCapabilities?.providers.some((provider: NativeVoiceProviderDescriptor) =>
+    const hasLocalVoice = voiceCapabilities?.providers.some(provider =>
       provider.operations.includes('speech-to-text')
         && provider.operations.includes('text-to-speech')) === true
     return {

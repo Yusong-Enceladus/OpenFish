@@ -92,11 +92,12 @@ export async function importNativeSessions(
 
 function validateRequest(request: NativeImportRequest): void {
   const formats: readonly NativeImportFormat[] = ['auto', 'dsh-jsonl', 'dsh-zip', 'codex-jsonl', 'codex-zip']
-  if (!formats.includes(request.format)) throw new Error(`unsupported x-native import format "${String(request.format)}"`)
+  if (!formats.includes(request.format)) throw new Error(`unsupported x-native import format "${request.format}"`)
+  const files: readonly NativeImportFile[] = request.files
   if (!Array.isArray(request.files) || request.files.length === 0 || request.files.length > MAX_FILES) {
     throw new Error(`x-native import accepts 1 to ${MAX_FILES} files`)
   }
-  const wireChars = request.files.reduce((total, file) => total + file.data.length, 0)
+  const wireChars = files.reduce((total, file) => total + file.data.length, 0)
   if (wireChars > MAX_WIRE_CHARS) throw new Error('x-native import exceeds the bounded wire payload')
 }
 
@@ -344,6 +345,7 @@ function appendTranscript(session: Session, messages: readonly TranscriptMessage
   let turn = 0
   let step = 0
   let openTurn = false
+  const isTurnOpen = (): boolean => openTurn
   const closeTurn = (): void => {
     if (!openTurn) return
     session.append('turn/end', { turn, reason: { kind: 'completed' } })
@@ -365,7 +367,7 @@ function appendTranscript(session: Session, messages: readonly TranscriptMessage
       }), { surfaceOp: 'append' })
       continue
     }
-    if (!openTurn) openNextTurn()
+    if (!isTurnOpen()) openNextTurn()
     step += 1
     session.append('step/start', { turn, step })
     session.append('assistant/message', {

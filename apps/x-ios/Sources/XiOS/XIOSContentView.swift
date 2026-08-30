@@ -304,6 +304,9 @@ public struct OpenCodexIOSView: View {
                 if runsLifecycleHardwareSelfTest {
                     await store.runPhysicalLifecycleSmokeTest()
                 }
+                if ProcessInfo.processInfo.arguments.contains("--openfish-projectless-autotest") {
+                    await store.runPhysicalProjectlessSmokeTest()
+                }
 #endif
                 chooseInitialWorkspaceIfNeeded()
                 if MobileOpenFishDemoMode.showsHarnessRuntime {

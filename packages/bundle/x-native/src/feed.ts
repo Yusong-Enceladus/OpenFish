@@ -85,11 +85,11 @@ export async function *followNativeContracts(
 function projectRemoteEventFrame(value: RemoteEventDownlinkFrame): NativeRemoteEventFrame {
   if (value.type === 'emit') {
     assertJsonValue(value.args)
-    return { ...value, args: value.args as readonly JsonValue[] }
+    return { ...value, args: value.args }
   }
   if (value.type === 'waterfall') {
     assertJsonValue(value.request)
-    return { ...value, request: value.request as Readonly<Record<string, JsonValue>> }
+    return { ...value, request: value.request }
   }
   return value
 }

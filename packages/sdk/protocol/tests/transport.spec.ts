@@ -193,7 +193,7 @@ describe('JsonRpcLineTransport', () => {
     let written = 0
     output.on('data', (chunk: Buffer) => { written += chunk.byteLength })
     const transport = new JsonRpcLineTransport(new PassThrough(), output, 64)
-    expect(() => transport.notify('oversized', { value: 'x'.repeat(80) })).toThrow('64-byte limit')
+    expect(() => { transport.notify('oversized', { value: 'x'.repeat(80) }) }).toThrow('64-byte limit')
     expect(written).toBe(0)
   })
 

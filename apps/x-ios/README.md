@@ -13,3 +13,11 @@ Build the library:
 ```
 
 The Xcode application target is described by `project.yml` and the files under `App/`. A composed OpenFish DSH Host is expected at the configured LAN or Tailscale address. Release parity still requires real-device and side-by-side evidence; this README describes implemented reachability, not a release-verification claim.
+
+## Physical smoke checks (Debug)
+
+The `--openfish-voice-autotest` launch argument exercises five real microphone start/stop cycles after the required permissions are granted. It discards recognized speech and replaces `Library/Caches/openfish-voice-hardware-history.txt` with a timestamped, content-free record for each invocation. A cancelled run cannot report success.
+
+The `--openfish-lifecycle-autotest` argument exercises the production connection handlers and waits for a fresh, fully refreshed Host baseline. The separate `--openfish-projectless-autotest` argument prepares a real No Project task without sending a prompt; it refuses to replace unsent text or attachments. After switching to another app and returning, the next Host refresh checks that the same blank task, Harness, model, reasoning selection, and available model catalog survive.
+
+Connection checks replace `Library/Caches/openfish-connection-history.txt` at boot and record only timestamps and coarse states. These checks require an already paired Host and configured default Harness. They do not replace XCTest coverage of taps and layout, and a runner connection failure is not a passing UI test.

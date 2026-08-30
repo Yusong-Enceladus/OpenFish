@@ -17,7 +17,7 @@ function shortString(value: unknown, maximum = 4_096): string | undefined {
   return value
 }
 
-function contentProjection(value: unknown): unknown | undefined {
+function contentProjection(value: unknown): unknown {
   const block = record(value)
   const type = shortString(block?.type, 64)
   if (block === undefined || type === undefined) return undefined
@@ -36,7 +36,7 @@ function contentProjection(value: unknown): unknown | undefined {
   return undefined
 }
 
-function toolContentProjection(value: unknown): unknown | undefined {
+function toolContentProjection(value: unknown): unknown {
   const block = record(value)
   const type = shortString(block?.type, 64)
   if (block === undefined || type === undefined) return undefined
@@ -51,7 +51,7 @@ function toolContentProjection(value: unknown): unknown | undefined {
   return undefined
 }
 
-function toolProjection(update: JsonRecord, sessionUpdate: 'tool_call' | 'tool_call_update'): unknown | undefined {
+function toolProjection(update: JsonRecord, sessionUpdate: 'tool_call' | 'tool_call_update'): unknown {
   const toolCallId = shortString(update.toolCallId, 512)
   if (toolCallId === undefined) return undefined
   return safeHarnessEventValue({
@@ -81,11 +81,11 @@ function toolProjection(update: JsonRecord, sessionUpdate: 'tool_call' | 'tool_c
  * @param update - One live ACP Session notification update.
  * @returns The bounded durable projection, or `undefined` for live-only data.
  */
-export function durableAcpSessionUpdate(update: SessionNotification['update']): unknown | undefined {
+export function durableAcpSessionUpdate(update: SessionNotification['update']): unknown {
   switch (update.sessionUpdate) {
     case 'tool_call':
     case 'tool_call_update':
-      return toolProjection(update as unknown as JsonRecord, update.sessionUpdate)
+      return toolProjection(update, update.sessionUpdate)
     case 'plan':
       return safeHarnessEventValue({ sessionUpdate: update.sessionUpdate, entries: update.entries })
     case 'plan_update':
@@ -120,7 +120,7 @@ const DURABLE_CODEX_ITEM_FIELDS = [
  * @param params - Untrusted notification parameters.
  * @returns The bounded durable projection, or `undefined` for live-only data.
  */
-export function durableCodexNotification(method: string, params: Readonly<JsonRecord>): unknown | undefined {
+export function durableCodexNotification(method: string, params: Readonly<JsonRecord>): unknown {
   if (method === 'turn/completed') {
     const turn = record(params.turn)
     const threadId = shortString(params.threadId, 512)

@@ -229,6 +229,10 @@ final class MobileOpenCodexStore: ObservableObject {
     private var lastVoiceTurnEndSeq = -1
     private var loadingAttachments: Set<String> = []
     private static let debugConnectionStateKey = "OpenFish.connection.hardwareSmoke.lastState"
+#if DEBUG
+    private var hardwareBaselineGeneration = 0
+    private var hardwareProjectlessTask: (sessionId: String, harnessId: String, model: MobileModelSelection)?
+#endif
     private var readTimestamps: [String: Double] = UserDefaults.standard
         .dictionary(forKey: "OpenFish.readTimestamps.ios")?
         .compactMapValues { ($0 as? NSNumber)?.doubleValue } ?? [:]
@@ -1005,19 +1009,69 @@ final class MobileOpenCodexStore: ObservableObject {
             return
         }
         recordConnectionDiagnostic("lifecycle-self-test:initial-connected")
+        let generation = hardwareBaselineGeneration
         await enteredBackground()
         recordConnectionDiagnostic("lifecycle-self-test:background-quiescent")
         await becameActive()
-        guard await waitForLiveBaseline() else {
+        guard await waitForLiveBaseline(after: generation) else {
             recordConnectionDiagnostic("lifecycle-self-test:failed-reconnect")
             return
         }
         recordConnectionDiagnostic("lifecycle-self-test:passed")
     }
 
-    private func waitForLiveBaseline() async -> Bool {
+    /// Prepares a real blank task but never sends a prompt. The next OS-driven
+    /// foreground refresh verifies that its identity, Harness and model survive.
+    /// Refuse to replace an unsent message or attachment during this check.
+    func runPhysicalProjectlessSmokeTest() async {
+        recordConnectionDiagnostic("projectless-self-test:started")
+        guard !isDemoMode, await waitForLiveBaseline() else {
+            recordConnectionDiagnostic("projectless-self-test:failed-initial-connect")
+            return
+        }
+        await draftPreparationTask?.value
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, pendingImages.isEmpty else {
+            recordConnectionDiagnostic("projectless-self-test:skipped-unsent-draft")
+            return
+        }
+        guard canStartNewTask, !selectedHarnessId.isEmpty else {
+            recordConnectionDiagnostic("projectless-self-test:failed-no-default-harness")
+            return
+        }
+        newTask(in: nil)
+        await draftPreparationTask?.value
+        guard let sessionId = draftSessionId, let harnessId = draftHarnessId,
+              let models = sessionModels else {
+            recordConnectionDiagnostic("projectless-self-test:failed-prepare")
+            return
+        }
+        hardwareProjectlessTask = (sessionId, harnessId, models.current)
+        if let failure = projectlessHardwareFailure() {
+            recordConnectionDiagnostic("projectless-self-test:failed-\(failure)")
+            hardwareProjectlessTask = nil
+            return
+        }
+        recordConnectionDiagnostic("projectless-self-test:ready-for-os-background")
+    }
+
+    private func projectlessHardwareFailure() -> String? {
+        guard let expected = hardwareProjectlessTask else { return "not-prepared" }
+        guard selectedSessionId == nil, draftSessionId == expected.sessionId else { return "task-identity" }
+        guard selectedWorkspaceId == nil,
+              !workspaces.contains(where: { $0.sessionIds.contains(expected.sessionId) }) else { return "workspace" }
+        guard draftHarnessId == expected.harnessId,
+              sessions.contains(where: { $0.sessionId == expected.sessionId && $0.blank && $0.harnessId == expected.harnessId }) else { return "harness" }
+        guard !isLoadingSessionModels, sessionModelsError == nil,
+              let models = sessionModels, models.routable,
+              models.groups.contains(where: { !$0.models.isEmpty }) else { return "models-unavailable" }
+        guard models.current == expected.model else { return "model-selection" }
+        return nil
+    }
+
+    private func waitForLiveBaseline(after generation: Int = 0) async -> Bool {
         for _ in 0..<100 {
-            if connectionState == .connected && hasLiveBaseline { return true }
+            guard !Task.isCancelled else { return false }
+            if connectionState == .connected && hasLiveBaseline && hardwareBaselineGeneration > generation { return true }
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
@@ -2525,6 +2579,15 @@ final class MobileOpenCodexStore: ObservableObject {
                 if let selected, sessions.contains(where: { $0.sessionId == selected }) {
                     await select(selected)
                 }
+#if DEBUG
+                if connectionState == .connected && hasLiveBaseline {
+                    hardwareBaselineGeneration += 1
+                    if hardwareProjectlessTask != nil {
+                        let state = projectlessHardwareFailure().map { "failed-\($0)" } ?? "foreground-restored"
+                        recordConnectionDiagnostic("projectless-self-test:\(state)")
+                    }
+                }
+#endif
             }
         case let .feed(frame):
             handleFeed(frame)
@@ -2760,7 +2823,7 @@ final class MobileOpenCodexStore: ObservableObject {
     private func resetConnectionDiagnostic() {
 #if DEBUG
         if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            try? Data().write(
+            try? Data("run-started at=\(Date().ISO8601Format())\n".utf8).write(
                 to: directory.appending(path: "openfish-connection-history.txt"),
                 options: .atomic
             )

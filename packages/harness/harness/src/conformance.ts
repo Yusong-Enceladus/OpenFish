@@ -80,7 +80,7 @@ function textArrayProperty(
 ): string[] {
   const candidate = value[property]
   if (!Array.isArray(candidate) || candidate.length > MAX_DRIVER_PORTS
-    || candidate.some(item => typeof item !== 'string' || item.length > MAX_DRIVER_TEXT)) {
+    || !candidate.every((item: unknown): item is string => typeof item === 'string' && item.length <= MAX_DRIVER_TEXT)) {
     issues.push(`${owner} property "${property}" must be a text array.`)
     return []
   }

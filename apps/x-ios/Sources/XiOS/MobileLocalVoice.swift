@@ -167,6 +167,7 @@ final class MobileLocalVoice: NSObject, ObservableObject {
 #if DEBUG
     private static let hardwareSmokeLogger = Logger(subsystem: "app.openfish.ios", category: "voice-hardware-smoke")
     private static let hardwareSmokeStateKey = "OpenFish.voice.hardwareSmoke.lastState"
+    private var hardwareSmokeHistory: [String] = []
 #endif
     let providerID = "apple-local"
     let providerName = "Apple On-Device Speech"
@@ -395,14 +396,21 @@ final class MobileLocalVoice: NSObject, ObservableObject {
     /// without depending on XCTest's physical-device automation channel.
     /// The diagnostic deliberately never prints recognized speech.
     func runPhysicalHardwareSmokeTest(iterations: Int = 5) async {
+        hardwareSmokeHistory = ["run-started at=\(Date().ISO8601Format())"]
         recordHardwareSmokeState("started iterations=\(iterations)")
+        guard iterations > 0 else {
+            recordHardwareSmokeState("failed reason=invalid-iteration-count", isError: true)
+            return
+        }
         for iteration in 1...iterations {
+            guard !Task.isCancelled else {
+                stopListening()
+                recordHardwareSmokeState("failed reason=cancelled", isError: true)
+                return
+            }
             await startListening { _, _ in }
             guard isListening else {
-                let reason = (errorMessage ?? "unknown")
-                    .replacingOccurrences(of: "\n", with: " ")
-                    .replacingOccurrences(of: "\r", with: " ")
-                recordHardwareSmokeState("failed iteration=\(iteration) reason=\(reason)", isError: true)
+                recordHardwareSmokeState("failed iteration=\(iteration) reason=capture-not-active", isError: true)
                 stopListening()
                 return
             }
@@ -420,11 +428,22 @@ final class MobileLocalVoice: NSObject, ObservableObject {
             }
             recordHardwareSmokeState("stopped iteration=\(iteration)")
         }
+        guard !Task.isCancelled else {
+            recordHardwareSmokeState("failed reason=cancelled", isError: true)
+            return
+        }
         recordHardwareSmokeState("passed iterations=\(iterations)")
     }
 
     private func recordHardwareSmokeState(_ state: String, isError: Bool = false) {
         UserDefaults.standard.set(state, forKey: Self.hardwareSmokeStateKey)
+        hardwareSmokeHistory.append(state)
+        if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            try? Data((hardwareSmokeHistory.joined(separator: "\n") + "\n").utf8).write(
+                to: directory.appending(path: "openfish-voice-hardware-history.txt"),
+                options: .atomic
+            )
+        }
         if isError {
             Self.hardwareSmokeLogger.error("OPENFISH_VOICE_SELF_TEST state=\(state, privacy: .public)")
         } else {

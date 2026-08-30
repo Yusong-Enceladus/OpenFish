@@ -3,7 +3,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   SessionHistoryRecord,
-  SessionProjectionBaseline,
   SessionWireEvent,
 } from '@deepseek-ai/dsh-api-session-controller'
 import { decodeStorageRecord } from '@deepseek-ai/dsh-session/chunk-rows'
@@ -38,7 +37,7 @@ export async function nativeHistory(
   return {
     events: page.records.flatMap(record => expandHistoryRecord(record).map(event => ({ event }))),
     hasMore: page.hasMore,
-    ...(projections === undefined ? {} : { projections: projections as SessionProjectionBaseline }),
+    ...(projections === undefined ? {} : { projections }),
   }
 }
 

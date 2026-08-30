@@ -371,7 +371,6 @@ function storedProofEvidence(input: unknown): Record<string, StoredProofEvidence
 function latestStoredCompatibility(evidence: StoredProofEvidence | undefined): StoredCompatibility | undefined {
   if (evidence === undefined) return undefined
   return Object.values(evidence)
-    .filter((item): item is StoredCompatibility => item !== undefined)
     .sort((left, right) => Date.parse(right.checkedAt) - Date.parse(left.checkedAt))[0]
 }
 

@@ -348,7 +348,7 @@ describe('official Codex app-server Harness contract', () => {
       const failure = session.events.findLast(event => event.type === 'turn/end')
       expect(failure?.data.reason).toMatchObject({
         kind: 'error',
-        error: { code: 'CODEX_APP_SERVER_ERROR', message: expect.stringContaining(expected) },
+        error: { code: 'CODEX_APP_SERVER_ERROR', message: expect.stringContaining(expected) as unknown },
       })
       expect(JSON.stringify(failure)).not.toContain('sk-test-supersecret123456')
 
