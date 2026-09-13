@@ -35,7 +35,7 @@
     "@agentclientprotocol/sdk": "1.4.0",
     "@deepseek-ai/cordis-plugin-include": "workspace:*",
     "@deepseek-ai/dsh-loader-smoke": "workspace:*",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.2",
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
