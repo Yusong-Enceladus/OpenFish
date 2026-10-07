@@ -97,7 +97,7 @@ jobs:
             -derivedDataPath .build/openfish-macos-ui-tests CODE_SIGNING_ALLOWED=NO
       - name: Build distributable
         run: ./script/build_openfish_release.sh '${{ matrix.arch }}'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: OpenFish-${{ matrix.arch }}
           path: dist/openfish-${{ matrix.arch }}/*
